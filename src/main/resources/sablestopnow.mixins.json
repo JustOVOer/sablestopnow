@@ -1,0 +1,17 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.ovo.sablestopnow.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "sablestopnow.refmap.json",
+  "mixins": [
+    "QueuedForceGroupMixin",
+    "SubLevelPhysicsSystemMixin",
+    "ServerSubLevelMixin",
+    "SubLevelAssemblyHelperMixin",
+    "BlockPlaceContextOverrideMixin",
+    "SubLevelHeatMapManagerMixin"
+  ],
+  "client": [],
+  "server": []
+}

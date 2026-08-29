@@ -1,0 +1,43 @@
+{
+  "itemGroup.sablestopnow": "Example Mod Tab",
+  "block.sablestopnow.example_block": "Example Block",
+  "item.sablestopnow.example_item": "Example Item",
+
+  "sablestopnow.configuration.title": "Sable_stop_now Configs",
+  "sablestopnow.configuration.section.sablestopnow.common.toml": "Sable_stop_now Configs",
+  "sablestopnow.configuration.section.sablestopnow.common.toml.title": "Sable_stop_now Configs",
+  "sablestopnow.configuration.items": "Item List",
+  "sablestopnow.configuration.logDirtBlock": "Log Dirt Block",
+  "sablestopnow.configuration.magicNumberIntroduction": "Magic Number Text",
+  "sablestopnow.configuration.magicNumber": "Magic Number",
+
+  "sablestopnow.auto_pause.prefix": "[SableStopNow] ",
+  "sablestopnow.auto_pause.message": "检测到过强力，物理已自动暂停！",
+  "sablestopnow.auto_pause.hint_before": " 使用 ",
+  "sablestopnow.auto_pause.command": "/sablesn forces",
+  "sablestopnow.auto_pause.hint_after": " 查看记录。",
+  "sablestopnow.auto_pause.command_hover": "点击输入命令查看力记录",
+
+  "sablestopnow.force.list.title_all": "===== 所有力列表 (第 %d/%d 页) =====",
+  "sablestopnow.force.list.title_filtered": "===== 已过滤力列表 (第 %d/%d 页) =====",
+  "sablestopnow.force.list.no_records": "没有记录。",
+  "sablestopnow.force.list.unknown_target": "未知",
+  "sablestopnow.force.list.filtered": " [已过滤]",
+  "sablestopnow.force.list.normal": " [正常]",
+  "sablestopnow.force.list.page_prev": "[上一页]",
+  "sablestopnow.force.list.page_next": "[下一页]",
+  "sablestopnow.force.list.click_to_tp": "点击填充传送指令",
+  "sablestopnow.force.list.old_data_hint": "注意：当前物理刻没有新力，显示的是上一物理刻的记录。",
+  "config.sablestopnow.force_limiter.lock_new_sub_levels": "锁定新物理体",
+  "config.sablestopnow.force_limiter.disable_placement_collision_check": "禁用方块放置碰撞检测",
+
+  "sablestopnow.split.prefix": "[SableStopNow] ",
+  "sablestopnow.split.ask_confirm": "检测到物理体即将分裂，请输入",
+  "sablestopnow.split.confirm_hover": "点击输入确认命令",
+  "sablestopnow.split.confirmed": "已确认分裂。",
+  "sablestopnow.split.no_pending": "没有挂起的分裂请求。",
+  "config.sablestopnow.force_limiter.require_confirmation_before_split": "分裂前需要确认",
+  "sablestopnow.split.denied": "已取消分裂。",
+  "sablestopnow.command.deny_usage": "/sablesn deny - 取消当前挂起的分裂请求",
+  "sablestopnow.split.deny_hover": "点击输入取消命令"
+}

@@ -80,11 +80,11 @@ public class SubLevelOutlineRenderer {
                 SubLevel subLevel = Sable.HELPER.getContaining(level, blockPos);
                 if (subLevel != null) {
                     focusedSubLevelId = subLevel.getUniqueId();
-                    SablestopNow.LOGGER.debug("Focused sub-level: {}", focusedSubLevelId);
+                    //SablestopNow.LOGGER.debug("Focused sub-level: {}", focusedSubLevelId);
                 }
             }
             if (focusedSubLevelId == null) {
-                SablestopNow.LOGGER.debug("No focused sub-level, skipping outlines");
+                //SablestopNow.LOGGER.debug("No focused sub-level, skipping outlines");
                 return;
             }
         }
@@ -146,7 +146,7 @@ public class SubLevelOutlineRenderer {
             }
         }
 
-        SablestopNow.LOGGER.debug("Drew {} edges", totalEdges);
+        //SablestopNow.LOGGER.debug("Drew {} edges", totalEdges);
 
         if (totalEdges > 0) {
             bufferSource.endBatch(renderType);

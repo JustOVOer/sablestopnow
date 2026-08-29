@@ -39,5 +39,9 @@
   "config.sablestopnow.force_limiter.require_confirmation_before_split": "分裂前需要确认",
   "sablestopnow.split.denied": "已取消分裂。",
   "sablestopnow.command.deny_usage": "/sablesn deny - 取消当前挂起的分裂请求",
-  "sablestopnow.split.deny_hover": "点击输入取消命令"
+  "sablestopnow.split.deny_hover": "点击输入取消命令",
+  "config.sablestopnow.render_sub_level_outlines": "渲染物理体表面方块边框",
+  "config.sablestopnow.outline_always_visible": "边框始终可见",
+  "config.sablestopnow.outline_only_contour": "仅绘制物理体轮廓（暴露边）",
+  "config.sablestopnow.outline_only_focused": "仅对注视的物理体描边"
 }

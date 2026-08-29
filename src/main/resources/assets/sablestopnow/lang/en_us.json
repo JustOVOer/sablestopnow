@@ -38,5 +38,9 @@
   "config.sablestopnow.force_limiter.require_confirmation_before_split": "Require confirmation before split",
   "sablestopnow.split.denied": "Split cancelled.",
   "sablestopnow.command.deny_usage": "/sablesn deny - Cancel pending split request",
-  "sablestopnow.split.deny_hover": "Click to type cancel command"
+  "sablestopnow.split.deny_hover": "Click to type cancel command",
+  "config.sablestopnow.render_sub_level_outlines": "Render Sub-Level Surface Block Outlines",
+  "config.sablestopnow.outline_always_visible": "Outlines Always Visible",
+  "config.sablestopnow.outline_only_contour": "Draw Only Contour (Exposed Edges)",
+  "config.sablestopnow.outline_only_focused": "Only Outline Focused Sub-Level"
 }

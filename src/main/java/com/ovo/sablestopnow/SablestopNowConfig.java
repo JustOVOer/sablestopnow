@@ -30,10 +30,29 @@ public class SablestopNowConfig {
         public final ModConfigSpec.BooleanValue lockNewSubLevels;
         public final ModConfigSpec.BooleanValue disablePlacementCollisionCheck;
         public final ModConfigSpec.BooleanValue requireConfirmationBeforeSplit;
-
+        public final ModConfigSpec.BooleanValue renderSubLevelOutlines;
+        public final ModConfigSpec.BooleanValue outlineAlwaysVisible;
+        public final ModConfigSpec.BooleanValue outlineOnlyContour;
+        public final ModConfigSpec.BooleanValue outlineOnlyFocused;
         Config(ModConfigSpec.Builder builder) {
             builder.comment("Sable Force Limiter Configuration")
                     .push("force_limiter");
+            outlineOnlyFocused = builder
+                    .comment("If true, only draw outlines for the sub-level the player is looking at.")
+                    .translation("config.sablestopnow.outline_only_focused")
+                    .define("outline_only_focused", false);
+            outlineOnlyContour = builder
+                    .comment("If true, only draw edges that are exposed to air (the contour of the sub-level), otherwise draw full block outlines.")
+                    .translation("config.sablestopnow.outline_only_contour")
+                    .define("outline_only_contour", false);
+            outlineAlwaysVisible = builder
+                    .comment("Make block outlines always visible (ignore depth test)")
+                    .translation("config.sablestopnow.outline_always_visible")
+                    .define("outline_always_visible", true);
+            renderSubLevelOutlines = builder
+                    .comment("Render colored outlines for each block on the surface of sub-levels")
+                    .translation("config.sablestopnow.render_sub_level_outlines")
+                    .define("render_sub_level_outlines", false);
             requireConfirmationBeforeSplit = builder
                     .comment("Require player confirmation before splitting a sub-level.")
                     .translation("config.sablestopnow.force_limiter.require_confirmation_before_split")

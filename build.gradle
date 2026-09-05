@@ -168,9 +168,9 @@ dependencies {
     compileOnly("dev.simulated_team.simulated:simulated-neoforge-${minecraft_version}:${simulated_version}") {
         transitive = false   // 避免引入不必要的传递依赖，特别是 Create
     }
-    implementation files('libs/veil-neoforge-1.21.1-4.3.2.jar')
-    implementation files('libs/ForgeConfigAPIPort-v21.1.3+mc1.21.1-NeoForge.jar')
-    implementation files('libs/create-1.21.1-6.0.10.jar')
+    implementation files('lib/veil-neoforge-1.21.1-4.3.2.jar')
+    implementation files('lib/ForgeConfigAPIPort-v21.1.3-1.21.1-NeoForge.jar')
+    implementation files('lib/create-1.21.1-6.0.10.jar')
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.

@@ -11,6 +11,10 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.joml.Vector3d;
 
+import com.ovo.sablestopnow.network.StaffEnhanceNetworking;
+import com.ovo.sablestopnow.server.StaffEnhanceServer;
+import dev.ryanhcode.sable.platform.SableEventPlatform;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,6 +34,9 @@ public class SablestopNow {
                 MOD_ID + "-common.toml"
         );
         LOGGER.info("Sable Force Limiter initialized.");
+        StaffEnhanceNetworking.init();
+        // 整组拖拽：每物理子步驱动（跨平台 API，同 Simulated.init() 用法）
+        SableEventPlatform.INSTANCE.onPhysicsTick(StaffEnhanceServer::physicsTick);
         NeoForge.EVENT_BUS.addListener(this::registerCommands);
     }
 

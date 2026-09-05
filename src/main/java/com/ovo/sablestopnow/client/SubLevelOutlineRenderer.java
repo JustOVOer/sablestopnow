@@ -29,7 +29,7 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import org.joml.Quaternionf;
 import org.joml.Vector3dc;
-
+import com.ovo.sablestopnow.client.ModRenderTypes;
 import java.util.Collection;
 import java.util.UUID;
 
@@ -45,9 +45,10 @@ public class SubLevelOutlineRenderer {
 
         boolean enabled = SablestopNowConfig.INSTANCE.renderSubLevelOutlines.get();
         if (!loggedConfig) {
-            SablestopNow.LOGGER.info("renderSubLevelOutlines = {}, outlineOnlyContour = {}, outlineOnlyFocused = {}",
+            SablestopNow.LOGGER.info("renderSubLevelOutlines = {}, outlineOnlyContour = {}, outlineOnlyFocused = {}, renderAxis = {}",
                     enabled, SablestopNowConfig.INSTANCE.outlineOnlyContour.get(),
-                    SablestopNowConfig.INSTANCE.outlineOnlyFocused.get());
+                    SablestopNowConfig.INSTANCE.outlineOnlyFocused.get(),
+                    SablestopNowConfig.INSTANCE.renderAxis.get());
             loggedConfig = true;
         }
         if (!enabled) return;
@@ -72,6 +73,8 @@ public class SubLevelOutlineRenderer {
         boolean alwaysVisible = SablestopNowConfig.INSTANCE.outlineAlwaysVisible.get();
         boolean onlyContour = SablestopNowConfig.INSTANCE.outlineOnlyContour.get();
         boolean onlyFocused = SablestopNowConfig.INSTANCE.outlineOnlyFocused.get();
+        boolean renderAxis = SablestopNowConfig.INSTANCE.renderAxis.get();
+        float axisAngleDeg = SablestopNowConfig.INSTANCE.axisAngleDegrees.get().floatValue();
 
         UUID focusedSubLevelId = null;
         if (onlyFocused) {
@@ -80,16 +83,15 @@ public class SubLevelOutlineRenderer {
                 SubLevel subLevel = Sable.HELPER.getContaining(level, blockPos);
                 if (subLevel != null) {
                     focusedSubLevelId = subLevel.getUniqueId();
-                    //SablestopNow.LOGGER.debug("Focused sub-level: {}", focusedSubLevelId);
                 }
             }
             if (focusedSubLevelId == null) {
-                //SablestopNow.LOGGER.debug("No focused sub-level, skipping outlines");
+                SablestopNow.LOGGER.trace("No focused sub-level, skipping outlines");
                 return;
             }
         }
 
-        RenderType renderType = alwaysVisible ? com.ovo.sablestopnow.client.ModRenderTypes.LINES_NO_DEPTH : RenderType.lines();
+        RenderType renderType = alwaysVisible ? ModRenderTypes.LINES_NO_DEPTH : ModRenderTypes.LINES;
         VertexConsumer vertexConsumer = bufferSource.getBuffer(renderType);
 
         int totalEdges = 0;
@@ -112,6 +114,12 @@ public class SubLevelOutlineRenderer {
 
             Pose3dc renderPose = subLevel.renderPose();
 
+            // 绘制坐标轴（动态缩放）
+            if (renderAxis) {
+                drawAxis(poseStack, vertexConsumer, camera, renderPose, axisAngleDeg);
+            }
+
+            // 绘制边框
             var plot = subLevel.getPlot();
             for (var holder : plot.getLoadedChunks()) {
                 var chunk = holder.getChunk();
@@ -146,9 +154,9 @@ public class SubLevelOutlineRenderer {
             }
         }
 
-        //SablestopNow.LOGGER.debug("Drew {} edges", totalEdges);
+        SablestopNow.LOGGER.trace("Drew {} edges", totalEdges);
 
-        if (totalEdges > 0) {
+        if (totalEdges > 0 || renderAxis) {
             bufferSource.endBatch(renderType);
         }
     }
@@ -226,7 +234,6 @@ public class SubLevelOutlineRenderer {
                 for (int[] edge : edges) {
                     float[] p1 = corners[edge[0]];
                     float[] p2 = corners[edge[1]];
-                    // 计算边的方向
                     float ex = p2[0] - p1[0];
                     float ey = p2[1] - p1[1];
                     float ez = p2[2] - p1[2];
@@ -237,7 +244,6 @@ public class SubLevelOutlineRenderer {
 
                     boolean skip = false;
                     if (edgeAxis != null) {
-                        // 确定面内垂直于边的轴
                         Direction.Axis perpAxis = null;
                         if (faceDir.getAxis() == Direction.Axis.Y) {
                             if (edgeAxis == Direction.Axis.X) perpAxis = Direction.Axis.Z;
@@ -280,6 +286,25 @@ public class SubLevelOutlineRenderer {
         return edgeCount;
     }
 
+    private static void drawAxis(PoseStack poseStack, VertexConsumer vertexConsumer, Camera camera, Pose3dc renderPose, float angleDeg) {
+        Vector3dc centerJoml = renderPose.position();
+        Vec3 centerWorld = new Vec3(centerJoml.x(), centerJoml.y(), centerJoml.z());
+        double dist = centerWorld.distanceTo(camera.getPosition());
+        if (dist < 0.01) return;
+        double angleRad = Math.toRadians(angleDeg);
+        float actualLen = (float) (dist * Math.tan(angleRad));
+        actualLen = Math.max(0.1f, Math.min(actualLen, 10.0f));
+        Vec3 relative = centerWorld.subtract(camera.getPosition());
+        poseStack.pushPose();
+        poseStack.translate(relative.x, relative.y, relative.z);
+        poseStack.mulPose(new Quaternionf(renderPose.orientation()));
+        PoseStack.Pose pose = poseStack.last();
+        addLine(vertexConsumer, pose, 0, 0, 0, actualLen, 0, 0, 1, 0, 0);
+        addLine(vertexConsumer, pose, 0, 0, 0, 0, actualLen, 0, 0, 1, 0);
+        addLine(vertexConsumer, pose, 0, 0, 0, 0, 0, actualLen, 0, 0, 1);
+        poseStack.popPose();
+    }
+
     private static void addLine(VertexConsumer vertexConsumer, PoseStack.Pose pose, float x1, float y1, float z1, float x2, float y2, float z2, float r, float g, float b) {
         vertexConsumer.addVertex(pose, x1, y1, z1).setColor(r, g, b, 1.0f).setNormal(pose, 0.0f, 0.0f, 1.0f);
         vertexConsumer.addVertex(pose, x2, y2, z2).setColor(r, g, b, 1.0f).setNormal(pose, 0.0f, 0.0f, 1.0f);
@@ -292,5 +317,47 @@ public class SubLevelOutlineRenderer {
                 level.getBlockState(pos.south()).isAir() ||
                 level.getBlockState(pos.west()).isAir() ||
                 level.getBlockState(pos.east()).isAir();
+    }
+
+    /**
+     * 供其它渲染器复用：以“只描轮廓（暴露棱线，不画平坦表面的内部接缝）”的风格为整座物理体描边。
+     * 顶点写入调用方提供的 VertexConsumer（需 POSITION_COLOR_NORMAL 线框 RenderType）。
+     */
+    public static void drawSubLevelContourOutline(final PoseStack poseStack, final VertexConsumer vc, final Camera camera,
+                                                  final ClientSubLevel subLevel, final float r, final float g, final float b) {
+        final Level level = subLevel.getLevel();
+        final Pose3dc renderPose = subLevel.renderPose();
+        final var plot = subLevel.getPlot();
+        for (final var holder : plot.getLoadedChunks()) {
+            final var chunk = holder.getChunk();
+            if (chunk == null) {
+                continue;
+            }
+            final var chunkPos = chunk.getPos();
+            final int minX = chunkPos.getMinBlockX();
+            final int minZ = chunkPos.getMinBlockZ();
+            final LevelChunkSection[] sections = chunk.getSections();
+            for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+                final LevelChunkSection section = sections[sectionIndex];
+                if (section == null || section.hasOnlyAir()) {
+                    continue;
+                }
+                final int minY = chunk.getSectionYFromSectionIndex(sectionIndex) << 4;
+                for (int dx = 0; dx < 16; dx++) {
+                    for (int dy = 0; dy < 16; dy++) {
+                        for (int dz = 0; dz < 16; dz++) {
+                            if (section.getBlockState(dx, dy, dz).isAir()) {
+                                continue;
+                            }
+                            final BlockPos pos = new BlockPos(minX + dx, minY + dy, minZ + dz);
+                            if (!isSurface(level, pos)) {
+                                continue;
+                            }
+                            drawBlockOutlineContour(poseStack, vc, camera, renderPose, pos, r, g, b, 1.0f, level, subLevel);
+                        }
+                    }
+                }
+            }
+        }
     }
 }

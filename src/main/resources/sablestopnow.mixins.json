@@ -12,6 +12,9 @@
     "BlockPlaceContextOverrideMixin",
     "SubLevelHeatMapManagerMixin"
   ],
-  "client": [],
+  "client": [
+    "input.KeyboardHandlerStaffEnhanceMixin",
+    "input.MouseHandlerStaffEnhanceMixin"
+  ],
   "server": []
 }

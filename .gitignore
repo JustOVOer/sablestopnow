@@ -38,3 +38,15 @@ run/
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+
+### Dev / harness artifacts ###
+.corepack/
+.dsh-bin/
+.dsh-tmp/
+.tmp-jarjar/
+
+### External reference sources (not part of this repository) ###
+/sable-main/
+/Simulated-Project-main/
+/Veil-1.21/
+/neoforge-Documentation-main/

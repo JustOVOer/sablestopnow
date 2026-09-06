@@ -184,7 +184,7 @@ public final class StaffEnhanceClientHandler {
             return false;
         }
         if (key == SablestopNowConfig.keyCollisionToggle()) {
-            if (!multiSelect && groupDrag == null) {
+            if (!multiSelect) {
                 onCollisionToggleKey();
                 return true;
             }
@@ -511,21 +511,31 @@ public final class StaffEnhanceClientHandler {
         prompt("sablestopnow.staff.box_done", added, selected.size());
     }
 
-    // ============ V：无碰撞切换（占位：服务端状态 + 图标） ============
+    // ============ V：无碰撞切换（对整组选中队列应用/取消，语义与左键锁定一致） ============
     private static void onCollisionToggleKey() {
-        final SubLevel target = pickTarget();
-        if (target == null) {
-            prompt("sablestopnow.staff.select_miss", penetration);
+        if (selected.isEmpty()) {
+            prompt("sablestopnow.staff.need_queue");
             return;
         }
-        final UUID id = target.getUniqueId();
-        // 乐观更新本地状态（随后服务端 S2C 同步覆盖）
-        final boolean on = !noCollision.remove(id);
-        if (on) {
-            noCollision.add(id);
+        boolean allMarked = true;
+        for (final UUID id : selected) {
+            if (!noCollision.contains(id)) {
+                allMarked = false;
+                break;
+            }
         }
-        prompt(on ? "sablestopnow.staff.collision_on" : "sablestopnow.staff.collision_off", id.toString());
-        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.ToggleNoCollisionPayload(id));
+        final boolean mark = !allMarked; // 全部已标记→取消；否则（含部分）→先全标记
+        // 乐观更新本地（随后服务端 S2C 同步覆盖）
+        if (mark) {
+            noCollision.addAll(selected);
+        } else {
+            noCollision.removeAll(selected);
+        }
+        prompt(mark
+                        ? (SablestopNowConfig.isGhostReal() ? "sablestopnow.staff.group_ghost_on_real" : "sablestopnow.staff.group_ghost_on")
+                        : "sablestopnow.staff.group_ghost_off",
+                selected.size());
+        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.SetNoCollisionPayload(mark, new ArrayList<>(selected)));
     }
 
     public static void setNoCollision(final ResourceLocation dimension, final Collection<UUID> ids) {

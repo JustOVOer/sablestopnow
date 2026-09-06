@@ -91,6 +91,14 @@ public class SablestopNowConfig {
         }
     }
 
+    public static boolean isGhostReal() {
+        try {
+            return INSTANCE.ghostReal.get();
+        } catch (IllegalStateException e) {
+            return false;
+        }
+    }
+
     public static class Config {
         // 移除 enableForceLimiter
         public final ModConfigSpec.DoubleValue forceThreshold;
@@ -115,6 +123,7 @@ public class SablestopNowConfig {
         public final ModConfigSpec.DoubleValue staffRotateSensitivity;
         public final ModConfigSpec.DoubleValue staffScrollSensitivity;
         public final ModConfigSpec.DoubleValue staffCenterPullSpeed;
+        public final ModConfigSpec.BooleanValue ghostReal;
         Config(ModConfigSpec.Builder builder) {
             builder.comment("Sable Force Limiter Configuration")
                     .push("force_limiter");
@@ -206,6 +215,9 @@ public class SablestopNowConfig {
             staffCenterPullSpeed = builder
                     .comment("How fast the centroid eases to the view center while holding the center-pull key (0..1 per tick). Default 0.06.")
                     .defineInRange("center_pull_speed", 0.06, 0.0001, 1.0);
+            ghostReal = builder
+                    .comment("EXPERIMENTAL: when true, the V no-collision marker really stops the marked body from colliding with OTHER Sable bodies (not terrain/players). Implemented with transient no-effect joints (contacts_enabled=false) to nearby bodies, removed when they move far away. Default false.")
+                    .define("ghost_real", false);
             builder.pop();
         }
     }

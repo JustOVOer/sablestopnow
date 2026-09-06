@@ -100,6 +100,7 @@ public final class StaffEnhanceNetworking {
         MANAGER.registerServerbound(MoveGroupPayload.TYPE, MoveGroupPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerServerbound(SetLocksPayload.TYPE, SetLocksPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerServerbound(ToggleNoCollisionPayload.TYPE, ToggleNoCollisionPayload.CODEC, (payload, context) -> payload.handle(context));
+        MANAGER.registerServerbound(SetNoCollisionPayload.TYPE, SetNoCollisionPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(SyncNoCollisionPayload.TYPE, SyncNoCollisionPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(SyncLocksPayload.TYPE, SyncLocksPayload.CODEC, (payload, context) -> payload.handle(context));
     }
@@ -254,6 +255,38 @@ public final class StaffEnhanceNetworking {
             }
             final ServerLevel level = (ServerLevel) context.level();
             StaffEnhanceServer.toggleNoCollision(level, this.subLevel);
+        }
+    }
+
+    // ============ C2S：对一组物理体设置无碰撞标记（服务端幂等） ============
+    public static final class SetNoCollisionPayload implements CustomPacketPayload {
+        public static final Type<SetNoCollisionPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(SablestopNow.MOD_ID, "staff_set_no_collision"));
+        public static final StreamCodec<ByteBuf, SetNoCollisionPayload> CODEC = StreamCodec.composite(
+                StreamCodec.of((buf, b) -> buf.writeBoolean(b), ByteBuf::readBoolean), payload -> payload.mark,
+                UUID_LIST_CODEC, payload -> payload.subLevels,
+                SetNoCollisionPayload::new);
+
+        private final boolean mark;
+        private final List<UUID> subLevels;
+
+        public SetNoCollisionPayload(final boolean mark, final Collection<UUID> subLevels) {
+            this.mark = mark;
+            this.subLevels = new ArrayList<>(subLevels);
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        public void handle(final PacketContext context) {
+            final Player player = context.player();
+            if (!PhysicsStaffItem.isHolding(player)) {
+                context.disconnect(Component.literal("Invalid packet"));
+                return;
+            }
+            final ServerLevel level = (ServerLevel) context.level();
+            StaffEnhanceServer.setNoCollision(level, this.mark, this.subLevels);
         }
     }
 

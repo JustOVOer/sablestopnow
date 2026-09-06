@@ -43,6 +43,7 @@ repo/
 .corepack/
 .dsh-bin/
 .dsh-tmp/
+.dshwolf/
 .tmp-jarjar/
 
 ### External reference sources (not part of this repository) ###
@@ -50,3 +51,4 @@ repo/
 /Simulated-Project-main/
 /Veil-1.21/
 /neoforge-Documentation-main/
+/sable-schematic-api-master/

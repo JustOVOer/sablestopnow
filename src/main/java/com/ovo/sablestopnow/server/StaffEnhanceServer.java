@@ -3,6 +3,7 @@ package com.ovo.sablestopnow.server;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
 import dev.ryanhcode.sable.api.physics.constraint.ConstraintJointAxis;
 import dev.ryanhcode.sable.api.physics.constraint.FreeConstraintConfiguration;
+import dev.ryanhcode.sable.api.physics.constraint.GenericConstraintConfiguration;
 import dev.ryanhcode.sable.api.physics.constraint.PhysicsConstraintHandle;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
@@ -10,6 +11,8 @@ import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import dev.simulated_team.simulated.content.physics_staff.PhysicsStaffItem;
+import com.ovo.sablestopnow.SablestopNowConfig;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.joml.Quaterniond;
@@ -44,6 +47,10 @@ public final class StaffEnhanceServer {
 
     /** player -> group drag session */
     private static final Map<UUID, GroupDrag> ACTIVE = new HashMap<>();
+
+    /** 实验：无碰撞（幽灵）体与临近其它体的两两临时关节（无机械效果 + contacts_enabled=false）。 */
+    private static final double GHOST_SEARCH_SQ = 160.0 * 160.0;
+    private static final Map<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>, Map<UUID, Map<UUID, PhysicsConstraintHandle>>> GHOSTS = new HashMap<>();
 
     private StaffEnhanceServer() {
     }
@@ -145,6 +152,7 @@ public final class StaffEnhanceServer {
     public static void clearAll() {
         ACTIVE.values().forEach(GroupDrag::dispose);
         ACTIVE.clear();
+        clearGhosts();
     }
 
     private static void stopGroupDragInternal(final UUID player) {
@@ -238,7 +246,116 @@ public final class StaffEnhanceServer {
         }
     }
 
-    // ============ 无碰撞标记（占位：视觉 + 状态记录，Sable 暂不支持真实幽灵化） ============
+    // ============ 实验：无碰撞（只对其它 Sable 体生效；地形/玩家无效） ============
+
+    /** 每 tick（约半秒一次）维护“无碰撞体 ↔ 临近其它体”的两两临时关节。 */
+    public static void ghostTick(final MinecraftServer server) {
+        if (server == null) {
+            return;
+        }
+        if (!SablestopNowConfig.isGhostReal()) {
+            clearGhosts();
+            return;
+        }
+        for (final ServerLevel level : server.getAllLevels()) {
+            final ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+            if (container == null) {
+                continue;
+            }
+            final java.util.Set<UUID> marked = StaffCollisionData.get(level).getMarked();
+            final Map<UUID, Map<UUID, PhysicsConstraintHandle>> dim = GHOSTS.computeIfAbsent(level.dimension(), k -> new HashMap<>());
+
+            if (marked.isEmpty()) {
+                dim.values().forEach(map -> map.values().forEach(StaffEnhanceServer::safeRemove));
+                dim.clear();
+                continue;
+            }
+            // 清掉已被取消标记/消失的体
+            dim.entrySet().removeIf(e -> {
+                if (!marked.contains(e.getKey())) {
+                    e.getValue().values().forEach(StaffEnhanceServer::safeRemove);
+                    return true;
+                }
+                return false;
+            });
+
+            final java.util.List<ServerSubLevel> all = container.getAllSubLevels();
+            for (final ServerSubLevel body : all) {
+                if (body == null || body.isRemoved() || !marked.contains(body.getUniqueId())) {
+                    continue;
+                }
+                final UUID bodyId = body.getUniqueId();
+                final Map<UUID, PhysicsConstraintHandle> pairs = dim.computeIfAbsent(bodyId, k -> new HashMap<>());
+                final java.util.Set<UUID> keep = new java.util.HashSet<>();
+                for (final ServerSubLevel other : all) {
+                    if (other == null || other.isRemoved() || other.getUniqueId().equals(bodyId)) {
+                        continue;
+                    }
+                    final UUID otherId = other.getUniqueId();
+                    // 双方都标记时只由 id 更小的一侧建一次，避免重复
+                    if (marked.contains(otherId) && otherId.compareTo(bodyId) < 0) {
+                        continue;
+                    }
+                    if (body.logicalPose().position().distanceSquared(other.logicalPose().position()) > GHOST_SEARCH_SQ) {
+                        continue;
+                    }
+                    keep.add(otherId);
+                    if (!pairs.containsKey(otherId)) {
+                        final PhysicsConstraintHandle handle = createNoCollideJoint(body, other);
+                        if (handle != null) {
+                            pairs.put(otherId, handle);
+                        }
+                    }
+                }
+                final Iterator<java.util.Map.Entry<UUID, PhysicsConstraintHandle>> it = pairs.entrySet().iterator();
+                while (it.hasNext()) {
+                    final java.util.Map.Entry<UUID, PhysicsConstraintHandle> entry = it.next();
+                    if (!keep.contains(entry.getKey())) {
+                        safeRemove(entry.getValue());
+                        it.remove();
+                    }
+                }
+                if (pairs.isEmpty()) {
+                    dim.remove(bodyId);
+                }
+            }
+        }
+    }
+
+    /** 无机械效果关节：GenericConstraint 不锁任何轴 + 关闭这对体的接触。 */
+    private static PhysicsConstraintHandle createNoCollideJoint(final ServerSubLevel a, final ServerSubLevel b) {
+        try {
+            final ServerSubLevelContainer container = SubLevelContainer.getContainer(a.getLevel());
+            if (container == null) {
+                return null;
+            }
+            final Vector3d anchorA = new Vector3d(a.logicalPose().rotationPoint());
+            final Vector3d anchorB = new Vector3d(b.logicalPose().rotationPoint());
+            final GenericConstraintConfiguration config = new GenericConstraintConfiguration(
+                    anchorA, anchorB, new Quaterniond(), new Quaterniond(), java.util.Set.of());
+            final PhysicsConstraintHandle handle = container.physicsSystem().getPipeline().addConstraint(a, b, config);
+            if (handle == null) {
+                return null;
+            }
+            handle.setContactsEnabled(false);
+            return handle;
+        } catch (final Exception e) {
+            return null;
+        }
+    }
+
+    private static void safeRemove(final PhysicsConstraintHandle handle) {
+        if (handle != null && handle.isValid()) {
+            handle.remove();
+        }
+    }
+
+    public static void clearGhosts() {
+        GHOSTS.values().forEach(dim -> dim.values().forEach(map -> map.values().forEach(StaffEnhanceServer::safeRemove)));
+        GHOSTS.clear();
+    }
+
+    // ============ 无碰撞标记（视觉 + 状态记录；真实只对其它 Sable 体，见上方 ghostTick） ============
 
     /** 按当前锁定状态幂等地把一组物理体设成锁定/解锁（航空学 FixedConstraint）。 */
     public static void setLocks(final ServerLevel level, final boolean lock, final Collection<UUID> subLevels) {
@@ -288,6 +405,19 @@ public final class StaffEnhanceServer {
                 .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncNoCollisionPayload(level.dimension(),
                         StaffCollisionData.get(level).getMarked()));
         return on;
+    }
+
+    /** 幂等地把一组物理体设为“无碰撞标记”开/关（与 setLocks 同一语义）。 */
+    public static void setNoCollision(final ServerLevel level, final boolean mark, final Collection<UUID> subLevels) {
+        final StaffCollisionData data = StaffCollisionData.get(level);
+        for (final UUID uuid : subLevels) {
+            if (data.getMarked().contains(uuid) != mark) {
+                data.toggle(uuid);
+            }
+        }
+        foundry.veil.api.network.VeilPacketManager.all(level.getServer())
+                .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncNoCollisionPayload(level.dimension(),
+                        data.getMarked()));
     }
 
     public static java.util.Set<UUID> getNoCollision(final ServerLevel level) {

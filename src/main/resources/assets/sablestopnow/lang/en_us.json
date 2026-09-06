@@ -59,6 +59,7 @@
   "sablestopnow.staff.box_done": "Box select done: added %d bodies (total %d)",
   "sablestopnow.staff.box_too_large": "Box too large (>1,000,000 cells), shrink the area",
   "sablestopnow.staff.collision_on": "%s marked no-collision (visual+state placeholder; Sable can't ghost bodies yet)",
+  "sablestopnow.staff.collision_on_real": "%s marked no-collision: it no longer collides with OTHER Sable bodies (terrain/players still collide)",
   "sablestopnow.staff.collision_off": "%s restored to normal collision state",
   "sablestopnow.staff.group_start": "Group control active (%d bodies, relative position kept): Scroll sets target distance, hold C to slowly pull centroid to view center, TAB+mouse to rotate, right-click to end",
   "sablestopnow.staff.group_stop": "Group drag ended",
@@ -68,5 +69,15 @@
   "sablestopnow.staff.not_selected": "%s is not in the selection queue",
   "sablestopnow.staff.queue_cleared": "Selection queue cleared (%d bodies)",
   "sablestopnow.staff.group_locked": "Locked %d selected bodies",
-  "sablestopnow.staff.group_unlocked": "Unlocked %d selected bodies"
+  "sablestopnow.staff.group_unlocked": "Unlocked %d selected bodies",
+  "sablestopnow.staff.need_queue": "Select some bodies first (RMB in multi-select adds them to the queue)",
+  "sablestopnow.staff.group_ghost_on": "%d selected bodies marked no-collision (visual+state placeholder)",
+  "sablestopnow.staff.group_ghost_on_real": "%d selected bodies marked no-collision: they no longer collide with OTHER Sable bodies (terrain/players still collide)",
+  "sablestopnow.staff.group_ghost_off": "%d selected bodies restored to normal collision",
+  "sablestopnow.staff.hud.multiselect": "Multi-select ON",
+  "sablestopnow.staff.hud.armed": "Group armed",
+  "sablestopnow.staff.hud.penetration": "Penetration: %d",
+  "sablestopnow.staff.hud.selected": "Selected: %d",
+  "sablestopnow.staff.hud.box_a": "Box corner A: %d, %d, %d",
+  "sablestopnow.staff.hud.box_b": "Box corner B: %d, %d, %d"
 }

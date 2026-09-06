@@ -21,6 +21,10 @@ public final class StaffEnhanceServerEvents {
     @SubscribeEvent
     public static void onServerTick(final ServerTickEvent.Post event) {
         StaffEnhanceServer.serverTick();
+        // 幽灵体两两临时关节：每 10 tick 维护一次
+        if (event.getServer().getTickCount() % 10 == 0) {
+            StaffEnhanceServer.ghostTick(event.getServer());
+        }
     }
 
     @SubscribeEvent

@@ -60,6 +60,7 @@
   "sablestopnow.staff.box_done": "框选完成：新增选中 %d 个物理体（共 %d 个）",
   "sablestopnow.staff.box_too_large": "框选范围过大（超过100万格），请缩小选区",
   "sablestopnow.staff.collision_on": "已将 %s 标记为无碰撞（视觉+存档占位，Sable 暂不支持真实穿模）",
+  "sablestopnow.staff.collision_on_real": "已将 %s 标记为无碰撞（不再与其它物理体碰撞；地形/玩家仍会碰撞）",
   "sablestopnow.staff.collision_off": "已恢复 %s 的碰撞状态",
   "sablestopnow.staff.group_start": "已进入整组控制（%d 个物理体，保持相对位置）：滚轮调目标距离，长按C缓慢移到视线中央，TAB+鼠标旋转，右键结束",
   "sablestopnow.staff.group_stop": "已结束整组拖拽",
@@ -69,5 +70,15 @@
   "sablestopnow.staff.not_selected": "%s 不在选中队列中",
   "sablestopnow.staff.queue_cleared": "已清空选中队列（%d 个物理体）",
   "sablestopnow.staff.group_locked": "已锁定 %d 个选中物理体",
-  "sablestopnow.staff.group_unlocked": "已解除 %d 个选中物理体的锁定"
+  "sablestopnow.staff.group_unlocked": "已解除 %d 个选中物理体的锁定",
+  "sablestopnow.staff.need_queue": "请先选中物理体（多选模式右键加入队列）",
+  "sablestopnow.staff.group_ghost_on": "已将 %d 个选中物理体标记为无碰撞（视觉+存档占位）",
+  "sablestopnow.staff.group_ghost_on_real": "已将 %d 个选中物理体标记为无碰撞（不再与其它物理体碰撞；地形/玩家仍会碰撞）",
+  "sablestopnow.staff.group_ghost_off": "已恢复 %d 个选中物理体的碰撞",
+  "sablestopnow.staff.hud.multiselect": "多选模式 ON",
+  "sablestopnow.staff.hud.armed": "整组待命",
+  "sablestopnow.staff.hud.penetration": "穿透层数：%d",
+  "sablestopnow.staff.hud.selected": "已选中：%d",
+  "sablestopnow.staff.hud.box_a": "框选角点A：%d, %d, %d",
+  "sablestopnow.staff.hud.box_b": "框选角点B：%d, %d, %d"
 }

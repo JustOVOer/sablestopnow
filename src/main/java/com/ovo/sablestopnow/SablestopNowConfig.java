@@ -99,6 +99,22 @@ public class SablestopNowConfig {
         }
     }
 
+    public static boolean isSpeedLimitEnabled() {
+        try {
+            return INSTANCE.speedLimitEnabled.get();
+        } catch (IllegalStateException e) {
+            return false;
+        }
+    }
+
+    public static double speedLimitThreshold() {
+        try {
+            return INSTANCE.speedLimitThreshold.get();
+        } catch (IllegalStateException e) {
+            return 15.0;
+        }
+    }
+
     public static class Config {
         // 移除 enableForceLimiter
         public final ModConfigSpec.DoubleValue forceThreshold;
@@ -124,6 +140,8 @@ public class SablestopNowConfig {
         public final ModConfigSpec.DoubleValue staffScrollSensitivity;
         public final ModConfigSpec.DoubleValue staffCenterPullSpeed;
         public final ModConfigSpec.BooleanValue ghostReal;
+        public final ModConfigSpec.BooleanValue speedLimitEnabled;
+        public final ModConfigSpec.DoubleValue speedLimitThreshold;
         Config(ModConfigSpec.Builder builder) {
             builder.comment("Sable Force Limiter Configuration")
                     .push("force_limiter");
@@ -185,6 +203,12 @@ public class SablestopNowConfig {
                     .comment("Lock newly created sub-levels using a fixed constraint.")
                     .translation("config.sablestopnow.force_limiter.lock_new_sub_levels")
                     .define("lock_new_sub_levels", false);
+            speedLimitEnabled = builder
+                    .comment("Auto-lock a physics body when its speed exceeds the threshold (dragged bodies are exempt).")
+                    .define("speed_limit_enabled", false);
+            speedLimitThreshold = builder
+                    .comment("Speed limit in blocks/second for speed_limit_enabled.")
+                    .defineInRange("speed_limit_threshold", 15.0, 0.1, 1000.0);
             builder.pop();
 
             // ============ Physics Staff Enhance ============

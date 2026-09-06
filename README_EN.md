@@ -6,7 +6,7 @@ A practical NeoForge mod (MC **1.21.1**) for **Create: Aeronautics / Simulated**
 
 Two feature groups:
 
-1. **Force monitor & limiter** (original) — threshold filtering, recording and optional auto-pause for forces applied to Sable sub-levels.
+1. **Force monitor & limiter** (original) — threshold filtering, recording and optional auto-pause for forces applied to Sable sub-levels; **v1.0.4 adds paused-physics stepping and an auto speed-lock**.
 2. **Physics Staff Enhancements** (since **v1.0.2**; **v1.0.3** adds the experimental “real no-collision vs other Sable bodies” and an on-screen HUD) — multi-select, box select, penetration picking, and whole-group control (move / rotate / lock) on top of the Aeronautics physics staff.
 
 > Detailed key/config reference: [docs/staff-enhance-usage.md](docs/staff-enhance-usage.md) (CN).
@@ -22,6 +22,8 @@ Two feature groups:
 - Optional auto-pause on filter with a server-wide broadcast + a clickable `/sablesn forces` hint.
 - `/sablesn forces [page]` and `/sablesn forces filtered [page]` list force history; clicking a sub-level id fills in a `/tp` command.
 - Split confirmation (`/sablesn confirm` / `/sablesn deny`) before a heat-map driven split.
+- Paused-physics stepping: `/sablesn tick <steps>` steps the specified number of physics ticks while paused, then restores the pause automatically.
+- Speed auto-lock: bodies faster than `speed_limit_threshold` are locked automatically and announced in chat with a **clickable teleport suggestion**; bodies that are currently being dragged (single or group) are never falsely locked.
 - Utility toggles: auto-lock newly assembled sub-levels, disable block-placement collision checks, render sub-level surface outlines / axes.
 
 ### Physics Staff Enhancements (master switch `[staff_enhance].enable_staff_enhance`)
@@ -47,7 +49,7 @@ Selected / hovered bodies are outlined in a uniform cyan “contour only” styl
 
 Config file: `.minecraft/config/sablestopnow-common.toml`
 
-- `[force_limiter]` — threshold, excluded groups, auto-pause, lock new bodies, placement collision, split confirmation, outlines/axes.
+- `[force_limiter]` — threshold, excluded groups, auto-pause, lock new bodies, placement collision, split confirmation, **speed auto-lock (`speed_limit_enabled` / `speed_limit_threshold`)**, outlines/axes.
 - `[staff_enhance]` — master switch, GLFW key codes and sensitivities:
 
 | Key / value | Default | Meaning |
@@ -68,6 +70,7 @@ Config file: `.minecraft/config/sablestopnow-common.toml`
 
 - `/sablesn forces [page]`, `/sablesn forces filtered [page]`
 - `/sablesn confirm`, `/sablesn deny`
+- `/sablesn tick <steps>` (permission level 2; steps physics while paused)
 
 ## Dependencies
 

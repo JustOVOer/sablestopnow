@@ -80,5 +80,9 @@
   "sablestopnow.staff.hud.penetration": "穿透层数：%d",
   "sablestopnow.staff.hud.selected": "已选中：%d",
   "sablestopnow.staff.hud.box_a": "框选角点A：%d, %d, %d",
-  "sablestopnow.staff.hud.box_b": "框选角点B：%d, %d, %d"
+  "sablestopnow.staff.hud.box_b": "框选角点B：%d, %d, %d",
+  "sablestopnow.command.tick.not_paused": "物理未暂停，无法步进（请先暂停物理）",
+  "sablestopnow.command.tick.started": "已开始步进 %d 个物理 tick（完成后自动恢复暂停）",
+  "sablestopnow.speedlock.message": "物理体 %s 超速（%.1f 格/秒），已自动锁定",
+  "sablestopnow.speedlock.tp": "[点击传送]"
 }

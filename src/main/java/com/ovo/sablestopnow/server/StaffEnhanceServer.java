@@ -12,6 +12,10 @@ import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import dev.simulated_team.simulated.content.physics_staff.PhysicsStaffItem;
 import com.ovo.sablestopnow.SablestopNowConfig;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -153,6 +157,7 @@ public final class StaffEnhanceServer {
         ACTIVE.values().forEach(GroupDrag::dispose);
         ACTIVE.clear();
         clearGhosts();
+        STEPPING.clear();
     }
 
     private static void stopGroupDragInternal(final UUID player) {
@@ -353,6 +358,142 @@ public final class StaffEnhanceServer {
     public static void clearGhosts() {
         GHOSTS.values().forEach(dim -> dim.values().forEach(map -> map.values().forEach(StaffEnhanceServer::safeRemove)));
         GHOSTS.clear();
+    }
+
+    // ============ 暂停步进（/sablesn tick） ============
+
+    /** level -> 剩余需解除暂停的 tick 数（每个 server tick 步进一次后递减）。 */
+    private static final Map<ServerLevel, Integer> STEPPING = new HashMap<>();
+
+    /** 返回 false：未暂停或无法步进。 */
+    public static boolean startStepping(final ServerLevel level, final int serverTicks) {
+        final ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container == null || container.physicsSystem() == null) {
+            return false;
+        }
+        final SubLevelPhysicsSystem system = container.physicsSystem();
+        if (!system.getPaused()) {
+            return false;
+        }
+        system.setPaused(false);
+        STEPPING.put(level, serverTicks);
+        return true;
+    }
+
+    private static void tickStepping() {
+        final Iterator<Map.Entry<ServerLevel, Integer>> it = STEPPING.entrySet().iterator();
+        while (it.hasNext()) {
+            final Map.Entry<ServerLevel, Integer> entry = it.next();
+            final ServerLevel level = entry.getKey();
+            final ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+            if (container == null || container.physicsSystem() == null) {
+                it.remove();
+                continue;
+            }
+            final int left = entry.getValue() - 1;
+            if (left <= 0) {
+                container.physicsSystem().setPaused(true);
+                it.remove();
+            } else {
+                entry.setValue(left);
+            }
+        }
+    }
+
+    // ============ 超速自动锁定（拖拽中的体豁免） ============
+
+    /** 每 5 tick 扫一次：速度超阈值即锁定并全服提示。 */
+    private static void speedScan(final MinecraftServer server) {
+        if (!SablestopNowConfig.isSpeedLimitEnabled()) {
+            return;
+        }
+        final double threshold = SablestopNowConfig.speedLimitThreshold();
+        for (final ServerLevel level : server.getAllLevels()) {
+            final ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+            if (container == null) {
+                continue;
+            }
+            final java.util.Set<UUID> dragged = currentlyDragged(level);
+            final dev.simulated_team.simulated.content.physics_staff.PhysicsStaffServerHandler locks =
+                    dev.simulated_team.simulated.content.physics_staff.PhysicsStaffServerHandler.get(level);
+            for (final ServerSubLevel sub : container.getAllSubLevels()) {
+                if (sub == null || sub.isRemoved() || dragged.contains(sub.getUniqueId())) {
+                    continue;
+                }
+                final double speed = sub.latestLinearVelocity != null ? sub.latestLinearVelocity.length() : 0.0;
+                if (speed <= threshold || locks.isLocked(sub)) {
+                    continue;
+                }
+                locks.toggleLock(sub.getUniqueId());
+                final String name = sub.getName() != null ? sub.getName() : sub.getUniqueId().toString();
+                final net.minecraft.world.phys.Vec3 pos = new net.minecraft.world.phys.Vec3(
+                        sub.logicalPose().position().x(), sub.logicalPose().position().y(), sub.logicalPose().position().z());
+                final String tpCmd = String.format("/tp @p %.2f %.2f %.2f", pos.x, pos.y, pos.z);
+                final Component tp = Component.translatable("sablestopnow.speedlock.tp")
+                        .withStyle(style -> style
+                                .withColor(ChatFormatting.GOLD)
+                                .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, tpCmd))
+                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                        Component.translatable("sablestopnow.force.list.click_to_tp"))));
+                final Component message = Component.translatable("sablestopnow.speedlock.message", name, String.format("%.1f", speed))
+                        .append(Component.literal(" "))
+                        .append(tp);
+                server.getPlayerList().broadcastSystemMessage(message, false);
+            }
+        }
+    }
+
+    /** 正在被拖拽的物理体：本模组整组控制成员 + 航空学单体拖拽会话（反射读其私有 sessions）。 */
+    private static java.util.Set<UUID> currentlyDragged(final ServerLevel level) {
+        final java.util.Set<UUID> out = new java.util.HashSet<>();
+        for (final GroupDrag drag : ACTIVE.values()) {
+            if (drag.level == level) {
+                for (final Member m : drag.members) {
+                    out.add(m.sub.getUniqueId());
+                }
+            }
+        }
+        try {
+            final Object handler = dev.simulated_team.simulated.content.physics_staff.PhysicsStaffServerHandler.get(level);
+            java.lang.reflect.Field sessionsField = null;
+            for (final java.lang.reflect.Field f : handler.getClass().getDeclaredFields()) {
+                if (java.util.Map.class.isAssignableFrom(f.getType())) {
+                    sessionsField = f;
+                    break;
+                }
+            }
+            if (sessionsField != null) {
+                sessionsField.setAccessible(true);
+                final Object sessions = sessionsField.get(handler);
+                if (sessions instanceof final Map<?, ?> map) {
+                    for (final Object session : map.values()) {
+                        for (final java.lang.reflect.Field f : session.getClass().getDeclaredFields()) {
+                            if (f.getType().getSimpleName().endsWith("SubLevel")) {
+                                f.setAccessible(true);
+                                final Object sub = f.get(session);
+                                if (sub instanceof final ServerSubLevel s) {
+                                    out.add(s.getUniqueId());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (final Exception ignored) {
+            // 反射失败时退化为只豁免本模组整组拖拽的成员
+        }
+        return out;
+    }
+
+    /** 每个 server tick 收尾：暂停步进递减、限速扫描、幽灵关节维护。 */
+    public static void serverFeatures(final MinecraftServer server) {
+        tickStepping();
+        if (server.getTickCount() % 5 == 0) {
+            speedScan(server);
+        }
+        if (server.getTickCount() % 10 == 0) {
+            ghostTick(server);
+        }
     }
 
     // ============ 无碰撞标记（视觉 + 状态记录；真实只对其它 Sable 体，见上方 ghostTick） ============

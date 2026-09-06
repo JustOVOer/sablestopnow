@@ -15,6 +15,8 @@ Protect your physics builds from excessive forces:
 - Optional auto-pause when a force is filtered, with a server-wide broadcast and a clickable `/sablesn forces` hint.
 - Paginated force history: `/sablesn forces [page]` and `/sablesn forces filtered [page]`; click a sub-level ID to fill in a `/tp` command.
 - Split confirmation (`/sablesn confirm` / `/sablesn deny`) before a heat-map driven split.
+- Paused-physics stepping: `/sablesn tick <steps>` steps the specified number of physics ticks while paused, then restores the pause automatically.
+- Speed auto-lock: bodies faster than `speed_limit_threshold` are locked automatically and announced in chat with a **clickable teleport suggestion**; bodies that are currently being dragged (single or group) are never falsely locked.
 - Utility toggles: auto-lock freshly assembled sub-levels, disable block-placement collision checks, render surface outlines/axes.
 
 ### 2. Physics Staff Enhancements
@@ -37,7 +39,7 @@ Upgrade the Aeronautics **physics staff** into a practical build tool (master sw
 
 `config/sablestopnow-common.toml`
 
-- `[force_limiter]` — force threshold, excluded groups, auto-pause, split confirmation, outlines/axes and more.
+- `[force_limiter]` — force threshold, excluded groups, auto-pause, split confirmation, **speed auto-lock (`speed_limit_enabled` / `speed_limit_threshold`)**, outlines/axes and more.
 - `[staff_enhance]` — master switch, GLFW key codes and sensitivities:
 
 | Setting | Default | Meaning |
@@ -60,6 +62,7 @@ Upgrade the Aeronautics **physics staff** into a practical build tool (master sw
 - `/sablesn forces filtered [page]`
 - `/sablesn confirm`
 - `/sablesn deny`
+- `/sablesn tick <steps>` (permission level 2)
 
 ## Requirements
 

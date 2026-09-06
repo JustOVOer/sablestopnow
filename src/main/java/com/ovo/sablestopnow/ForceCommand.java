@@ -3,6 +3,7 @@ package com.ovo.sablestopnow;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.ovo.sablestopnow.server.StaffEnhanceServer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -42,9 +43,30 @@ public class ForceCommand {
                         .then(Commands.literal("deny")
                                 .executes(ctx -> denySplit(ctx))
                         )
+                        .then(Commands.literal("tick")
+                                .requires(src -> src.hasPermission(2))
+                                .then(Commands.argument("steps", IntegerArgumentType.integer(1))
+                                        .executes(ForceCommand::stepTicks))
+                        )
 
         );
 
+    }
+
+    /** /sablesn tick <steps>：物理暂停时步进指定数量的物理 tick（每 tick 含 Sable 的物理子步）。 */
+    private static int stepTicks(final CommandContext<CommandSourceStack> ctx) {
+        final CommandSourceStack source = ctx.getSource();
+        final int steps = IntegerArgumentType.getInteger(ctx, "steps");
+        if (!(source.getLevel() instanceof final ServerLevel level)) {
+            source.sendFailure(Component.translatable("sablestopnow.command.player_only"));
+            return 0;
+        }
+        if (!StaffEnhanceServer.startStepping(level, steps)) {
+            source.sendFailure(Component.translatable("sablestopnow.command.tick.not_paused"));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.translatable("sablestopnow.command.tick.started", steps), false);
+        return 1;
     }
 
     private static int listForces(CommandContext<CommandSourceStack> ctx, boolean onlyFiltered, int page) {

@@ -79,5 +79,9 @@
   "sablestopnow.staff.hud.penetration": "Penetration: %d",
   "sablestopnow.staff.hud.selected": "Selected: %d",
   "sablestopnow.staff.hud.box_a": "Box corner A: %d, %d, %d",
-  "sablestopnow.staff.hud.box_b": "Box corner B: %d, %d, %d"
+  "sablestopnow.staff.hud.box_b": "Box corner B: %d, %d, %d",
+  "sablestopnow.command.tick.not_paused": "Physics is not paused; nothing to step (pause it first)",
+  "sablestopnow.command.tick.started": "Stepping %d physics ticks (pause will be restored automatically)",
+  "sablestopnow.speedlock.message": "Physics body %s is too fast (%.1f blocks/s) and has been locked",
+  "sablestopnow.speedlock.tp": "[click to TP]"
 }

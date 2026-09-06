@@ -402,7 +402,10 @@ public final class StaffEnhanceServer {
 
     // ============ 超速自动锁定（拖拽中的体豁免） ============
 
-    /** 每 5 tick 扫一次：速度超阈值即锁定并全服提示。 */
+    /** 上次尝试锁定的 tick（避免锁定失败/未持久时的重复广播刷屏）。 */
+    private static final Map<UUID, Long> SPEED_LOCK_RETRY = new HashMap<>();
+
+    /** 每 5 tick 扫一次：速度超阈值即锁定并全服提示（带冷却，只在真正锁定成功时广播一次）。 */
     private static void speedScan(final MinecraftServer server) {
         if (!SablestopNowConfig.isSpeedLimitEnabled()) {
             return;
@@ -420,12 +423,28 @@ public final class StaffEnhanceServer {
                 if (sub == null || sub.isRemoved() || dragged.contains(sub.getUniqueId())) {
                     continue;
                 }
+                final UUID subUuid = sub.getUniqueId();
                 final double speed = sub.latestLinearVelocity != null ? sub.latestLinearVelocity.length() : 0.0;
-                if (speed <= threshold || locks.isLocked(sub)) {
+                if (speed <= threshold) {
+                    SPEED_LOCK_RETRY.remove(subUuid);
                     continue;
                 }
-                locks.toggleLock(sub.getUniqueId());
-                final String name = sub.getName() != null ? sub.getName() : sub.getUniqueId().toString();
+                if (locks.isLocked(sub)) {
+                    SPEED_LOCK_RETRY.remove(subUuid);
+                    continue;
+                }
+                final long now = server.getTickCount();
+                final Long last = SPEED_LOCK_RETRY.get(subUuid);
+                if (last != null && now - last < 60) {
+                    continue; // 冷却中（上次尝试未成功，稍后静默重试）
+                }
+                SPEED_LOCK_RETRY.put(subUuid, now);
+                locks.toggleLock(subUuid);
+                if (!locks.isLocked(sub)) {
+                    continue; // 锁定未生效（例如世界锚点校验失败），静默等待冷却后重试
+                }
+                SPEED_LOCK_RETRY.remove(subUuid);
+                final String name = sub.getName() != null ? sub.getName() : subUuid.toString();
                 final net.minecraft.world.phys.Vec3 pos = new net.minecraft.world.phys.Vec3(
                         sub.logicalPose().position().x(), sub.logicalPose().position().y(), sub.logicalPose().position().z());
                 final String tpCmd = String.format("/tp @p %.2f %.2f %.2f", pos.x, pos.y, pos.z);
@@ -455,25 +474,15 @@ public final class StaffEnhanceServer {
         }
         try {
             final Object handler = dev.simulated_team.simulated.content.physics_staff.PhysicsStaffServerHandler.get(level);
-            java.lang.reflect.Field sessionsField = null;
-            for (final java.lang.reflect.Field f : handler.getClass().getDeclaredFields()) {
-                if (java.util.Map.class.isAssignableFrom(f.getType())) {
-                    sessionsField = f;
-                    break;
-                }
-            }
-            if (sessionsField != null) {
-                sessionsField.setAccessible(true);
-                final Object sessions = sessionsField.get(handler);
-                if (sessions instanceof final Map<?, ?> map) {
-                    for (final Object session : map.values()) {
-                        for (final java.lang.reflect.Field f : session.getClass().getDeclaredFields()) {
-                            if (f.getType().getSimpleName().endsWith("SubLevel")) {
-                                f.setAccessible(true);
-                                final Object sub = f.get(session);
-                                if (sub instanceof final ServerSubLevel s) {
-                                    out.add(s.getUniqueId());
-                                }
+            final Object sessions = findDraggingSessions(handler);
+            if (sessions instanceof final Map<?, ?> map) {
+                for (final Object session : map.values()) {
+                    for (final java.lang.reflect.Field f : session.getClass().getDeclaredFields()) {
+                        if (ServerSubLevel.class.isAssignableFrom(f.getType())) {
+                            f.setAccessible(true);
+                            final Object sub = f.get(session);
+                            if (sub instanceof final ServerSubLevel s) {
+                                out.add(s.getUniqueId());
                             }
                         }
                     }
@@ -483,6 +492,46 @@ public final class StaffEnhanceServer {
             // 反射失败时退化为只豁免本模组整组拖拽的成员
         }
         return out;
+    }
+
+    /**
+     * 从 PhysicsStaffServerHandler 反射取“拖拽会话”map（其内部类值含 ServerSubLevel 字段）。
+     * 优先按字段名 draggingSessions，其次用“值对象含 ServerSubLevel 字段”的 Map 兜底，
+     * 避免误选到只有 UUID/handle 的 locks map。
+     */
+    private static Object findDraggingSessions(final Object handler) throws IllegalAccessException {
+        final java.lang.reflect.Field[] fields = handler.getClass().getDeclaredFields();
+        // 1) 按名字
+        for (final java.lang.reflect.Field f : fields) {
+            if (java.util.Map.class.isAssignableFrom(f.getType()) && f.getName().contains("raging")) {
+                f.setAccessible(true);
+                return f.get(handler);
+            }
+        }
+        // 2) 值对象含 ServerSubLevel 字段的 Map
+        for (final java.lang.reflect.Field f : fields) {
+            if (!java.util.Map.class.isAssignableFrom(f.getType())) {
+                continue;
+            }
+            f.setAccessible(true);
+            final Object map = f.get(handler);
+            if (map instanceof final Map<?, ?> m && !m.isEmpty()) {
+                final Object sample = m.values().iterator().next();
+                if (hasServerSubLevelField(sample)) {
+                    return map;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasServerSubLevelField(final Object value) {
+        for (final java.lang.reflect.Field f : value.getClass().getDeclaredFields()) {
+            if (ServerSubLevel.class.isAssignableFrom(f.getType())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 每个 server tick 收尾：暂停步进递减、限速扫描、幽灵关节维护。 */

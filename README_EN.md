@@ -7,9 +7,10 @@ A practical NeoForge mod (MC **1.21.1**) for **Create: Aeronautics / Simulated**
 Two feature groups:
 
 1. **Force monitor & limiter** (original) — threshold filtering, recording and optional auto-pause for forces applied to Sable sub-levels.
-2. **Physics Staff Enhancements** (new in **v1.0.2**) — multi-select, box select, penetration picking, and whole-group control (move / rotate / lock) on top of the Aeronautics physics staff.
+2. **Physics Staff Enhancements** (since **v1.0.2**; **v1.0.3** adds the experimental “real no-collision vs other Sable bodies” and an on-screen HUD) — multi-select, box select, penetration picking, and whole-group control (move / rotate / lock) on top of the Aeronautics physics staff.
 
 > Detailed key/config reference: [docs/staff-enhance-usage.md](docs/staff-enhance-usage.md) (CN).
+> English mod-page blurb: [DESCRIPTION.md](DESCRIPTION.md).
 
 ---
 
@@ -38,9 +39,9 @@ Two feature groups:
 | Group control: **Scroll** | Scale group distance along the eye→centroid line |
 | Group control: **hold C** | Slowly ease the centroid to the view center |
 | Group control: **TAB + mouse** | Rotate the whole group about its centroid |
-| Outside multi-select **V** | Toggle a "no-collision" marker (visual + saved state only; Sable has no runtime ghost API yet) |
+| Outside multi-select **V** | Apply / remove the no-collision marker to the **whole selection queue** (same logic as the LMB lock toggle; with `ghost_real` it really stops collisions vs OTHER Sable bodies, terrain/players excluded) |
 
-Selected / hovered bodies are outlined in a uniform cyan “contour only” style with a ring icon; every action shows a bilingual hint.
+Selected / hovered bodies are outlined in a uniform cyan “contour only” style with a ring icon; every action shows a bilingual hint. During multi-select an on-screen HUD (top-left) keeps showing mode, penetration depth, selection count, and (while box selecting) the corner coordinates.
 
 ## Keys & Configuration
 
@@ -59,6 +60,7 @@ Config file: `.minecraft/config/sablestopnow-common.toml`
 | `rotate_sensitivity` | 0.35 | TAB rotation sensitivity |
 | `scroll_sensitivity` | 0.6 | scroll sensitivity |
 | `center_pull_speed` | 0.06 | C ease speed per tick |
+| `ghost_real` | false | make V no-collision real (vs OTHER Sable bodies; experimental, off by default) |
 
 > TAB reuses Aeronautics' “Physics Staff Rotate Mode” key binding (change it in Controls). Other keys are edited in the toml and applied after a restart.
 
@@ -87,5 +89,5 @@ See `mod_license` in `gradle.properties` (default All Rights Reserved). `TEMPLAT
 
 ## Known limitations
 
-- The no-collision marker is a visual/saved-state placeholder (Sable has no per-body runtime ghost API).
+- The no-collision marker is a visual/saved-state placeholder by default; with `ghost_real` enabled it is real, but only vs **other Sable bodies** (terrain and players still collide).
 - Group control drives each member with physics motors; very large / fast structures may wobble slightly (server stiffness/damping constants live in `server/StaffEnhanceServer`).

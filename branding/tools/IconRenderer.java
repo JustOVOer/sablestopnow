@@ -32,6 +32,9 @@ public final class IconRenderer {
         double depth, shade;
         BufferedImage img;
         boolean opaque;
+        boolean flipNormal;      // 镜像件：法线要取反，否则光照会反向
+        boolean flipScreenY;     // 屏幕空间上下镜像（像翻图片一样）
+        int gid;                 // 所属物件 id（用于求镜像中心）
     }
 
     static int SS = 2;
@@ -40,6 +43,7 @@ public final class IconRenderer {
     static int haloColor = 0x9FB6CC;   // 模型外光边
     static double haloA = 0.55;
     static int gridStep = 32;
+    static double brightness = 1.16;   // 合背景之前先把模型调亮
 
     public static void main(String[] args) throws Exception {
         File scene = new File(args[0]);
@@ -50,6 +54,8 @@ public final class IconRenderer {
         if (args.length > 5) gridColor = (int) Long.parseLong(args[5].replace("0x", ""), 16);
         if (args.length > 6) gridStep = Integer.parseInt(args[6]);
         if (args.length > 7) haloColor = (int) Long.parseLong(args[7].replace("0x", ""), 16);
+        if (args.length > 8) haloA = Double.parseDouble(args[8]);
+        if (args.length > 9) brightness = Double.parseDouble(args[9]);
 
         int canvas = 512, padding = 26;
         String[] texNames = new String[0];
@@ -69,7 +75,11 @@ public final class IconRenderer {
                         Quad q = new Quad();
                         q.tex = texNames[Integer.parseInt(t[1])];
                         q.face = t[2];
-                        int k = 3;
+                        int flags = Integer.parseInt(t[3]);
+                        q.flipNormal = (flags & 1) != 0;
+                        q.flipScreenY = (flags & 2) != 0;
+                        q.gid = Integer.parseInt(t[4]);
+                        int k = 5;
                         for (int i = 0; i < 4; i++)
                             for (int j = 0; j < 3; j++) q.p[i][j] = Double.parseDouble(t[k++]);
                         for (int i = 0; i < 4; i++)
@@ -84,7 +94,7 @@ public final class IconRenderer {
         for (String n : texNames) if (n != null) cache.put(n, ImageIO.read(new File(texDir, n + ".png")));
 
         // ---- 正交等轴测投影 ----
-        double minX = 1e18, maxX = -1e18, minY = 1e18, maxY = -1e18;
+        Map<Integer, double[]> flipCenter = new HashMap<>();   // gid -> {sumY, count}
         for (Quad q : quads) {
             q.img = cache.get(q.tex);
             q.opaque = isOpaque(q.img);
@@ -92,14 +102,31 @@ public final class IconRenderer {
             for (int i = 0; i < 4; i++) {
                 double vx = q.p[i][0], vy = q.p[i][1], vz = q.p[i][2];
                 q.sx[i] = vx; q.sy[i] = -vy; d += vz;
-                minX = Math.min(minX, vx); maxX = Math.max(maxX, vx);
-                minY = Math.min(minY, -vy); maxY = Math.max(maxY, -vy);
+                if (q.flipScreenY) {
+                    double[] acc = flipCenter.computeIfAbsent(q.gid, k -> new double[2]);
+                    acc[0] += -vy; acc[1] += 1;
+                }
             }
             q.depth = d / 4.0;
             double[] n = normal(q.p[0], q.p[1], q.p[3]);
+            if (q.flipNormal) { n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2]; }
             double[] L = normalize(new double[]{-0.38, 0.86, 0.34});
             double lam = Math.max(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2]);
-            q.shade = 0.60 + 0.40 * lam;
+            q.shade = 0.62 + 0.38 * lam;
+        }
+        // 屏幕上下镜像：以该物件的投影中心为轴，把 sy 取反（像翻图片）
+        for (Quad q : quads) {
+            if (!q.flipScreenY) continue;
+            double[] acc = flipCenter.get(q.gid);
+            double c = acc[0] / acc[1];
+            for (int i = 0; i < 4; i++) q.sy[i] = 2.0 * c - q.sy[i];
+        }
+        double minX = 1e18, maxX = -1e18, minY = 1e18, maxY = -1e18;
+        for (Quad q : quads) {
+            for (int i = 0; i < 4; i++) {
+                minX = Math.min(minX, q.sx[i]); maxX = Math.max(maxX, q.sx[i]);
+                minY = Math.min(minY, q.sy[i]); maxY = Math.max(maxY, q.sy[i]);
+            }
         }
 
         double span = Math.max(maxX - minX, maxY - minY);
@@ -164,9 +191,9 @@ public final class IconRenderer {
                     bb = bb * (1 - haloA) + (haloColor & 0xFF) / 255.0 * haloA;
                 }
                 double a = ma[p];
-                double r = br * (1 - a) + mr[p] * a;
-                double g = bgc * (1 - a) + mg[p] * a;
-                double bl = bb * (1 - a) + mb[p] * a;
+                double r = br * (1 - a) + Math.min(1.0, mr[p] * brightness) * a;
+                double g = bgc * (1 - a) + Math.min(1.0, mg[p] * brightness) * a;
+                double bl = bb * (1 - a) + Math.min(1.0, mb[p] * brightness) * a;
                 img.setRGB(x, y, (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(bl));
             }
         }

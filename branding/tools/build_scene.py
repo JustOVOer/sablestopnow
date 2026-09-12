@@ -215,6 +215,12 @@ class Piece:
         self.scale = 1.0
         self.pos = (0.0, 0.0, 0.0)        # 最终中心 C
         self.rots = []                    # [("y", -25), ("z", 45)] 由内到外
+        # 屏幕「上下镜像」：对渲染结果在屏幕空间做垂直翻转（像翻图片一样）
+        self.flip_screen_y = False
+        # 3D 反射式镜像（备用）：沿指定法线的平面反射，注意会把斜对相机的圆盘压平
+        self.mirror_screen_up = False
+        self.mirror_axis = (0.0, 1.0, 0.0)
+        self.gid = 0
 
     # -- 源几何中心（y-up） --
     def _center_yup(self):
@@ -265,9 +271,16 @@ class Piece:
                     p = tuple(mat_apply(rmat, d)[i] + rorg[i] for i in range(3))
                 lp = tuple((p[i] - self.c0[i]) * self.scale for i in range(3))
                 w = mat_apply(m, lp)
-                return tuple(w[i] + self.pos[i] for i in range(3))
+                w = tuple(w[i] + self.pos[i] for i in range(3))
+                if self.mirror_screen_up:
+                    # 沿镜像平面法线做一次反射：w' = w - 2 (w·n) n，平面过物件中心
+                    n = self.mirror_axis
+                    d = sum((w[i] - self.pos[i]) * n[i] for i in range(3))
+                    w = tuple(w[i] - 2.0 * d * n[i] for i in range(3))
+                return w
 
             inv = self.tex_size / 16.0
+            flags = (1 if self.mirror_screen_up else 0) | (2 if self.flip_screen_y else 0)
             for fname in FACE_ORDER:
                 f = faces.get(fname)
                 if not f:
@@ -275,7 +288,8 @@ class Piece:
                 u1, v1, u2, v2 = f["uv"]
                 uvs = [(u * inv, v * inv)
                        for (u, v) in uv_corners(u1, v1, u2, v2, f.get("rotation", 0))]
-                out.append((self.texname, [place(p) for p in corners[fname]], uvs, fname))
+                out.append((self.texname, [place(p) for p in corners[fname]], uvs, fname,
+                            flags, self.gid))
         return out
 
     # -- 写进 .bbmodel 的元素（自身坐标已缩放/平移，旋转交给元素 rotation 字段）--
@@ -429,10 +443,12 @@ def main():
     gear = Piece("gear", load_java_model(create, GEAR_MODEL)["elements"], gear_tex,
                  tex_sizes[gear_tex])
     gear.scale = 0.64
-    # 立起来 + 上下翻转（x = 125°），再偏到右上方（y）——露出厚度，做成 3D
-    gear.rots = [("x", 125.0), ("y", 25.0)]
+    # 原角度立起 + 偏右上；再对整体做一次**屏幕上下镜像**（像翻图片一样，几何不变）
+    gear.rots = [("x", -55.0), ("y", 25.0)]
+    gear.flip_screen_y = True
 
     cam = Camera(yaw=-37.0, pitch=27.0)
+    gear.mirror_axis = (cam.m[1][0], cam.m[1][1], cam.m[1][2])   # 相机的屏幕向上轴（备用）
     gear.pos = cam.world_offset(-11.2, -10.6, 2.0)   # 左下角那块空三角里
 
     # ---- 小立方体：绕「手杖上端」的环形轨道（轨道平面垂直于手杖轴）----
@@ -461,6 +477,8 @@ def main():
             cubes.append(p)
 
     pieces = [staff, gear] + cubes
+    for i, p in enumerate(pieces):
+        p.gid = i
 
     # 调试/二分定位用：python build_scene.py [staff|gear|cubes] 只输出对应部分
     only = sys.argv[1] if len(sys.argv) > 1 else "all"
@@ -481,8 +499,8 @@ def main():
     for i, n in enumerate(order):
         lines.append("TEX %d %s" % (i, n))
     idx = {n: i for i, n in enumerate(order)}
-    for (tex, pts, uvs, fname) in quads:
-        lines.append("QUAD %d %s " % (idx[tex], fname)
+    for (tex, pts, uvs, fname, flags, gid) in quads:
+        lines.append("QUAD %d %s %d %d " % (idx[tex], fname, flags, gid)
                      + " ".join("%.5f" % v for p in pts for v in p) + " "
                      + " ".join("%.5f" % v for uv in uvs for v in uv))
     with open(os.path.join(BRAND, "scene.txt"), "w", encoding="utf-8") as f:
@@ -497,8 +515,8 @@ def main():
     with open(bb_path, "w", encoding="utf-8") as f:
         json.dump(bb, f, ensure_ascii=False, indent="\t")
 
-    lo = [min(p[i] for (_, pts, _, _) in quads for p in pts) for i in range(3)]
-    hi = [max(p[i] for (_, pts, _, _) in quads for p in pts) for i in range(3)]
+    lo = [min(p[i] for (_, pts, _, _, _, _) in quads for p in pts) for i in range(3)]
+    hi = [max(p[i] for (_, pts, _, _, _, _) in quads for p in pts) for i in range(3)]
     print("[scene] pieces=%d quads=%d" % (len(pieces), len(quads)))
     print("[scene] bbox lo=%s hi=%s" % ([round(v, 2) for v in lo], [round(v, 2) for v in hi]))
     print("[scene] wrote scene.txt, %s" % os.path.basename(bb_path))

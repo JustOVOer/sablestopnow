@@ -2,7 +2,7 @@
 
 > 状态：**已实现并通过实机验证（v1.0.4，2026-09）**。本文保留需求与交互决策的来龙去脉，并在 §7/§8 记录最终实现与关键事实。
 > 目标模组：SableStopNow（NeoForge 1.21.1 / NeoForge 21.1.248，Sable 2.0.4，Simulated/Aeronautics 1.3.1）。
-> 实现原则：所有 Mixin / API 用法以 `sable-main` 与 `Simulated-Project-main` 实际源码 + `run/mods` 内 jar 的 javap 签名核验为准，**不猜测**。
+> 实现原则：所有 Mixin / API 用法以 `depends/sable-main` 与 `depends/Simulated-Project-main` 实际源码（均在仓库根 `depends/` 下，已 gitignore）+ `run/mods` 内 jar 的 javap 签名核验为准，**不猜测**。
 
 ---
 
@@ -68,7 +68,7 @@ com.ovo.sablestopnow.server/
 
 ### 5.1 `ghost_real` 的取舍（已与用户确认的实验方向）
 
-`sable-schematic-api-master` 里的 `setIgnoreOnPlace` 是**方块写入批处理**，不是运行期物理 ghost，不可用。
+`depends/sable-schematic-api-master` 里的 `setIgnoreOnPlace` 是**方块写入批处理**，不是运行期物理 ghost，不可用。
 采用方案：对**邻近**（`GHOST_SEARCH_SQ = 160²`）的选中体**两两**创建 `GenericConstraintConfiguration`（锁定轴集合为空）+ `setContactsEnabled(false)` 的瞬态关节 → 选中体之间不碰撞，**地形/玩家不受影响**。关节随物理子步刷新、退出时 `clearGhosts()`。默认关闭，属实验特性。
 
 ## 6. 实施阶段（历史）

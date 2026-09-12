@@ -47,8 +47,6 @@ repo/
 .tmp-jarjar/
 
 ### External reference sources (not part of this repository) ###
-/sable-main/
-/Simulated-Project-main/
-/Veil-1.21/
-/neoforge-Documentation-main/
-/sable-schematic-api-master/
+# 参考源码树统一放在 depends/（sable-main、Simulated-Project-main、Veil-1.21、
+# neoforge-Documentation-main、sable-schematic-api-master 等），整目录不入库。
+/depends/

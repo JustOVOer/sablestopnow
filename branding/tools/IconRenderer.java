@@ -44,6 +44,7 @@ public final class IconRenderer {
     static double haloA = 0.55;
     static int gridStep = 32;
     static double brightness = 1.6;    // 合背景之前先把模型调亮（gamma 提亮：1.0 = 不变，越大越亮且不爆高光）
+    static int outW = 0, outH = 0;     // 输出画布尺寸；0 = 用场景文件里的正方形尺寸
 
     public static void main(String[] args) throws Exception {
         File scene = new File(args[0]);
@@ -56,6 +57,8 @@ public final class IconRenderer {
         if (args.length > 7) haloColor = (int) Long.parseLong(args[7].replace("0x", ""), 16);
         if (args.length > 8) haloA = Double.parseDouble(args[8]);
         if (args.length > 9) brightness = Double.parseDouble(args[9]);
+        outW = args.length > 10 ? Integer.parseInt(args[10]) : 0;
+        outH = args.length > 11 ? Integer.parseInt(args[11]) : 0;
 
         int canvas = 512, padding = 26;
         String[] texNames = new String[0];
@@ -92,6 +95,8 @@ public final class IconRenderer {
 
         Map<String, BufferedImage> cache = new HashMap<>();
         for (String n : texNames) if (n != null) cache.put(n, ImageIO.read(new File(texDir, n + ".png")));
+        if (outW <= 0) outW = canvas;
+        if (outH <= 0) outH = canvas;
 
         // ---- 正交等轴测投影 ----
         Map<Integer, double[]> flipCenter = new HashMap<>();   // gid -> {sumY, count}
@@ -129,34 +134,35 @@ public final class IconRenderer {
             }
         }
 
-        double span = Math.max(maxX - minX, maxY - minY);
-        double scale = (canvas - 2.0 * padding) / span;
+        // 等比缩放到画布内（contain），非正方形画布也适用
+        double scale = Math.min((outW - 2.0 * padding) / (maxX - minX),
+                                (outH - 2.0 * padding) / (maxY - minY));
         double cx = (minX + maxX) / 2.0, cy = (minY + maxY) / 2.0;
-        int W = canvas * SS;
+        int W = outW * SS, H = outH * SS;
         for (Quad q : quads) {
             for (int i = 0; i < 4; i++) {
-                q.sx[i] = ((q.sx[i] - cx) * scale + canvas / 2.0) * SS;
-                q.sy[i] = ((q.sy[i] - cy) * scale + canvas / 2.0) * SS;
+                q.sx[i] = ((q.sx[i] - cx) * scale + outW / 2.0) * SS;
+                q.sy[i] = ((q.sy[i] - cy) * scale + outH / 2.0) * SS;
             }
         }
 
-        double[] col = new double[W * W * 4];       // 直通 alpha，RGB 未预乘
-        double[] zbuf = new double[W * W];
+        double[] col = new double[W * H * 4];       // 直通 alpha，RGB 未预乘
+        double[] zbuf = new double[W * H];
         java.util.Arrays.fill(zbuf, Double.NEGATIVE_INFINITY);
 
         quads.sort(Comparator.comparingDouble(q -> q.depth));
-        for (Quad q : quads) if (q.opaque) raster(q, col, zbuf, W, true);
-        for (Quad q : quads) if (!q.opaque) raster(q, col, zbuf, W, false);
+        for (Quad q : quads) if (q.opaque) raster(q, col, zbuf, W, H, true);
+        for (Quad q : quads) if (!q.opaque) raster(q, col, zbuf, W, H, false);
 
-        BufferedImage img = new BufferedImage(canvas, canvas, BufferedImage.TYPE_INT_RGB);
-        // 1) 先把模型降采样成 canvas 尺寸的 RGBA + 掩码
-        double[] mr = new double[canvas * canvas];
-        double[] mg = new double[canvas * canvas];
-        double[] mb = new double[canvas * canvas];
-        double[] ma = new double[canvas * canvas];
-        boolean[] mask = new boolean[canvas * canvas];
-        for (int y = 0; y < canvas; y++) {
-            for (int x = 0; x < canvas; x++) {
+        BufferedImage img = new BufferedImage(outW, outH, BufferedImage.TYPE_INT_RGB);
+        // 1) 先把模型降采样成输出尺寸的 RGBA + 掩码
+        double[] mr = new double[outW * outH];
+        double[] mg = new double[outW * outH];
+        double[] mb = new double[outW * outH];
+        double[] ma = new double[outW * outH];
+        boolean[] mask = new boolean[outW * outH];
+        for (int y = 0; y < outH; y++) {
+            for (int x = 0; x < outW; x++) {
                 double a = 0, r = 0, g = 0, b = 0;
                 for (int dy = 0; dy < SS; dy++) {
                     for (int dx = 0; dx < SS; dx++) {
@@ -168,18 +174,18 @@ public final class IconRenderer {
                 double n = SS * SS;
                 r /= n; g /= n; b /= n; a /= n;
                 if (a > 1e-6) { r /= a; g /= a; b /= a; }
-                int p = y * canvas + x;
+                int p = y * outW + x;
                 mr[p] = r; mg[p] = g; mb[p] = b; ma[p] = a;
                 mask[p] = a > 0.35;
             }
         }
         // 2) 掩码膨胀 -> 外光边（深色模型压在深灰底上需要一圈亮边才立得住）
-        int halo = Math.max(2, canvas / 150);
-        boolean[] dil = dilate(mask, canvas, halo);
+        int halo = Math.max(2, Math.min(outW, outH) / 150);
+        boolean[] dil = dilate(mask, outW, outH, halo);
         // 3) 合成：底色 / 网格 -> 光边 -> 模型
-        for (int y = 0; y < canvas; y++) {
-            for (int x = 0; x < canvas; x++) {
-                int p = y * canvas + x;
+        for (int y = 0; y < outH; y++) {
+            for (int x = 0; x < outW; x++) {
+                int p = y * outW + x;
                 int base = bg;
                 if (gridStep > 0 && (x % gridStep == 0 || y % gridStep == 0)) base = gridColor;
                 double br = ((base >> 16) & 0xFF) / 255.0;
@@ -198,8 +204,8 @@ public final class IconRenderer {
             }
         }
         ImageIO.write(img, "png", out);
-        System.out.printf("[render] quads=%d canvas=%d ss=%d -> %s%n",
-                quads.size(), canvas, SS, out.getName());
+        System.out.printf("[render] quads=%d canvas=%dx%d ss=%d -> %s%n",
+                quads.size(), outW, outH, SS, out.getName());
     }
 
     /** gamma 提亮：先把模型调亮再合背景，暗部抬得多、高光不溢出。 */
@@ -209,33 +215,33 @@ public final class IconRenderer {
     }
 
     /** 方形结构元的最大值滤波（分离成水平/垂直两趟）。 */
-    static boolean[] dilate(boolean[] src, int n, int r) {
-        boolean[] tmp = new boolean[n * n];
-        for (int y = 0; y < n; y++) {
-            for (int x = 0; x < n; x++) {
+    static boolean[] dilate(boolean[] src, int nw, int nh, int r) {
+        boolean[] tmp = new boolean[nw * nh];
+        for (int y = 0; y < nh; y++) {
+            for (int x = 0; x < nw; x++) {
                 boolean v = false;
                 for (int d = -r; d <= r && !v; d++) {
                     int xx = x + d;
-                    if (xx >= 0 && xx < n && src[y * n + xx]) v = true;
+                    if (xx >= 0 && xx < nw && src[y * nw + xx]) v = true;
                 }
-                tmp[y * n + x] = v;
+                tmp[y * nw + x] = v;
             }
         }
-        boolean[] out = new boolean[n * n];
-        for (int y = 0; y < n; y++) {
-            for (int x = 0; x < n; x++) {
+        boolean[] out = new boolean[nw * nh];
+        for (int y = 0; y < nh; y++) {
+            for (int x = 0; x < nw; x++) {
                 boolean v = false;
                 for (int d = -r; d <= r && !v; d++) {
                     int yy = y + d;
-                    if (yy >= 0 && yy < n && tmp[yy * n + x]) v = true;
+                    if (yy >= 0 && yy < nh && tmp[yy * nw + x]) v = true;
                 }
-                out[y * n + x] = v;
+                out[y * nw + x] = v;
             }
         }
         return out;
     }
 
-    static void raster(Quad q, double[] col, double[] zbuf, int W, boolean writeDepth) {
+    static void raster(Quad q, double[] col, double[] zbuf, int W, int H, boolean writeDepth) {
         double x0 = q.sx[0], y0 = q.sy[0];
         double ex = q.sx[1] - x0, ey = q.sy[1] - y0;      // a 方向
         double fx = q.sx[3] - x0, fy = q.sy[3] - y0;      // b 方向
@@ -247,7 +253,7 @@ public final class IconRenderer {
         int minY = (int) Math.floor(Math.min(Math.min(q.sy[0], q.sy[1]), Math.min(q.sy[2], q.sy[3])));
         int maxY = (int) Math.ceil(Math.max(Math.max(q.sy[0], q.sy[1]), Math.max(q.sy[2], q.sy[3])));
         minX = Math.max(0, minX); minY = Math.max(0, minY);
-        maxX = Math.min(W - 1, maxX); maxY = Math.min(W - 1, maxY);
+        maxX = Math.min(W - 1, maxX); maxY = Math.min(H - 1, maxY);
 
         double u1 = q.uv[0][0], v1 = q.uv[0][1];
         double du = q.uv[1][0] - u1, dv = q.uv[3][1] - v1;

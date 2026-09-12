@@ -29,11 +29,34 @@ public final class StaffEnhanceServerEvents {
     public static void onPlayerLoggedIn(final PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player) {
             StaffEnhanceServer.sendAllData(player);
+            StaffSelectionRegistry.sendAllTo(player);
+            // 彩蛋开关状态补发
+            foundry.veil.api.network.VeilPacketManager.player(player)
+                    .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncSuperliminalPayload(
+                            StaffSuperliminalState.isEnabled(player.getUUID())));
+            // 「拖拽体对拖拽者幽灵化」的状态补发
+            StaffEnhanceServer.sendGhostsTo(player);
+        }
+    }
+
+    /** 玩家掉线：立刻释放他占用的多选结构并广播（功能2），并丢弃他的快照（功能9）。 */
+    @SubscribeEvent
+    public static void onPlayerLoggedOut(final PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player
+                && player.getServer() != null) {
+            final java.util.Set<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>> affected =
+                    StaffSelectionRegistry.releaseAll(player.getUUID());
+            StaffSelectionRegistry.broadcast(player.getServer(), affected);
+        }
+        if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player) {
+            StaffSnapshotRegistry.release(player.getUUID());
         }
     }
 
     @SubscribeEvent
     public static void onServerStopped(final ServerStoppedEvent event) {
         StaffEnhanceServer.clearAll();
+        StaffSelectionRegistry.clearAll();
+        StaffSnapshotRegistry.clearAll();
     }
 }

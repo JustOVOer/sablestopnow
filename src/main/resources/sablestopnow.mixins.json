@@ -10,11 +10,13 @@
     "ServerSubLevelMixin",
     "SubLevelAssemblyHelperMixin",
     "BlockPlaceContextOverrideMixin",
-    "SubLevelHeatMapManagerMixin"
+    "SubLevelHeatMapManagerMixin",
+    "SubLevelEntityCollisionGhostMixin"
   ],
   "client": [
-    "input.KeyboardHandlerStaffEnhanceMixin",
-    "input.MouseHandlerStaffEnhanceMixin"
+    "input.MouseHandlerStaffEnhanceMixin",
+    "client.VanillaChunkedSubLevelRenderScaleMixin",
+    "client.FancySubLevelRenderScaleMixin"
   ],
   "server": []
 }

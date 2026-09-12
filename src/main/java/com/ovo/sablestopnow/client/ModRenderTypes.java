@@ -47,4 +47,29 @@ public class ModRenderTypes {
                     .setDepthTestState(RenderStateShard.NO_DEPTH_TEST)
                     .createCompositeState(false)
     );
+
+    // 「细长长方体盒」边框：用 QUADS 画实心细长方条代替 GL 线（线宽受驱动限制且跨平台不一致）。
+    // 顶点格式沿用 Create/catnip 风格的做法：POSITION_COLOR + 原版 position_color 着色器。
+    public static final RenderType BOXES = boxType("sablestopnow_boxes", false);
+    public static final RenderType BOXES_NO_DEPTH = boxType("sablestopnow_boxes_no_depth", true);
+
+    private static RenderType boxType(final String name, final boolean noDepth) {
+        return RenderType.create(
+                name,
+                DefaultVertexFormat.POSITION_COLOR,
+                VertexFormat.Mode.QUADS,
+                1536,
+                false,
+                true,
+                RenderType.CompositeState.builder()
+                        .setShaderState(RenderStateShard.POSITION_COLOR_SHADER)
+                        .setLayeringState(RenderStateShard.VIEW_OFFSET_Z_LAYERING)
+                        .setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
+                        .setOutputState(RenderStateShard.ITEM_ENTITY_TARGET)
+                        .setWriteMaskState(RenderStateShard.COLOR_WRITE)
+                        .setCullState(RenderStateShard.NO_CULL)
+                        .setDepthTestState(noDepth ? RenderStateShard.NO_DEPTH_TEST : RenderStateShard.LEQUAL_DEPTH_TEST)
+                        .createCompositeState(false)
+        );
+    }
 }

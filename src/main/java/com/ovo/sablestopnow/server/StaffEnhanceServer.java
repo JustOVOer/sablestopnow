@@ -158,6 +158,8 @@ public final class StaffEnhanceServer {
         ACTIVE.clear();
         clearGhosts();
         STEPPING.clear();
+        com.ovo.sablestopnow.PhysicsGhosts.clear();
+        lastGhosts = Map.of();
     }
 
     private static void stopGroupDragInternal(final UUID player) {
@@ -417,10 +419,14 @@ public final class StaffEnhanceServer {
                 continue;
             }
             final java.util.Set<UUID> dragged = currentlyDragged(level);
+            // ⚠ 正在被缩放的结构必须一并豁免：teleport 会造成巨大的“表观速度”，
+            // 否则超速锁会把它们钉死在原地（表现为“组缩放拉开后被拉回/停住”）。
+            final java.util.Set<UUID> scaling = StaffScaleData.activeOrScaledIds(level);
             final dev.simulated_team.simulated.content.physics_staff.PhysicsStaffServerHandler locks =
                     dev.simulated_team.simulated.content.physics_staff.PhysicsStaffServerHandler.get(level);
             for (final ServerSubLevel sub : container.getAllSubLevels()) {
-                if (sub == null || sub.isRemoved() || dragged.contains(sub.getUniqueId())) {
+                if (sub == null || sub.isRemoved() || dragged.contains(sub.getUniqueId())
+                        || scaling.contains(sub.getUniqueId())) {
                     continue;
                 }
                 final UUID subUuid = sub.getUniqueId();
@@ -495,6 +501,90 @@ public final class StaffEnhanceServer {
     }
 
     /**
+     * 「物理结构 → 正在拖拽它的玩家」（用于把拖拽体对拖拽者幽灵化）。
+     * 覆盖本模组整组控制 + 航空学单体拖拽（后者的 sessions map 的 key 就是玩家 UUID）。
+     */
+    private static Map<UUID, UUID> draggedMap(final ServerLevel level) {
+        final Map<UUID, UUID> out = new HashMap<>();
+        for (final GroupDrag drag : ACTIVE.values()) {
+            if (drag.level == level) {
+                for (final Member m : drag.members) {
+                    out.put(m.sub.getUniqueId(), drag.player);
+                }
+            }
+        }
+        try {
+            final Object handler = dev.simulated_team.simulated.content.physics_staff.PhysicsStaffServerHandler.get(level);
+            final Object sessions = findDraggingSessions(handler);
+            if (sessions instanceof final Map<?, ?> map) {
+                for (final Map.Entry<?, ?> entry : map.entrySet()) {
+                    if (!(entry.getKey() instanceof final UUID playerId) || entry.getValue() == null) {
+                        continue;
+                    }
+                    final Object session = entry.getValue();
+                    for (final java.lang.reflect.Field f : session.getClass().getDeclaredFields()) {
+                        if (ServerSubLevel.class.isAssignableFrom(f.getType())) {
+                            f.setAccessible(true);
+                            if (f.get(session) instanceof final ServerSubLevel s) {
+                                out.put(s.getUniqueId(), playerId);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (final Exception ignored) {
+            // 反射失败时退化为只覆盖本模组整组拖拽
+        }
+        return out;
+    }
+
+    /** 上次广播出去的幽灵集合（只有变化时才发包）。 */
+    private static Map<UUID, UUID> lastGhosts = Map.of();
+
+    /**
+     * 每 tick 权威计算「拖拽体 → 拖拽者」，变化时广播给所有客户端。
+     * 玩家的真实碰撞在客户端算，所以客户端必须持有同一份状态（见 PhysicsGhosts / SubLevelEntityCollisionGhostMixin）。
+     */
+    private static void ghostSyncTick(final MinecraftServer server) {
+        final Map<UUID, UUID> ghosts = new HashMap<>();
+        final java.util.Set<UUID> globalGhosts = new java.util.LinkedHashSet<>();
+        for (final ServerLevel level : server.getAllLevels()) {
+            if (SablestopNowConfig.isDraggedNoPlayerCollision()) {
+                ghosts.putAll(draggedMap(level));
+            }
+            // 缩放中的结构：物理碰撞体不随缩放变化，避免把玩家"吸住" → 对所有玩家幽灵化
+            if (SablestopNowConfig.isScaledNoPlayerCollision()) {
+                globalGhosts.addAll(StaffScaleData.get(level).allScales().keySet());
+            }
+        }
+        if (ghosts.equals(lastGhosts) && globalGhosts.equals(lastGlobalGhosts)) {
+            return;
+        }
+        lastGhosts = ghosts;
+        lastGlobalGhosts = globalGhosts;
+        com.ovo.sablestopnow.PhysicsGhosts.set(ghosts);
+        com.ovo.sablestopnow.PhysicsGhosts.setGlobal(globalGhosts);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[staff] ghost set updated: dragged={}, scaled={}",
+                ghosts.size(), globalGhosts.size());
+        final List<UUID> subs = new ArrayList<>(ghosts.keySet());
+        final List<UUID> players = new ArrayList<>(ghosts.values());
+        foundry.veil.api.network.VeilPacketManager.all(server)
+                .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncActiveGhostsPayload(
+                        subs, players, new ArrayList<>(globalGhosts)));
+    }
+
+    private static java.util.Set<UUID> lastGlobalGhosts = java.util.Set.of();
+
+    /** 玩家登录时补发当前幽灵集合。 */
+    public static void sendGhostsTo(final ServerPlayer player) {
+        final List<UUID> subs = new ArrayList<>(lastGhosts.keySet());
+        final List<UUID> players = new ArrayList<>(lastGhosts.values());
+        foundry.veil.api.network.VeilPacketManager.player(player)
+                .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncActiveGhostsPayload(
+                        subs, players, new ArrayList<>(lastGlobalGhosts)));
+    }
+
+    /**
      * 从 PhysicsStaffServerHandler 反射取“拖拽会话”map（其内部类值含 ServerSubLevel 字段）。
      * 优先按字段名 draggingSessions，其次用“值对象含 ServerSubLevel 字段”的 Map 兜底，
      * 避免误选到只有 UUID/handle 的 locks map。
@@ -543,6 +633,14 @@ public final class StaffEnhanceServer {
         if (server.getTickCount() % 10 == 0) {
             ghostTick(server);
         }
+        // 缩放值回灌（Sable 自己的序列化不写 scale，重载后会丢）
+        if (server.getTickCount() % 20 == 0) {
+            for (final ServerLevel level : server.getAllLevels()) {
+                StaffScaleData.reapply(level);
+            }
+        }
+        // 拖拽体对拖拽者幽灵化：每 tick 权威计算并在变化时广播
+        ghostSyncTick(server);
     }
 
     // ============ 无碰撞标记（视觉 + 状态记录；真实只对其它 Sable 体，见上方 ghostTick） ============
@@ -622,6 +720,56 @@ public final class StaffEnhanceServer {
             foundry.veil.api.network.VeilPacketManager.player(player)
                     .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncLocksPayload(level.dimension(),
                             lockedSnapshot(level)));
+            broadcastOwnershipTo(player, level);
+            // 缩放表补发（Sable 的位姿同步不含 scale）
+            foundry.veil.api.network.VeilPacketManager.player(player)
+                    .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncScalesPayload(
+                            level.dimension().location(), StaffScaleData.scaleEntries(level)));
         }
+    }
+
+    // ============ 所有权（功能3） ============
+
+    /** 把某维度的所有权表广播给全服（客户端用于 HUD 显示 + 本地判断）。 */
+    public static void broadcastOwnership(final ServerLevel level) {
+        final var entries = ownershipEntries(level);
+        foundry.veil.api.network.VeilPacketManager.all(level.getServer())
+                .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncOwnershipPayload(
+                        level.dimension().location(), entries));
+    }
+
+    private static void broadcastOwnershipTo(final ServerPlayer player, final ServerLevel level) {
+        foundry.veil.api.network.VeilPacketManager.player(player)
+                .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncOwnershipPayload(
+                        level.dimension().location(), ownershipEntries(level)));
+    }
+
+    private static java.util.List<com.ovo.sablestopnow.network.StaffEnhanceNetworking.OwnershipEntry> ownershipEntries(final ServerLevel level) {
+        final StaffOwnershipData data = StaffOwnershipData.get(level);
+        final java.util.List<com.ovo.sablestopnow.network.StaffEnhanceNetworking.OwnershipEntry> out = new java.util.ArrayList<>();
+        for (final java.util.Map.Entry<UUID, UUID> entry : data.allOwners().entrySet()) {
+            out.add(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.OwnershipEntry(
+                    entry.getKey(), entry.getValue(), data.ownerNameOf(entry.getKey())));
+        }
+        return out;
+    }
+
+    // ============ 快照（功能9） ============
+
+    /** 把“该玩家有哪些结构存了快照”同步给他自己（用于图标提示）。 */
+    public static void sendSnapshotState(final net.minecraft.world.entity.player.Player player) {
+        if (!(player instanceof final ServerPlayer serverPlayer)) {
+            return;
+        }
+        final var snapshot = StaffSnapshotRegistry.get(serverPlayer.getUUID());
+        if (snapshot == null) {
+            foundry.veil.api.network.VeilPacketManager.player(serverPlayer)
+                    .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncSnapshotPayload(
+                            serverPlayer.level().dimension().location(), java.util.List.of()));
+            return;
+        }
+        foundry.veil.api.network.VeilPacketManager.player(serverPlayer)
+                .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncSnapshotPayload(
+                        snapshot.dimension().location(), new java.util.ArrayList<>(snapshot.data().keySet())));
     }
 }

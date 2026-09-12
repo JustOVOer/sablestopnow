@@ -48,9 +48,112 @@ public class ForceCommand {
                                 .then(Commands.argument("steps", IntegerArgumentType.integer(1))
                                         .executes(ForceCommand::stepTicks))
                         )
+                        .then(Commands.literal("owner")
+                                .requires(src -> src.hasPermission(2))
+                                .then(Commands.literal("list")
+                                        .executes(ForceCommand::listOwners))
+                                .then(Commands.literal("clear")
+                                        .then(Commands.argument("player", com.mojang.brigadier.arguments.StringArgumentType.word())
+                                                .executes(ForceCommand::clearOwner))
+                                        .then(Commands.literal("all")
+                                                .executes(ForceCommand::clearAllOwners)))
+                        )
+                        .then(Commands.literal("Superliminal")
+                                .executes(ForceCommand::toggleSuperliminal))
+                        .then(Commands.literal("superliminal")
+                                .executes(ForceCommand::toggleSuperliminal))
 
         );
 
+    }
+
+    /**
+     * /sablesn Superliminal：切换彩蛋（超阈限空间：拖拽时保持物体屏幕大小不变并放到视线所指平面）。
+     *
+     * <p>⚠ <b>未完成（WIP）</b>：目前只打通了「抓起 → BeginScale → 绝对放置」这条链路，
+     * 屏幕尺寸恒定、落点贴合与松手放下的手感都尚未验收，暂不作为对外功能宣传。</p>
+     */
+    private static int toggleSuperliminal(final CommandContext<CommandSourceStack> ctx) {
+        final CommandSourceStack source = ctx.getSource();
+        if (!(source.getEntity() instanceof final net.minecraft.server.level.ServerPlayer player)) {
+            source.sendFailure(Component.translatable("sablestopnow.command.superliminal.players_only"));
+            return 0;
+        }
+        final boolean on = com.ovo.sablestopnow.server.StaffSuperliminalState.toggle(player.getUUID());
+        foundry.veil.api.network.VeilPacketManager.player(player)
+                .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncSuperliminalPayload(on));
+        player.displayClientMessage(Component.translatable(on
+                ? "sablestopnow.command.superliminal.on"
+                : "sablestopnow.command.superliminal.off"), false);
+        return on ? 1 : 0;
+    }
+
+    /** /sablesn owner list：列出当前维度所有被设置所有权的物理结构。 */
+    private static int listOwners(final CommandContext<CommandSourceStack> ctx) {
+        final CommandSourceStack source = ctx.getSource();
+        if (!(source.getLevel() instanceof final ServerLevel level)) {
+            source.sendFailure(Component.translatable("sablestopnow.command.owner.no_level"));
+            return 0;
+        }
+        final com.ovo.sablestopnow.server.StaffOwnershipData data =
+                com.ovo.sablestopnow.server.StaffOwnershipData.get(level);
+        if (data.allOwners().isEmpty()) {
+            source.sendSuccess(() -> Component.translatable("sablestopnow.command.owner.empty"), false);
+            return 0;
+        }
+        int count = 0;
+        for (final java.util.Map.Entry<java.util.UUID, java.util.UUID> entry : data.allOwners().entrySet()) {
+            final String subName;
+            final var sub = dev.ryanhcode.sable.api.sublevel.SubLevelContainer.getContainer(level).getSubLevel(entry.getKey());
+            subName = sub != null && sub.getName() != null ? sub.getName() : entry.getKey().toString();
+            final String ownerName = data.ownerNameOf(entry.getKey());
+            source.sendSuccess(() -> Component.translatable("sablestopnow.command.owner.entry", subName, ownerName), false);
+            count++;
+        }
+        final int total = count;
+        source.sendSuccess(() -> Component.translatable("sablestopnow.command.owner.count", total), false);
+        return total;
+    }
+
+    /** /sablesn owner clear <player|all>：强制清除某玩家（或全部）的所有权。 */
+    private static int clearOwner(final CommandContext<CommandSourceStack> ctx) {
+        final CommandSourceStack source = ctx.getSource();
+        if (!(source.getLevel() instanceof final ServerLevel level)) {
+            source.sendFailure(Component.translatable("sablestopnow.command.owner.no_level"));
+            return 0;
+        }
+        final String name = com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "player");
+        final com.ovo.sablestopnow.server.StaffOwnershipData data =
+                com.ovo.sablestopnow.server.StaffOwnershipData.get(level);
+        int cleared = 0;
+        for (final java.util.Map.Entry<java.util.UUID, java.util.UUID> entry : new java.util.ArrayList<>(data.allOwners().entrySet())) {
+            if (name.equals(data.ownerNameOf(entry.getKey()))) {
+                data.setOwner(entry.getKey(), null);
+                cleared++;
+            }
+        }
+        StaffEnhanceServer.broadcastOwnership(level);
+        final int total = cleared;
+        source.sendSuccess(() -> Component.translatable("sablestopnow.command.owner.cleared", total, name), true);
+        return total;
+    }
+
+    /** /sablesn owner clear all。 */
+    private static int clearAllOwners(final CommandContext<CommandSourceStack> ctx) {
+        final CommandSourceStack source = ctx.getSource();
+        if (!(source.getLevel() instanceof final ServerLevel level)) {
+            source.sendFailure(Component.translatable("sablestopnow.command.owner.no_level"));
+            return 0;
+        }
+        final com.ovo.sablestopnow.server.StaffOwnershipData data =
+                com.ovo.sablestopnow.server.StaffOwnershipData.get(level);
+        final int before = data.allOwners().size();
+        for (final java.util.UUID id : new java.util.ArrayList<>(data.allOwners().keySet())) {
+            data.setOwner(id, null);
+        }
+        StaffEnhanceServer.broadcastOwnership(level);
+        source.sendSuccess(() -> Component.translatable("sablestopnow.command.owner.cleared_all", before), true);
+        return before;
     }
 
     /** /sablesn tick <steps>：物理暂停时步进指定数量的物理 tick（每 tick 含 Sable 的物理子步）。 */

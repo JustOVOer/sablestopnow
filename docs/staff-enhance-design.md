@@ -1,7 +1,7 @@
 # 物理手杖增强（Staff Enhance）—— 设计决策记录
 
-> 状态：**已实现并通过实机验证（v1.0.4，2026-09）**。本文保留需求与交互决策的来龙去脉，并在 §7/§8 记录最终实现与关键事实。
-> 目标模组：SableStopNow（NeoForge 1.21.1 / NeoForge 21.1.248，Sable 2.0.4，Simulated/Aeronautics 1.3.1）。
+> 状态：**v1.1.0（2026-09）**。多人选择 / 所有权 / 区域选择 / 快照 / 缩放 / 幽灵化 / 设置界面均已实机验证；§8.14 的彩蛋**未完成**（仅开发文档记录，不对外宣传）。本文保留需求与交互决策的来龙去脉，并在 §7/§8 记录最终实现与关键事实。
+> 目标模组：Aeronautics: Tweaks & Toolkit（mod id `sablestopnow`，NeoForge 1.21.1 / 21.1.248，Sable 2.0.4，Simulated/Aeronautics 1.3.1）。
 > 实现原则：所有 Mixin / API 用法以 `depends/sable-main` 与 `depends/Simulated-Project-main` 实际源码（均在仓库根 `depends/` 下，已 gitignore）+ `run/mods` 内 jar 的 javap 签名核验为准，**不猜测**。
 
 ---
@@ -121,6 +121,66 @@ Sable 的物理体是**位姿渲染**（plot 占据的是组装时的基准网�
 
 ### 8.5 目录/包一致性
 `ModRenderTypes` / `SubLevelOutlineRenderer` 早期“声明 `package …client` 却放在根目录”，现已**物理移入 `client/` 子目录**（`docs/功能梳理与扩展开发指南.md` §2 的旧警告已过时）。
+
+### 8.6 键位：Minecraft KeyMapping（v1.1.0 起）
+- 全部键位迁到 `client/StaffKeyMappings`（`@EventBusSubscriber(bus = Bus.MOD)` 里注册），旧的 `KeyboardHandlerStaffEnhanceMixin` 已删除；鼠标仍靠 `MouseHandlerStaffEnhanceMixin` 在 HEAD 吞掉（多选/区域选择必须真正 cancel 航空学的手杖交互）。
+- ⚠ **原版在 GLFW REPEAT 时也会调 `KeyMapping.click()`**（1.21.1 `KeyboardHandler.keyPress` 字节码：`action != 0` 分支直接 `set(true)+click`）。因此切换类按键**不能**裸用 `consumeClick()` 的 while 循环，必须自己取上升沿：见 `StaffEnhanceClientHandler.justPressed()`（记录上一 tick `isDown()`，只在上升沿或同 tick 内按下并抬起时算一次）。
+- ⚠ 多选键默认左 Ctrl 与原版「疾跑」同键，`KeyMapping.set` 会把同键的所有映射一起按下 → 每 tick 显式 `keySprint.setDown(false)` 压掉（`suppressVanillaKeyClash()`）。
+- GUI 打开时原版不会更新 KeyMapping 状态，天然满足“有 GUI 时不响应”。
+
+### 8.7 自建 RenderType 共用 shared buffer（渲染崩溃根因）
+1.21.1 `MultiBufferSource.BufferSource`：**不在 `fixedBuffers` 里的自建 RenderType** 全部共用同一个 `sharedBuffer`，`getBuffer(另一个自建类型)` 会先把 `lastSharedType` 的 `BufferBuilder` `endBatch` 掉。
+→ **同一段绘制里不能同时持有两种自建类型的 VertexConsumer**，否则先取的那个后续写顶点直接 `IllegalStateException: Not building!`。
+现固定做法：**两段式绘制** —— 先画完所有盒式边框（`BOXES_NO_DEPTH`）并 `endBatch`，再取 `LINES_NO_DEPTH` 画图标/坐标轴/角点十字。`SubLevelOutlineRenderer`（盒式轮廓 + 坐标轴）与 `StaffEnhanceRenderer`（轮廓 + 图标）都已按此拆分。
+
+### 8.8 世界坐标渲染必须平移 −相机位置
+`StaffEnhanceRenderer` 的 Z 区域选择预览盒用世界坐标调用 `BoxOutlineRenderer.addWireBox`，顶点写的是绝对方块坐标，因此必须先 `poseStack.translate(-cameraPos)`；方块描边则是逐方块算“相机相对坐标”，两者不可混。
+
+### 8.9 「仅描边边缘」的共面接缝判定
+旧实现要求「这条棱两侧的两个邻居都存在且都暴露」才跳过 → 平坦表面最外圈方块的那条**内部接缝**因为一侧是空气而不再被跳过，表现成「边缘 + 向内一层的棱」同时描边。
+正解：一条棱只可能跨过一条轴（垂直于面法线的两条轴里、中点带 ±half 偏移的那条），**只看跨过这条棱的那唯一的邻居**（同物理体 + 其对面对应面也暴露 → 跳过）；同一方块内 12 条棱再用位掩码去重（避免相邻暴露面重复画同一条棱）。
+
+### 8.10 多人选择 / 所有权 / 快照（v1.1.0）
+- **独占登记表** `server/StaffSelectionRegistry`：运行期内存（不落盘），`claim` 时同时校验「他人已选中」与「他人所有」；释放时机＝移出队列/清空/退出多选/掉线（退出多选只释放占用，**本地队列保留**供整组拖拽，因此 S2C 快照**不能**用来清空本地队列）。
+- **颜色**：`StaffColors.PALETTE`（12 色），服务端按玩家分配索引并随选择快照下发；客户端只渲染同维度 + 64 格内的他人选择。
+- **所有权** `server/StaffOwnershipData extends SavedData`：落盘；`/sablesn owner list|clear <玩家>|clear all` 为 OP 后门。
+- **快照** `server/StaffSnapshotRegistry`：按玩家、运行期内存；内容来自 `SubLevelSerializer.toData(sub, List.of())`（方块 + 位姿 + 速度 + 名称）。
+  回退 = `removeSubLevel(sub, REMOVED)`（不会把方块掉到地上）→ `SubLevelSerializer.fullyLoad(level, data)`（同 UUID 重建，plot 已被腾出）→ `pipeline.resetVelocity` + 按快照原值 `addLinearAndAngularVelocity`（绕开 `VELOCITY_RETAINED_ON_LOAD` 衰减）。
+  ⚠ 回退前先 `StaffEnhanceServer.stopGroupDrag(level, player)`，否则马达会驱动到已被替换的物理体。
+
+### 8.11 自定义设置界面（v1.1.0）
+- `client/gui/`：`ModConfigScreen`（大类页，GUI1）、`ModConfigCategoryScreen`（详情页，GUI2）、`ConfigOption`（行模型，直接绑定 `ModConfigSpec` 值）、`ModConfigCategory`（大类→选项映射）、`Ease`（指数收敛缓动 + Create 风蓝色板）。
+- 入口：`Ctrl+O`（`StaffKeyMappings.OPEN_CONFIG`，`KeyModifier.CONTROL` + O）与 NeoForge 模组列表「配置」（`client/ClientConfigScreens` 里注册 `IConfigScreenFactory`，**只在 `FMLEnvironment.dist.isClient()` 分支调用**，避免服务端加载客户端类）。
+- 动画：指数收敛（`1 - e^(-speed·dt)`）天然“由快变慢”；离场先反向播完再 `setScreen`（用 `next` 字段延迟切换）。
+- ⚠ `rowAt()` 返回可空 `Integer`，赋给 `int` 字段会因自动拆箱 NPE（已修）。
+- ⚠ 界面改动直接 `SablestopNow.saveConfig()` 写回 `sablestopnow-common.toml`。
+- Create 的蓝色按钮贴图来自 Catnip，而 Catnip 不是本项目的编译依赖（`lib/create-*.jar` 里不含 `net/createmod/catnip`），因此按钮是用色块 + 高光边**手绘**的同风格外观。
+
+### 8.12 缩放（X）—— 四处必须自己补的洞（v1.1.0）
+Sable 的 `Pose3d` 有 `scale` 字段，但**除了它自己的方块描边，整条链路都不认它**：
+1. **同步**：`SableBufferUtils.write(ByteBuf, Pose3d)` 只写 position/orientation/rotationPoint，**不写 scale** → 客户端拿到的 `renderPose().scale()` 永远是 1。必须自建 `SyncScalesPayload`（`Set<ScaleEntry>`）并在客户端 `applySyncedScales()` 里覆盖，且**要放在「没持杖就 early-return」之前**，否则非持杖玩家看不到缩放。
+2. **网络上的物理读回**：`SubLevelPhysicsSystem.readPose` 只读 position+orientation，**不读 scale** → 服务端每 tick 用物理结果覆盖位姿时会把 scale 抹掉；缩放数据因此独立存在 `server/StaffScaleData`（SavedData）里，并由 `reapply` 每 tick 写回。
+3. **渲染**：Sable 两条区块渲染路径都只做 translate+rotate（`VanillaChunkedSubLevelRenderData.renderChunkedSubLevel`、`FancySubLevelRenderDispatcher.renderSectionLayer`），而它自己的方块描边 `LevelRendererMixin` **是**乘 scale 的 → 不补就会「碰撞盒/描边缩放、方块不缩放」。补法是改 `Matrix4f.mul` 的入参矩阵：`transform = T((1−s)·(pos−cam)) · R · S`。
+   - 推导依据：原生顶点路径的 translation 列恒为 0，相机偏移被折进每 section 的 `CHUNK_OFFSET` uniform（`sectionPos − origin + R⁻¹·(renderPos − cam)`）；因此把「先缩放再平移」改写成上式的纯矩阵组合即可，且 `(1−s)` 那一项**不能**改 translation 列（那是恒 0 的）。
+4. **超速自动锁定**：马达瞬移成员的线速度远超阈值 → 被自家 `speedScan` 锁定，表现为「松开滚轮就弹回/卡住」。修法：`StaffScaleData.activeOrScaledIds` 里的物理体在速度扫描中豁免，且缩放会话开始时把已锁定的成员临时解锁、结束时恢复；会话中若被锁定则直接解锁。
+
+其它：`@ModifyArg` 的处理器参数类型必须写成目标方法**声明的**类型（`Matrix4fc`），写 `Object` 会 `InvalidInjectionException: Could not find arg matching type Ljava/lang/Object;`，表现却是「Network Protocol Error」/掉线，极易误判成网络问题。
+
+### 8.13 幽灵化（拖拽体 / 缩放体不与玩家碰撞，v1.1.0）
+- **唯一的漏斗**：实体↔物理体碰撞只有 `SubLevelEntityCollision.collide(...)`，由 Sable 的 `Entity.move` `@Redirect` 调一次；该类里 `getAllIntersecting(Level, BoundingBox3dc)` **只有一处调用**（`collide` 内，字节码偏移 306）。
+- ⚠ **不能**全局过滤 `getAllIntersecting`、不能改 `getTrackingSubLevel`、更不能跳过 `ServerPlayer` 的「假地面」分支（会触发 moved-too-quickly 回弹 / “floating too long” 踢出）。
+- ⚠ `ServerPlayer` 分支会提前返回一个假地面 → **玩家的物理体碰撞是在客户端算的** ⇒ Mixin 必须在 **common** 侧，且幽灵状态要**同步给客户端**（`SyncActiveGhostsPayload(subs, draggers, globalIds)`）。
+- `PhysicsGhosts`（common）持有 `Map<UUID dragger, ? extends Collection<UUID>>` 与 `Set<UUID> globalGhosts`，`ignores(sub, entity)` 判断；Mixin 用 `@ModifyExpressionValue` 包住那次 `getAllIntersecting` 的返回值，**两趟**扫描且仅在真的剔除过幽灵时才新建集合。
+- 残留：只关碰撞，搭车（tracking）仍在。
+
+### 8.14 🚧 未完成的彩蛋（不在对外说明范围内）
+> 该彩蛋**尚未完成**：只打通了「右键抓起 → BeginScale → 绝对放置」的链路，屏幕尺寸恒定、落点贴合与松手放下均未验收。
+> 因此实现细节仅保留在此处，**不出现在 README / DESCRIPTION / CHANGELOG** 等对外文档中；游戏内开关提示也已标注「未完成·实验性」。
+
+- 目标：抓取期间**屏幕上视觉大小不变**（强制透视）→ 看起来小就放得远，看起来大就放得近。
+- 实现：右键抓取时以「当前视觉大小」反算基准距离 `superliminalBaseDistance`，之后每次移动把结构放到**视线命中的平面点**上（`superliminalTargetPoint` / `groupHalfExtent` 用于把结构“贴”在平面上而不是嵌进去），受 `superliminal_max_distance` 限制。
+- 与普通整组拖拽共用 `sendGroupDragTick`，只是位置分支换成绝对放置（`SuperliminalPlacePayload`），手感是「直接粘在准星上」而非弹簧拖拽。
+- **多选模式内外都能用**：非多选时右键会先 `pickAtDepth` 命中体 → `selected.add` → `startGroupDrag`，并**吞掉该次点击**，避免航空学同时启动它自己的拖拽。
 
 ## 9. 待办 / 可迭代点
 

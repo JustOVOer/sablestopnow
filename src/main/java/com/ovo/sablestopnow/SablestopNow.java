@@ -35,6 +35,10 @@ public class SablestopNow {
         );
         LOGGER.info("Sable Force Limiter initialized.");
         StaffEnhanceNetworking.init();
+        // 模组列表里的“配置”按钮 → 本模组的自定义设置界面（仅客户端）
+        if (net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) {
+            com.ovo.sablestopnow.client.ClientConfigScreens.register(container);
+        }
         // 整组拖拽：每物理子步驱动（跨平台 API，同 Simulated.init() 用法）
         SableEventPlatform.INSTANCE.onPhysicsTick(StaffEnhanceServer::physicsTick);
         NeoForge.EVENT_BUS.addListener(this::registerCommands);

@@ -45,6 +45,8 @@ repo/
 .dsh-tmp/
 .dshwolf/
 .tmp-jarjar/
+# dsh-openwolf 自动生成的代码地图（每次扫描都会变，不入库）
+AGENTS.md
 
 ### External reference sources (not part of this repository) ###
 # 参考源码树统一放在 depends/（sable-main、Simulated-Project-main、Veil-1.21、

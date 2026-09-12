@@ -36,9 +36,15 @@ public final class StaffEnhanceHud {
             return;
         }
         final boolean multi = StaffEnhanceClientHandler.isMultiSelect();
-        final int boxStep = StaffEnhanceClientHandler.getBoxStep();
+        final int regionStep = StaffEnhanceClientHandler.getRegionStep();
         final boolean armed = !multi && !StaffEnhanceClientHandler.getSelected().isEmpty();
-        if (!multi && boxStep == 0 && !armed) {
+        final boolean dragging = StaffEnhanceClientHandler.isGroupDragging();
+        final boolean hovering = StaffEnhanceClientHandler.getHoverBody() != null;
+        final boolean viewLock = StaffEnhanceClientHandler.isViewLockActive();
+        final boolean scaling = StaffEnhanceClientHandler.isScaling();
+        // 只要手杖“有事情正在做”就显示（穿透层数、悬停目标、选中队列、区域选择、整组控制、视角锁定、缩放）
+        if (!multi && regionStep == 0 && !armed && !dragging && !hovering && !viewLock && !scaling
+                && StaffEnhanceClientHandler.getPenetration() == 0) {
             return;
         }
 
@@ -52,29 +58,90 @@ public final class StaffEnhanceHud {
         if (multi) {
             lines.add(Component.translatable("sablestopnow.staff.hud.multiselect"));
             colors.add(ChatFormatting.AQUA.getColor());
+        } else if (regionStep != 0) {
+            lines.add(Component.translatable(regionStep == 1
+                    ? "sablestopnow.staff.hud.region_first"
+                    : "sablestopnow.staff.hud.region_second"));
+            colors.add(ChatFormatting.GREEN.getColor());
+        } else if (dragging) {
+            lines.add(Component.translatable("sablestopnow.staff.hud.controlling"));
+            colors.add(ChatFormatting.LIGHT_PURPLE.getColor());
         } else if (armed) {
             lines.add(Component.translatable("sablestopnow.staff.hud.armed"));
             colors.add(ChatFormatting.GOLD.getColor());
         }
 
-        lines.add(Component.translatable("sablestopnow.staff.hud.penetration", StaffEnhanceClientHandler.getPenetration()));
-        colors.add(ChatFormatting.GOLD.getColor());
+        if (multi || StaffEnhanceClientHandler.getPenetration() > 0) {
+            lines.add(Component.translatable("sablestopnow.staff.hud.penetration", StaffEnhanceClientHandler.getPenetration()));
+            colors.add(ChatFormatting.GOLD.getColor());
+        }
 
-        lines.add(Component.translatable("sablestopnow.staff.hud.selected", StaffEnhanceClientHandler.getSelected().size()));
-        colors.add(ChatFormatting.GOLD.getColor());
+        if (!StaffEnhanceClientHandler.getSelected().isEmpty()) {
+            lines.add(Component.translatable("sablestopnow.staff.hud.selected", StaffEnhanceClientHandler.getSelected().size()));
+            colors.add(ChatFormatting.GOLD.getColor());
+        }
 
-        if (boxStep != 0) {
-            final var first = StaffEnhanceClientHandler.getBoxFirst();
+        if (hovering) {
+            final String name = StaffEnhanceClientHandler.getHoverName();
+            lines.add(name != null
+                    ? Component.translatable("sablestopnow.staff.hud.aim_name", name)
+                    : Component.translatable("sablestopnow.staff.hud.aim"));
+            colors.add(ChatFormatting.WHITE.getColor());
+            final var hoverId = StaffEnhanceClientHandler.getHoverBody();
+            // 瞄准的物理结构如果被缩放过，直接显示它的倍率（原来的几倍）
+            if (hoverId != null) {
+                final float aimedScale = StaffEnhanceClientHandler.scaleOf(hoverId);
+                if (Math.abs(aimedScale - 1.0f) > 1.0e-3f) {
+                    lines.add(Component.translatable("sablestopnow.staff.hud.aim_scale",
+                            String.format("%.2f", aimedScale)));
+                    colors.add(ChatFormatting.AQUA.getColor());
+                }
+            }
+            // 视线落在物理结构上时显示所有者（功能3）
+            final String owner = hoverId != null ? StaffEnhanceClientHandler.ownerNameOf(hoverId) : null;
+            if (owner != null) {
+                lines.add(Component.translatable("sablestopnow.staff.hud.owner", owner));
+                colors.add(ChatFormatting.LIGHT_PURPLE.getColor());
+            }
+        }
+
+        if (scaling) {
+            lines.add(Component.translatable("sablestopnow.staff.hud.scale",
+                    String.format("%.2f", StaffEnhanceClientHandler.getScaleFactor())));
+            colors.add(ChatFormatting.AQUA.getColor());
+        } else if (scaling) {
+            // 缩放操作中由下面的“缩放：×N”行显示，这里不重复
+        }
+
+        if (viewLock) {
+            final String locked = StaffEnhanceClientHandler.getViewLockName();
+            lines.add(locked != null
+                    ? Component.translatable("sablestopnow.staff.hud.view_lock_name", locked)
+                    : Component.translatable("sablestopnow.staff.hud.view_lock"));
+            colors.add(ChatFormatting.AQUA.getColor());
+        }
+
+        if (regionStep != 0) {
+            lines.add(Component.translatable("sablestopnow.staff.hud.region_distance",
+                    String.format("%.1f", StaffEnhanceClientHandler.getRegionDistance())));
+            colors.add(ChatFormatting.GREEN.getColor());
+            final var first = StaffEnhanceClientHandler.getRegionFirst();
             if (first != null) {
                 lines.add(Component.translatable("sablestopnow.staff.hud.box_a", first.getX(), first.getY(), first.getZ()));
                 colors.add(ChatFormatting.GREEN.getColor());
             }
-            final var second = StaffEnhanceClientHandler.getBoxStep() == 2
-                    ? StaffEnhanceClientHandler.getBoxSecond()
-                    : StaffEnhanceClientHandler.getBoxPreview();
-            if (second != null) {
-                lines.add(Component.translatable("sablestopnow.staff.hud.box_b", second.getX(), second.getY(), second.getZ()));
+            final var cursor = StaffEnhanceClientHandler.getRegionCursor();
+            if (cursor != null) {
+                lines.add(Component.translatable(regionStep == 1
+                                ? "sablestopnow.staff.hud.region_cursor"
+                                : "sablestopnow.staff.hud.box_b",
+                        cursor.getX(), cursor.getY(), cursor.getZ()));
                 colors.add(ChatFormatting.GREEN.getColor());
+            }
+            if (regionStep == 2) {
+                lines.add(Component.translatable("sablestopnow.staff.hud.region_candidates",
+                        StaffEnhanceClientHandler.getRegionCandidates().size()));
+                colors.add(ChatFormatting.YELLOW.getColor());
             }
         }
 

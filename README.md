@@ -1,6 +1,6 @@
 # Aeronautics: Tweaks & Toolkit（`sablestopnow`）
 
-> **English readme：**[README_EN.md](README_EN.md) ｜ **更新日志：**[CHANGELOG.md](CHANGELOG.md)
+> **English readme：**[README_EN.md](README_EN.md) ｜ **更新日志：**[CHANGELOG.md](CHANGELOG.md)（[English](CHANGELOG_EN.md)）
 
 一个面向 **Create: Aeronautics / Simulated** + **Sable 物理引擎** 的 NeoForge 实用模组（MC 1.21.1）。显示名已改为 *Aeronautics: Tweaks & Toolkit*，mod id 与包名仍是 `sablestopnow`（存档兼容）。
 

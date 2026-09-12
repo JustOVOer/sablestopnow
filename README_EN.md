@@ -1,6 +1,6 @@
 # Aeronautics: Tweaks & Toolkit (`sablestopnow`)
 
-> **中文说明：** [README.md](README.md) ｜ **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+> **中文说明：** [README.md](README.md) ｜ **Changelog:** [CHANGELOG_EN.md](CHANGELOG_EN.md) ([中文](CHANGELOG.md))
 
 A practical NeoForge mod (MC **1.21.1**) for **Create: Aeronautics / Simulated** + the **Sable** physics engine. The display name is now *Aeronautics: Tweaks & Toolkit*; the mod id and package stay `sablestopnow` (save-compatible).
 

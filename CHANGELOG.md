@@ -26,6 +26,7 @@
 
 - **框选与「仅轮廓」描边风格**：由 GL 线条改为 Create 蓝图 / 强力胶风格的**细长长方体盒**，粗细可通过 `staff_outline_thickness` / `outline_thickness` 调整，并加入平滑动画；其余描边模式视觉保持不变。
 - 超速自动锁定的豁免范围扩大：正在被拖拽、正在被缩放或已被缩放过的物理体都不会被误锁。
+- **构建产物改名**：jar 文件名前缀由 `sablestopnow` 改为 `aeronautics-tweaks-toolkit`（即 `aeronautics-tweaks-toolkit-1.1.0.jar`）。**mod id 与包名仍是 `sablestopnow`**，只是文件名跟随显示名。
 - 手杖相关界面文案全部双语化，HUD 改为「只显示当前正在做的事」。
 
 ### 修复 Fixed

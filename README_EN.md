@@ -91,7 +91,7 @@ Config file: `.minecraft/config/sablestopnow-common.toml`, or the in-game screen
 ## Building
 
 ```bash
-gradlew.bat build        # jar in build/libs/sablestopnow-1.1.0.jar
+gradlew.bat build        # jar in build/libs/aeronautics-tweaks-toolkit-1.1.0.jar
 gradlew.bat runClient    # dev client
 ```
 

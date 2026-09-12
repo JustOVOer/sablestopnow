@@ -89,7 +89,7 @@
 ## 构建
 
 ```bash
-gradlew.bat build        # 产物在 build/libs/sablestopnow-1.1.0.jar
+gradlew.bat build        # 产物在 build/libs/aeronautics-tweaks-toolkit-1.1.0.jar
 gradlew.bat runClient    # 开发客户端
 ```
 

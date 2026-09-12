@@ -55,7 +55,9 @@ repositories {
 }
 
 base {
-    archivesName = mod_id
+    // 产物名跟随显示名（Aeronautics: Tweaks & Toolkit），而不是 mod id；
+    // 显示名含 ":" 与 "&"，故在 gradle.properties 里给出文件名安全形式。
+    archivesName = project.archives_base_name
 }
 
 // Mojang ships Java 21 to end users in 1.21.1, so mods should target Java 21.

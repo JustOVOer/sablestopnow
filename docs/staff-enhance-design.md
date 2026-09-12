@@ -181,6 +181,7 @@ Sable 的 `Pose3d` 有 `scale` 字段，但**除了它自己的方块描边，�
 - 实现：右键抓取时以「当前视觉大小」反算基准距离 `superliminalBaseDistance`，之后每次移动把结构放到**视线命中的平面点**上（`superliminalTargetPoint` / `groupHalfExtent` 用于把结构“贴”在平面上而不是嵌进去），受 `superliminal_max_distance` 限制。
 - 与普通整组拖拽共用 `sendGroupDragTick`，只是位置分支换成绝对放置（`SuperliminalPlacePayload`），手感是「直接粘在准星上」而非弹簧拖拽。
 - **多选模式内外都能用**：非多选时右键会先 `pickAtDepth` 命中体 → `selected.add` → `startGroupDrag`，并**吞掉该次点击**，避免航空学同时启动它自己的拖拽。
+- 既定取舍：落点是「视线命中的平面」，与真实物理（未缩放的碰撞体）会有观感差异。
 
 ## 9. 待办 / 可迭代点
 

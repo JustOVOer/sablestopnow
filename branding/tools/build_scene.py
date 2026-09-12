@@ -428,9 +428,9 @@ def main():
 
     gear = Piece("gear", load_java_model(create, GEAR_MODEL)["elements"], gear_tex,
                  tex_sizes[gear_tex])
-    gear.scale = 0.46
-    # 先立起来（x），再偏到右上方（y）——不再正对屏幕，露出厚度做出 3D 感
-    gear.rots = [("x", -55.0), ("y", 25.0)]
+    gear.scale = 0.64
+    # 立起来 + 上下翻转（x = 125°），再偏到右上方（y）——露出厚度，做成 3D
+    gear.rots = [("x", 125.0), ("y", 25.0)]
 
     cam = Camera(yaw=-37.0, pitch=27.0)
     gear.pos = cam.world_offset(-11.2, -10.6, 2.0)   # 左下角那块空三角里

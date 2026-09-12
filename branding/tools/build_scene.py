@@ -442,14 +442,15 @@ def main():
 
     gear = Piece("gear", load_java_model(create, GEAR_MODEL)["elements"], gear_tex,
                  tex_sizes[gear_tex])
-    gear.scale = 0.64
+    gear.scale = 0.88
     # 原角度立起 + 偏右上；再对整体做一次**屏幕上下镜像**（像翻图片一样，几何不变）
     gear.rots = [("x", -55.0), ("y", 25.0)]
     gear.flip_screen_y = True
 
     cam = Camera(yaw=-37.0, pitch=27.0)
     gear.mirror_axis = (cam.m[1][0], cam.m[1][1], cam.m[1][2])   # 相机的屏幕向上轴（备用）
-    gear.pos = cam.world_offset(-11.2, -10.6, 2.0)   # 左下角那块空三角里
+    # 左下角空三角的内切位置：既尽量填满，又不与手杖相碰
+    gear.pos = cam.world_offset(-7.4, -7.4, 2.0)
 
     # ---- 小立方体：绕「手杖上端」的环形轨道（轨道平面垂直于手杖轴）----
     th = math.radians(-135.0)

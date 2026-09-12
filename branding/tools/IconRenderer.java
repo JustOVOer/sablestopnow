@@ -43,7 +43,7 @@ public final class IconRenderer {
     static int haloColor = 0x9FB6CC;   // 模型外光边
     static double haloA = 0.55;
     static int gridStep = 32;
-    static double brightness = 1.16;   // 合背景之前先把模型调亮
+    static double brightness = 1.6;    // 合背景之前先把模型调亮（gamma 提亮：1.0 = 不变，越大越亮且不爆高光）
 
     public static void main(String[] args) throws Exception {
         File scene = new File(args[0]);
@@ -191,15 +191,21 @@ public final class IconRenderer {
                     bb = bb * (1 - haloA) + (haloColor & 0xFF) / 255.0 * haloA;
                 }
                 double a = ma[p];
-                double r = br * (1 - a) + Math.min(1.0, mr[p] * brightness) * a;
-                double g = bgc * (1 - a) + Math.min(1.0, mg[p] * brightness) * a;
-                double bl = bb * (1 - a) + Math.min(1.0, mb[p] * brightness) * a;
+                double r = br * (1 - a) + lift(mr[p]) * a;
+                double g = bgc * (1 - a) + lift(mg[p]) * a;
+                double bl = bb * (1 - a) + lift(mb[p]) * a;
                 img.setRGB(x, y, (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(bl));
             }
         }
         ImageIO.write(img, "png", out);
         System.out.printf("[render] quads=%d canvas=%d ss=%d -> %s%n",
                 quads.size(), canvas, SS, out.getName());
+    }
+
+    /** gamma 提亮：先把模型调亮再合背景，暗部抬得多、高光不溢出。 */
+    static double lift(double c) {
+        if (c <= 0) return 0;
+        return 1.0 - Math.pow(1.0 - Math.min(1.0, c), brightness);
     }
 
     /** 方形结构元的最大值滤波（分离成水平/垂直两趟）。 */

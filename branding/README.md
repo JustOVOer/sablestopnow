@@ -31,9 +31,9 @@ java branding/tools/Steelify.java branding/textures/cogwheel.png branding/textur
 # 2) 组装场景（需要 run/mods 下有航空学与 Create 的 jar）
 python branding/tools/build_scene.py          # 加 staff|gear|cubes 可只输出某一部分
 # 3) 渲染两版背景
-#    参数：<ss> <底色> <网格色> <网格步长> <光边色> <光边alpha> <模型提亮>
-java branding/tools/IconRenderer.java branding/scene.txt branding/textures branding/icon-512-dark.png 2 33383D 4A5158 32 9FB6CC 0.55 1.16
-java branding/tools/IconRenderer.java branding/scene.txt branding/textures branding/icon-512-lightblue.png 2 A9CBE8 8FB6D8 32 53718C 0.45 1.16
+#    参数：<ss> <底色> <网格色> <网格步长> <光边色> <光边alpha> <模型提亮gamma>
+java branding/tools/IconRenderer.java branding/scene.txt branding/textures branding/icon-512-dark.png 2 33383D 4A5158 32 9FB6CC 0.55 1.6
+java branding/tools/IconRenderer.java branding/scene.txt branding/textures branding/icon-512-lightblue.png 2 A9CBE8 8FB6D8 32 53718C 0.45 1.6
 ```
 
 ## 在 Blockbench 里用
@@ -48,8 +48,8 @@ java branding/tools/IconRenderer.java branding/scene.txt branding/textures brand
 - 坐标系是 **y-up**（1 单位 = Blockbench 1 像素，16 = 1 方块）。Java 模型源文件是 y-down，导入时 y 取负，并按 `C·R·C⁻¹` 把 x/z 轴角度取负。
 - **手杖**：`R_z(-135°)`，头（能量环/十字）朝左上、杖尾朝右下，`scale = 1.0` —— 原尺寸约 34.5 单位长，正好撑满图标对角线。
 - **小立方体 ×8**：绕**手杖上端**的环形轨道摆放，轨道平面⊥手杖轴；轨道中心在轴上 `0.55 × 半长` 处（靠近上端），半径 5.0，另加黄金比小幅沿轴错开。每个是「内实心小立方 + 负尺寸外壳」。
-- **齿轮**：`R_x(-55°)` 立起来 + `R_y(25°)` 转向右上，scale 0.64，落在左下角空三角里；另加一次**屏幕空间上下镜像**（`flip_screen_y`，以该物件的投影中心为轴翻 sy）。
+- **齿轮**：`R_x(-55°)` 立起来 + `R_y(25°)` 转向右上，scale 0.88（按左下角空三角的**内切圆**定尺：半径约 7.9 单位、中心落在屏幕坐标 (-7.4, -7.4)，刚好填满又不与手杖相碰）；另加一次**屏幕空间上下镜像**（`flip_screen_y`，以该物件的投影中心为轴翻 sy）。
   > ⚠ 这个镜像是**屏幕空间**的（等价于把齿轮的渲染图上下翻转）；Blockbench 的组变换只有旋转、没有镜像，所以 `.bbmodel` 里的齿轮是**未镜像**版本，需要的话在 Blockbench 里手动处理。
   > 也**不要**用 3D 反射代替：对斜对相机的圆盘做反射会把法线翻成近乎竖直，齿轮会被压成一张平躺的薄饼（已实测）。
-- **背景**：深灰 `#33383D` + 网格 `#4A5158`，或浅蓝 `#A9CBE8` + 网格 `#8FB6D8`（每 32px 一条）；合背景**之前**先把模型整体提亮（增益 1.16），并给模型外圈加一道光边（深灰底用 `#9FB6CC`，浅蓝底用 `#53718C`）——否则深色手杖压在深灰底上会糊。
+- **背景**：深灰 `#33383D` + 网格 `#4A5158`，或浅蓝 `#A9CBE8` + 网格 `#8FB6D8`（每 32px 一条）；合背景**之前**先对模型做一次 **gamma 提亮**（`1 - (1-c)^1.6`，暗部抬得多、高光不溢出），并给模型外圈加一道光边（深灰底用 `#9FB6CC`，浅蓝底用 `#53718C`）——否则深色手杖压在深灰底上会糊。
 

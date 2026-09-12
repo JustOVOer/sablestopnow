@@ -10,8 +10,8 @@ import java.io.File;
  */
 public final class Steelify {
     // 钢色渐变：暗 -> 亮（偏亮一点，作为图标要能看清齿形）
-    static final int[] DARK = {0x46, 0x50, 0x5C};
-    static final int[] LIGHT = {0xC6, 0xD1, 0xDC};
+    static final int[] DARK = {0x3C, 0x45, 0x51};
+    static final int[] LIGHT = {0xB4, 0xC0, 0xCD};
 
     public static void main(String[] a) throws Exception {
         BufferedImage src = ImageIO.read(new File(a[0]));

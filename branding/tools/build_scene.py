@@ -45,7 +45,7 @@ GEAR_MODEL = "assets/create/models/block/cogwheel_shaftless.json"
 GEAR_TEX = "assets/create/textures/block/cogwheel.png"
 
 CANVAS = 512
-PADDING = 26
+PADDING = 34
 
 CUBE_INNER_RGB = (0x6F, 0xC8, 0xF0)
 CUBE_SHELL_RGB = (0xA8, 0xE4, 0xFF)
@@ -366,7 +366,7 @@ class Camera:
         return tuple(sx * right[i] + sy * up[i] + sd * back[i] for i in range(3))
 
 
-def make_wrapped_cube(name, tex_sizes, half=0.95, pad=0.72):
+def make_wrapped_cube(name, tex_sizes, half=0.60, pad=0.42):
     """内实心小立方 + 负尺寸外壳（与手杖 outer_cube 同构）。"""
     els = []
     for tex, pad_ in (("cube_inner", 0.0), ("cube_shell", pad)):
@@ -421,7 +421,7 @@ def main():
 
     staff = Piece("staff", load_java_model(sim, STAFF_MODEL)["elements"], "zapper_staff",
                   tex_sizes["zapper_staff"])
-    staff.scale = 0.50
+    staff.scale = 1.0                            # 原尺寸：约 34.5 单位长，撑满图标对角线
     staff.pos = (0.0, 0.0, 0.0)
     # -135°：把手杖「翻过来」——带能量环/十字的头朝左上，杖尾朝右下
     staff.rots = [("z", -135.0)]
@@ -433,27 +433,30 @@ def main():
     gear.rots = [("x", -55.0), ("y", 25.0)]
 
     cam = Camera(yaw=-37.0, pitch=27.0)
-    gear.pos = cam.world_offset(-10.6, -10.8, 1.2)
+    gear.pos = cam.world_offset(-11.2, -10.6, 2.0)   # 左下角那块空三角里
 
-    # ---- 小立方体：以「手杖轴」为轴环绕（不是绕世界 Y 轴）----
-    sa, ca = math.sin(math.radians(-135.0)), math.cos(math.radians(-135.0))
-    axis = (ca, sa, 0.0)                 # 手杖轴向（R_z(-135) 作用在 +Y 上）
-    side_u = (-sa, ca, 0.0)              # 与轴垂直
-    side_v = (0.0, 0.0, 1.0)             # 与轴垂直
+    # ---- 小立方体：绕「手杖上端」的环形轨道（轨道平面垂直于手杖轴）----
+    th = math.radians(-135.0)
+    head_dir = (math.sin(th), -math.cos(th), 0.0)     # 指向手杖头部（左上）
+    side_u = (head_dir[1], -head_dir[0], 0.0)         # 与轴垂直
+    side_v = (0.0, 0.0, 1.0)                          # 与轴垂直
+    half_len = 0.5 * 34.5 * staff.scale               # 手杖半长
+    orbit_c = tuple(0.55 * half_len * head_dir[k] for k in range(3))   # 轨道中心：靠近上端
+    orbit_r = 5.0
 
     cubes = []
     n_cubes = 8
     for i in range(n_cubes):
-        theta = 2.0 * math.pi * (i / n_cubes) + 0.55
-        g = (i * 0.6180339887) % 1.0                       # 黄金比 -> 沿轴错开
-        h = -8.5 + 17.0 * g
-        r = 11.8 + 2.2 * (((i * 0.37) % 1.0) - 0.5)
+        phi = 2.0 * math.pi * (i / n_cubes) + 0.35
+        jitter = 1.5 * (((i * 0.6180339887) % 1.0) - 0.5)              # 沿轴小幅错开
         pos = tuple(
-            r * (math.cos(theta) * side_u[k] + math.sin(theta) * side_v[k]) + h * axis[k]
+            orbit_c[k]
+            + orbit_r * (math.cos(phi) * side_u[k] + math.sin(phi) * side_v[k])
+            + jitter * head_dir[k]
             for k in range(3))
         for p in make_wrapped_cube("cube%d" % i, tex_sizes):
             p.name = "%s_%s" % (p.name, p.texname.split("_")[-1])   # 名字唯一
-            p.rots = [("y", math.degrees(theta) * 0.6)]
+            p.rots = [("y", math.degrees(phi) * 0.6)]
             p.pos = pos
             cubes.append(p)
 

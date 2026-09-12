@@ -35,12 +35,21 @@ public final class IconRenderer {
     }
 
     static int SS = 2;
+    static int bg = 0x33383D;          // 深灰底
+    static int gridColor = 0x4A5158;   // 浅灰网格
+    static int haloColor = 0x9FB6CC;   // 模型外光边
+    static double haloA = 0.55;
+    static int gridStep = 32;
 
     public static void main(String[] args) throws Exception {
         File scene = new File(args[0]);
         File texDir = new File(args[1]);
         File out = new File(args[2]);
         if (args.length > 3) SS = Integer.parseInt(args[3]);
+        if (args.length > 4) bg = (int) Long.parseLong(args[4].replace("0x", ""), 16);
+        if (args.length > 5) gridColor = (int) Long.parseLong(args[5].replace("0x", ""), 16);
+        if (args.length > 6) gridStep = Integer.parseInt(args[6]);
+        if (args.length > 7) haloColor = (int) Long.parseLong(args[7].replace("0x", ""), 16);
 
         int canvas = 512, padding = 26;
         String[] texNames = new String[0];
@@ -112,7 +121,13 @@ public final class IconRenderer {
         for (Quad q : quads) if (q.opaque) raster(q, col, zbuf, W, true);
         for (Quad q : quads) if (!q.opaque) raster(q, col, zbuf, W, false);
 
-        BufferedImage img = new BufferedImage(canvas, canvas, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage img = new BufferedImage(canvas, canvas, BufferedImage.TYPE_INT_RGB);
+        // 1) 先把模型降采样成 canvas 尺寸的 RGBA + 掩码
+        double[] mr = new double[canvas * canvas];
+        double[] mg = new double[canvas * canvas];
+        double[] mb = new double[canvas * canvas];
+        double[] ma = new double[canvas * canvas];
+        boolean[] mask = new boolean[canvas * canvas];
         for (int y = 0; y < canvas; y++) {
             for (int x = 0; x < canvas; x++) {
                 double a = 0, r = 0, g = 0, b = 0;
@@ -126,14 +141,65 @@ public final class IconRenderer {
                 double n = SS * SS;
                 r /= n; g /= n; b /= n; a /= n;
                 if (a > 1e-6) { r /= a; g /= a; b /= a; }
-                int ia = (int) Math.round(Math.min(1, a) * 255);
-                img.setRGB(x, y, (ia << 24)
-                        | (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(b));
+                int p = y * canvas + x;
+                mr[p] = r; mg[p] = g; mb[p] = b; ma[p] = a;
+                mask[p] = a > 0.35;
+            }
+        }
+        // 2) 掩码膨胀 -> 外光边（深色模型压在深灰底上需要一圈亮边才立得住）
+        int halo = Math.max(2, canvas / 150);
+        boolean[] dil = dilate(mask, canvas, halo);
+        // 3) 合成：底色 / 网格 -> 光边 -> 模型
+        for (int y = 0; y < canvas; y++) {
+            for (int x = 0; x < canvas; x++) {
+                int p = y * canvas + x;
+                int base = bg;
+                if (gridStep > 0 && (x % gridStep == 0 || y % gridStep == 0)) base = gridColor;
+                double br = ((base >> 16) & 0xFF) / 255.0;
+                double bgc = ((base >> 8) & 0xFF) / 255.0;
+                double bb = (base & 0xFF) / 255.0;
+                if (dil[p] && !mask[p]) {
+                    br = br * (1 - haloA) + ((haloColor >> 16) & 0xFF) / 255.0 * haloA;
+                    bgc = bgc * (1 - haloA) + ((haloColor >> 8) & 0xFF) / 255.0 * haloA;
+                    bb = bb * (1 - haloA) + (haloColor & 0xFF) / 255.0 * haloA;
+                }
+                double a = ma[p];
+                double r = br * (1 - a) + mr[p] * a;
+                double g = bgc * (1 - a) + mg[p] * a;
+                double bl = bb * (1 - a) + mb[p] * a;
+                img.setRGB(x, y, (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(bl));
             }
         }
         ImageIO.write(img, "png", out);
         System.out.printf("[render] quads=%d canvas=%d ss=%d -> %s%n",
                 quads.size(), canvas, SS, out.getName());
+    }
+
+    /** 方形结构元的最大值滤波（分离成水平/垂直两趟）。 */
+    static boolean[] dilate(boolean[] src, int n, int r) {
+        boolean[] tmp = new boolean[n * n];
+        for (int y = 0; y < n; y++) {
+            for (int x = 0; x < n; x++) {
+                boolean v = false;
+                for (int d = -r; d <= r && !v; d++) {
+                    int xx = x + d;
+                    if (xx >= 0 && xx < n && src[y * n + xx]) v = true;
+                }
+                tmp[y * n + x] = v;
+            }
+        }
+        boolean[] out = new boolean[n * n];
+        for (int y = 0; y < n; y++) {
+            for (int x = 0; x < n; x++) {
+                boolean v = false;
+                for (int d = -r; d <= r && !v; d++) {
+                    int yy = y + d;
+                    if (yy >= 0 && yy < n && tmp[yy * n + x]) v = true;
+                }
+                out[y * n + x] = v;
+            }
+        }
+        return out;
     }
 
     static void raster(Quad q, double[] col, double[] zbuf, int W, boolean writeDepth) {

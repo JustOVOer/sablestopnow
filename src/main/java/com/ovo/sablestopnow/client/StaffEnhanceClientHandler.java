@@ -1352,22 +1352,29 @@ public final class StaffEnhanceClientHandler {
      * 方向按服务端 S2C 同步的锁定状态判断。
      */
     /**
-     * 当前操作的目标「物理结构组」。
+     * 当前操作的目标「物理结构组」——**以准星指向的结构为准**。
      *
-     * <p>队列非空 → 就是队列；队列为空但准星指着一个物理结构 → 把它本身当作
-     * <b>只有一个成员的物理结构组</b>（所以锁定切换 / V / 快照 / 缩放 / 所有权
-     * 对单个结构也能直接用，不需要先 Ctrl 多选）。</p>
+     * <ul>
+     *   <li>准星指着一个结构，而它属于当前的组（拖拽成员优先，否则主多选队列）→ 作用于**整组**；</li>
+     *   <li>准星指着一个不在组里的结构 → 只作用于**这一个**（相当于只有一个成员的结构组）；</li>
+     *   <li>准星没指着任何结构 → 回退到当前组（拖拽成员 / 主队列），方便"对着空气操作整组"。</li>
+     * </ul>
+     *
+     * <p>注意顺序：以前是"队列优先"，导致明明看着另一个结构、功能却打到已选好的队列上，现改为
+     * <b>看着的优先</b>。</p>
      */
     private static Set<UUID> operationTargets() {
-        // 拖拽中：以本次拖拽的成员为准（可能是临时单成员组，与主队列并存）
-        if (groupDrag != null && !dragMembers.isEmpty()) {
-            return dragMembers;
-        }
-        if (!selected.isEmpty()) {
-            return selected;
-        }
+        final boolean dragging = groupDrag != null && !dragMembers.isEmpty();
+        final Set<UUID> group = dragging ? dragMembers : selected;
         final Pick pick = pickAtDepth(penetration);
-        return pick == null || pick.body == null ? Set.of() : Set.of(pick.body.getUniqueId());
+        if (pick == null || pick.body == null) {
+            return group.isEmpty() ? Set.of() : group;
+        }
+        final UUID aimed = pick.body.getUniqueId();
+        if (group.contains(aimed)) {
+            return group;
+        }
+        return Set.of(aimed);
     }
 
     private static void toggleLocksAll() {

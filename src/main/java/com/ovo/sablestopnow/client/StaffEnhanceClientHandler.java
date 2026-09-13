@@ -1339,7 +1339,11 @@ public final class StaffEnhanceClientHandler {
     private static void clearQueue() {
         final int size = selected.size();
         selected.clear();
-        releaseAllClaims();
+        // 临时拖拽组也一并清掉（它不在 selected 里，只清 selected 会「看起来没反应」）
+        dragMembers.clear();
+        tempDragGroup = false;
+        // 强制通知服务端释放（claimsPending 可能在退出多选时已被置 false，但服务端状态未必同步）
+        releaseAllClaims(true);
         prompt(size > 0 ? "sablestopnow.staff.queue_cleared" : "sablestopnow.staff.multi_exit_empty", size);
     }
 
@@ -1495,7 +1499,15 @@ public final class StaffEnhanceClientHandler {
 
     /** C2S：清空我的选择并释放全部占用（退出多选 / 清空队列 / 丢下手杖时调用）。 */
     private static void releaseAllClaims() {
-        if (!claimsPending) {
+        releaseAllClaims(false);
+    }
+
+    /**
+     * @param force true = 即使本地没有"待释放"标记也通知服务端清空。
+     *              「清空队列」用 force，避免本地标记已复位而服务端仍留着占用。
+     */
+    private static void releaseAllClaims(final boolean force) {
+        if (!claimsPending && !force) {
             return;
         }
         claimsPending = false;
@@ -2079,13 +2091,8 @@ public final class StaffEnhanceClientHandler {
     }
 
     public static Collection<UUID> selectedSnapshot() {
-        // 渲染用：主队列 + 本次拖拽的成员（临时单成员组也要被描边高亮）
-        if (dragMembers.isEmpty()) {
-            return List.copyOf(selected);
-        }
-        final Set<UUID> all = new LinkedHashSet<>(selected);
-        all.addAll(dragMembers);
-        return List.copyOf(all);
+        // 只描主多选队列：临时拖拽组**不**画蓝色描边（用户要求），它退出拖拽时会被清掉
+        return List.copyOf(selected);
     }
 
     /** 整组拖拽会话（客户端）。 */

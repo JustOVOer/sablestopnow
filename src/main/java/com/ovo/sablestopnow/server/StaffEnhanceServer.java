@@ -649,6 +649,31 @@ public final class StaffEnhanceServer {
 
     // ============ 无碰撞标记（视觉 + 状态记录；真实只对其它 Sable 体，见上方 ghostTick） ============
 
+    // ============ 右上角信息面板：按需回一个物理结构的实时信息（速度/质量只有服务端有） ============
+
+    /**
+     * 回应客户端的「这个结构现在多快、多重」查询（右上角信息面板用）。
+     *
+     * <p>质量走 {@code getMassTracker().getMass()}：现在质量会随缩放变化（见 {@code scale.ScaledMass}），
+     * 所以这里读到的是缩放后的真实值。速度用 {@code latestLinearVelocity}（格/秒）。</p>
+     */
+    public static void sendBodyInfo(final ServerPlayer player, final UUID subLevelId) {
+        final ServerLevel level = player.serverLevel();
+        final ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container == null) {
+            return;
+        }
+        final ServerSubLevel sub = (ServerSubLevel) container.getSubLevel(subLevelId);
+        if (sub == null || sub.isRemoved()) {
+            return;
+        }
+        final Vector3dc velocity = sub.latestLinearVelocity;
+        final double mass = sub.getMassTracker() == null ? 0.0 : sub.getMassTracker().getMass();
+        foundry.veil.api.network.VeilPacketManager.player(player)
+                .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.BodyInfoPayload(
+                        subLevelId, velocity.x(), velocity.y(), velocity.z(), mass));
+    }
+
     /** 按当前锁定状态幂等地把一组物理体设成锁定/解锁（航空学 FixedConstraint）。 */
     public static void setLocks(final ServerLevel level, final boolean lock, final Collection<UUID> subLevels) {
         final ServerSubLevelContainer container = SubLevelContainer.getContainer(level);

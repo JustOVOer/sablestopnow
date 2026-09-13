@@ -134,6 +134,10 @@ public final class StaffEnhanceClientHandler {
     private static boolean viewLockHold;
     /** 上一 tick 的模式，用于给 HUD 触发切换动画。 */
     @Nullable private static StaffControl.Mode lastControlMode;
+    /** Ctrl 这次按下期间是否用过滚轮（用过就只切物品栏，不切多选）。 */
+    private static boolean ctrlChordUsed;
+    /** Ctrl 已按下、等待抬起判定。 */
+    private static boolean ctrlPending;
 
     // ---- 彩蛋：Superliminal ----
     /** 服务端同步的彩蛋开关。 */
@@ -151,6 +155,16 @@ public final class StaffEnhanceClientHandler {
     @Nullable private static UUID hoverBody;
     /** 上述物理体的显示名（可能为 null；供 HUD 提示）。 */
     @Nullable private static String hoverName;
+
+    // ---- 右上角信息面板：速度/质量只有服务端有，按需请求 ----
+    /** 已经拿到实时信息的物理结构（null = 还没有/不是当前目标）。 */
+    @Nullable private static UUID bodyInfoId;
+    /** 最近一次请求过的目标，用于「换目标立刻查」。 */
+    @Nullable private static UUID bodyInfoRequested;
+    private static double bodyInfoVx;
+    private static double bodyInfoVy;
+    private static double bodyInfoVz;
+    private static double bodyInfoMass;
     private static int tickCounter;
 
     private StaffEnhanceClientHandler() {
@@ -286,11 +300,27 @@ public final class StaffEnhanceClientHandler {
         if (justPressed(StaffKeyMappings.OPEN_CONFIG)) {
             openConfigScreen();
         }
-        if (justPressed(StaffKeyMappings.MULTI_SELECT) && active) {
-            toggleMultiSelect();
+        // ⚠ 每 tick 只能对同一个 KeyMapping 调一次 justPressed()：它会更新「上一 tick 是否按下」，
+        // 调两次时第二次永远拿不到上升沿（这正是之前 Ctrl 进不了多选的原因）。
+        final boolean multiSelectPressed = justPressed(StaffKeyMappings.MULTI_SELECT);
+        if (!SablestopNowConfig.isNewControlScheme()) {
+            if (multiSelectPressed && active) {
+                toggleMultiSelect();
+            }
         }
         if (SablestopNowConfig.isNewControlScheme()) {
             // 新控制逻辑：其余功能不再由按键直接触发，改为「滚轮选中 + 左键应用」。
+            // Ctrl 采用「点击」语义：按下期间若用过滚轮（Ctrl+滚轮 = 原版切物品栏），这次按下不算点击。
+            if (multiSelectPressed) {
+                ctrlChordUsed = false;
+                ctrlPending = active;
+            }
+            if (ctrlPending && !StaffKeyMappings.MULTI_SELECT.isDown()) {
+                if (!ctrlChordUsed) {
+                    toggleMultiSelect();
+                }
+                ctrlPending = false;
+            }
             if (scalingSession && !active) {
                 stopScaling();
             }
@@ -376,7 +406,8 @@ public final class StaffEnhanceClientHandler {
             return;
         }
         final int size = list.size();
-        final int next = Math.floorMod(newControlIndex() + (deltaY > 0 ? 1 : -1), size);
+        // 滚轮向下(deltaY<0)=选下一项，向上=选上一项（与列表方向一致）
+        final int next = Math.floorMod(newControlIndex() + (deltaY > 0 ? -1 : 1), size);
         storeControlIndex(next);
         StaffControlHud.notifySelectionChanged();
     }
@@ -670,7 +701,11 @@ public final class StaffEnhanceClientHandler {
         }
         if (multiSelect) {
             if (SablestopNowConfig.isNewControlScheme()) {
-                // 新逻辑：多选模式下滚轮切功能（吞掉，避免切快捷栏）
+                // 新逻辑：多选模式下滚轮切功能；Ctrl+滚轮交还原版（切物品栏）
+                if (isControlModifierDown()) {
+                    ctrlChordUsed = true;
+                    return false;
+                }
                 cycleFunction(deltaY);
                 return true;
             }
@@ -700,8 +735,12 @@ public final class StaffEnhanceClientHandler {
             }
             return true;
         }
-        // 新逻辑：普通模式下滚轮切功能（功能清单见 StaffControl）
+        // 新逻辑：普通模式下滚轮切功能；按住 Ctrl 时交还原版（切物品栏）
         if (SablestopNowConfig.isNewControlScheme()) {
+            if (isControlModifierDown()) {
+                ctrlChordUsed = true;
+                return false;
+            }
             cycleFunction(deltaY);
             return true;
         }
@@ -794,6 +833,7 @@ public final class StaffEnhanceClientHandler {
                 hoverBody = null;
                 hoverName = null;
             }
+            requestBodyInfo();
         }
         // 区域选择指示点：每 tick 跟随视线/距离（很便宜）
         updateRegionCursor(player);
@@ -911,8 +951,68 @@ public final class StaffEnhanceClientHandler {
         return out;
     }
 
-    /** S2C：彩蛋开关状态。 */
-    public static void setSuperliminal(final boolean on) {
+    // ---- 右上角信息面板：瞄准结构的速度/质量（服务端按需回） ----
+
+    /** S2C：服务端回传的某个结构的实时信息（速度格/秒 + 质量）。 */
+    public static void setBodyInfo(final UUID id, final double vx, final double vy,
+                                   final double vz, final double mass) {
+        bodyInfoId = id;
+        bodyInfoVx = vx;
+        bodyInfoVy = vy;
+        bodyInfoVz = vz;
+        bodyInfoMass = mass;
+    }
+
+    /** 面板用：准星当前指向的结构（可能为 null）。 */
+    @Nullable
+    public static UUID getInfoBody() {
+        return hoverBody;
+    }
+
+    /** 面板用：准星目标的名字（可能为 null）。 */
+    @Nullable
+    public static String getInfoName() {
+        return hoverName;
+    }
+
+    /** 该结构的实时信息是否已经拿到（没拿到时面板显示占位）。 */
+    public static boolean hasBodyInfo(final UUID id) {
+        return id != null && id.equals(bodyInfoId);
+    }
+
+    /** 面板用：线速度大小（格/秒）。 */
+    public static double getInfoSpeed() {
+        return Math.sqrt(bodyInfoVx * bodyInfoVx + bodyInfoVy * bodyInfoVy + bodyInfoVz * bodyInfoVz);
+    }
+
+    /** 面板用：质量（随缩放变化）。 */
+    public static double getInfoMass() {
+        return bodyInfoMass;
+    }
+
+    /**
+     * 按需向服务端查询瞄准结构的速度/质量：换目标立即查，同一目标每 10 tick 刷新一次。
+     * 关闭信息面板（config）或没有目标时不查。
+     */
+    private static void requestBodyInfo() {
+        if (!SablestopNowConfig.isShowBodyInfo()) {
+            bodyInfoRequested = null;
+            bodyInfoId = null;
+            return;
+        }
+        final UUID id = hoverBody;
+        if (id == null) {
+            bodyInfoRequested = null;
+            bodyInfoId = null;
+            return;
+        }
+        if (!id.equals(bodyInfoRequested) || tickCounter % 10 == 0) {
+            bodyInfoRequested = id;
+            VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.RequestBodyInfoPayload(id));
+        }
+    }
+
+    /** S2C：彩蛋开关状态。 */    public static void setSuperliminal(final boolean on) {
         superliminalOn = on;
         prompt(on ? "sablestopnow.command.superliminal.on" : "sablestopnow.command.superliminal.off");
     }
@@ -1108,6 +1208,8 @@ public final class StaffEnhanceClientHandler {
         // 新控制逻辑的按住型功能与光条
         centerHold = false;
         viewLockHold = false;
+        ctrlPending = false;
+        ctrlChordUsed = false;
         StaffControlHud.notifySustainedEnded();
         releaseAllClaims();
         multiSelect = false;
@@ -1184,36 +1286,53 @@ public final class StaffEnhanceClientHandler {
      * 左键：对队列内全部物理体智能切换锁定 —— 全部已锁定 → 解锁；否则（含部分锁定）→ 先全部锁定。
      * 方向按服务端 S2C 同步的锁定状态判断。
      */
+    /**
+     * 当前操作的目标「物理结构组」。
+     *
+     * <p>队列非空 → 就是队列；队列为空但准星指着一个物理结构 → 把它本身当作
+     * <b>只有一个成员的物理结构组</b>（所以锁定切换 / V / 快照 / 缩放 / 所有权
+     * 对单个结构也能直接用，不需要先 Ctrl 多选）。</p>
+     */
+    private static Set<UUID> operationTargets() {
+        if (!selected.isEmpty()) {
+            return selected;
+        }
+        final Pick pick = pickAtDepth(penetration);
+        return pick == null || pick.body == null ? Set.of() : Set.of(pick.body.getUniqueId());
+    }
+
     private static void toggleLocksAll() {
-        if (selected.isEmpty()) {
+        final Set<UUID> targets = operationTargets();
+        if (targets.isEmpty()) {
             return;
         }
         boolean allLocked = true;
-        for (final UUID id : selected) {
+        for (final UUID id : targets) {
             if (!staffLocks.contains(id)) {
                 allLocked = false;
                 break;
             }
         }
         final boolean lock = !allLocked;
-        sendSetLocks(lock, selected);
+        sendSetLocks(lock, targets);
         // 乐观更新本地（服务端随后会 S2C 回推校准）
         if (lock) {
-            staffLocks.addAll(selected);
+            staffLocks.addAll(targets);
         } else {
-            staffLocks.removeAll(selected);
+            staffLocks.removeAll(targets);
         }
-        prompt(lock ? "sablestopnow.staff.group_locked" : "sablestopnow.staff.group_unlocked", selected.size());
+        prompt(lock ? "sablestopnow.staff.group_locked" : "sablestopnow.staff.group_unlocked", targets.size());
     }
 
     // ============ V：无碰撞切换（对整组选中队列应用/取消，语义与左键锁定一致） ============
     private static void onCollisionToggleKey() {
-        if (selected.isEmpty()) {
+        final Set<UUID> targets = operationTargets();
+        if (targets.isEmpty()) {
             prompt("sablestopnow.staff.need_queue");
             return;
         }
         boolean allMarked = true;
-        for (final UUID id : selected) {
+        for (final UUID id : targets) {
             if (!noCollision.contains(id)) {
                 allMarked = false;
                 break;
@@ -1222,15 +1341,15 @@ public final class StaffEnhanceClientHandler {
         final boolean mark = !allMarked; // 全部已标记→取消；否则（含部分）→先全标记
         // 乐观更新本地（随后服务端 S2C 同步覆盖）
         if (mark) {
-            noCollision.addAll(selected);
+            noCollision.addAll(targets);
         } else {
-            noCollision.removeAll(selected);
+            noCollision.removeAll(targets);
         }
         prompt(mark
                         ? (SablestopNowConfig.isGhostReal() ? "sablestopnow.staff.group_ghost_on_real" : "sablestopnow.staff.group_ghost_on")
                         : "sablestopnow.staff.group_ghost_off",
-                selected.size());
-        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.SetNoCollisionPayload(mark, new ArrayList<>(selected)));
+                targets.size());
+        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.SetNoCollisionPayload(mark, new ArrayList<>(targets)));
     }
 
     public static void setNoCollision(final ResourceLocation dimension, final Collection<UUID> ids) {
@@ -1336,18 +1455,19 @@ public final class StaffEnhanceClientHandler {
         }
     }
 
-    /** K：当前没有快照 → 用选中队列创建；已有快照 → 取消。 */
+    /** K：当前没有快照 → 用目标结构组创建；已有快照 → 取消。 */
     private static void onSnapshotKey() {
         if (!snapshotIds.isEmpty()) {
             VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.SnapshotPayload(false, List.of()));
             snapshotIds.clear();
             return;
         }
-        if (selected.isEmpty()) {
+        final Set<UUID> targets = operationTargets();
+        if (targets.isEmpty()) {
             prompt("sablestopnow.staff.snap_need_queue");
             return;
         }
-        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.SnapshotPayload(true, new ArrayList<>(selected)));
+        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.SnapshotPayload(true, new ArrayList<>(targets)));
     }
 
     /** R：把整份快照回退。 */
@@ -1366,14 +1486,15 @@ public final class StaffEnhanceClientHandler {
         if (scalingSession) {
             return;
         }
-        if (selected.isEmpty()) {
+        final Set<UUID> targets = operationTargets();
+        if (targets.isEmpty()) {
             prompt("sablestopnow.staff.scale_need_queue");
             return;
         }
         scalingSession = true;
         scaleFactor = 1.0f;
-        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.BeginScalePayload(new ArrayList<>(selected)));
-        prompt("sablestopnow.staff.scale_begin", selected.size());
+        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.BeginScalePayload(new ArrayList<>(targets)));
+        prompt("sablestopnow.staff.scale_begin", targets.size());
     }
 
     /** 松开 X：结束会话（保留当前缩放结果）。 */
@@ -1410,12 +1531,13 @@ public final class StaffEnhanceClientHandler {
         if (player == null) {
             return;
         }
-        if (selected.isEmpty()) {
+        if (selected.isEmpty() && operationTargets().isEmpty()) {
             prompt("sablestopnow.staff.own_need_queue");
             return;
         }
+        final Set<UUID> targets = operationTargets();
         boolean allMine = true;
-        for (final UUID id : selected) {
+        for (final UUID id : targets) {
             if (!player.getUUID().equals(ownershipOwners.get(id))) {
                 allMine = false;
                 break;
@@ -1423,7 +1545,7 @@ public final class StaffEnhanceClientHandler {
         }
         final boolean own = !allMine;
         // 乐观更新（服务端随后回推权威表）
-        for (final UUID id : selected) {
+        for (final UUID id : targets) {
             if (own) {
                 ownershipOwners.put(id, player.getUUID());
                 ownershipNames.put(id, player.getGameProfile().getName());
@@ -1432,8 +1554,8 @@ public final class StaffEnhanceClientHandler {
                 ownershipNames.remove(id);
             }
         }
-        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.SetOwnershipPayload(own, new ArrayList<>(selected)));
-        prompt(own ? "sablestopnow.staff.own_set" : "sablestopnow.staff.own_cleared", selected.size());
+        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.SetOwnershipPayload(own, new ArrayList<>(targets)));
+        prompt(own ? "sablestopnow.staff.own_set" : "sablestopnow.staff.own_cleared", targets.size());
     }
 
     // ============ 整组拖拽 ============

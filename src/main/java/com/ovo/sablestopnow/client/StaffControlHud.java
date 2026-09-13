@@ -7,23 +7,26 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.resources.language.I18n;
+import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
- * 新控制逻辑的 HUD（左上角）—— 参考 {@code newControl/GUI.png}：
- * <ul>
- *   <li>顶部一条蓝色「模式」标签（右边斜切），模式切换时整块先向左消失、再从左侧进入；</li>
- *   <li>下面列出该模式的<b>全部</b>功能，离当前选中项越远越虚化；选中项有一个蓝色选框 + 指向右侧的三角；</li>
- *   <li>选中项的<b>描述</b>显示在选框右侧，切换时从右向左消失、再从左向右出现；</li>
- *   <li>底部提示当前的切换方式（普通=滚轮 / 拖拽=Ctrl+滚轮）；功能激活后改为提示滚轮用途；</li>
- *   <li>左键应用功能时，一条蓝灰渐变到透明的光条沿选框边缘跑一圈；Z / X 这类持续功能会一直转到动作结束。</li>
- * </ul>
- * 配色沿用自定义设置界面那套蓝（{@code PANEL}/{@code PANEL_DARK}/{@code EDGE}）。
+ * 新控制逻辑的 HUD（左上角）+ 右上角「瞄准结构信息面板」。
+ *
+ * <p>左上（仅新控制逻辑开启时）：模式标签（右边缘斜切、描边连续）+ 该模式**全部**功能
+ * （离当前项越远越虚化）+ 会平滑滑动的蓝色选框 + 右侧**带左侧三角凸起的两行描述面板**
+ * + 底部换行提示；左键应用功能时沿选框周长跑一条连续光条（Z/X 持续旋转）。</p>
+ *
+ * <p>右上（config {@code show_body_info}，默认开）：拿着手杖时显示准星所指物理结构的
+ * 所有者 / 速度 / 质量 / 缩放 / 碰撞 / 快照，从右侧滑入滑出。</p>
  */
 @EventBusSubscriber(modid = SablestopNow.MOD_ID, value = Dist.CLIENT)
 public final class StaffControlHud {
@@ -34,26 +37,27 @@ public final class StaffControlHud {
     private static final int EDGE = 0xFF8296B8;
     private static final int TEXT = 0xFFFFFFFF;
     private static final int TEXT_DIM = 0xFFD6DEEA;
+    private static final int STREAK = 0xFFC9D6E6;
 
     private static final int MARGIN_X = 6;
     private static final int MARGIN_Y = 8;
-    private static final int BANNER_H = 15;
+    private static final int BANNER_H = 14;
     private static final int BANNER_SLANT = 7;
-    private static final int ROW_H = 13;
-    private static final int BOX_W = 86;
+    private static final int ROW_H = 12;
+    private static final int BOX_W = 76;
     private static final int LIST_GAP = 5;
+    private static final int DESC_GAP = 10;
+    private static final int DESC_W = 96;
+    private static final int LINE_H = 10;
+    private static final int HINT_W = 118;
 
     // ---- 动画状态 ----
-    /** 0=完全离开(向左)，1=完全就位。 */
     private static float modeAnim = 1.0f;
-    /** 0=描述已向右离开，1=描述就位。 */
     private static float descAnim = 1.0f;
-    /** 选框的插值行号（缓动移动）。 */
     private static float selPos;
-    /** <0=无光条；否则为 0..1 的一次性进度。 */
     private static float streak = -1.0f;
-    /** 光条是否持续旋转（Z / X 激活中）。 */
     private static boolean streakLoop;
+    private static float infoAnim;
     private static long lastFrameNanos;
 
     private StaffControlHud() {
@@ -63,24 +67,20 @@ public final class StaffControlHud {
     // 由 StaffEnhanceClientHandler 调用的触发器
     // ------------------------------------------------------------------
 
-    /** 模式变了：整块先向左消失再从左侧进入。 */
     public static void notifyModeChanged() {
         modeAnim = 0.0f;
         descAnim = 1.0f;
     }
 
-    /** 选中项变了：描述从右向左消失（再由渲染侧自动从左进入），选框缓动到新行。 */
     public static void notifySelectionChanged() {
         descAnim = 0.0f;
     }
 
-    /** 左键应用了某个功能：开始跑光条；{@code sustained}=持续型（Z/X）会一直转到结束。 */
     public static void notifyApplied(final boolean sustained) {
         streak = 0.0f;
         streakLoop = sustained;
     }
 
-    /** 持续型功能结束了（区域选择取消/确认、缩放确认）。 */
     public static void notifySustainedEnded() {
         if (streakLoop) {
             streakLoop = false;
@@ -97,115 +97,189 @@ public final class StaffControlHud {
         final Minecraft mc = Minecraft.getInstance();
         final LocalPlayer player = mc.player;
         if (player == null || mc.level == null || mc.screen != null
-                || !SablestopNowConfig.isStaffEnhanceEnabled() || !SablestopNowConfig.isNewControlScheme()
-                || !StaffEnhanceClientHandler.isEnabled() || !PhysicsStaffItem.isHolding(player)) {
+                || !SablestopNowConfig.isStaffEnhanceEnabled()
+                || !StaffEnhanceClientHandler.isEnabled()
+                || !PhysicsStaffItem.isHolding(player)) {
             return;
         }
-
+        final GuiGraphics gg = event.getGuiGraphics();
         final float dt = frameDelta();
+
+        if (SablestopNowConfig.isNewControlScheme()) {
+            renderControlHud(gg, dt);
+        }
+        if (SablestopNowConfig.isShowBodyInfo()) {
+            renderBodyInfo(gg, dt);
+        }
+    }
+
+    /** 左上角：模式 + 功能列表 + 描述面板 + 提示 + 准星穿透层数。 */
+    private static void renderControlHud(final GuiGraphics gg, final float dt) {
+        final Minecraft mc = Minecraft.getInstance();
         final StaffControl.Mode mode = StaffEnhanceClientHandler.newControlMode();
         final List<StaffControl.Fn> fns = StaffControl.functionsFor(mode);
         final int index = Math.max(0, Math.min(fns.size() - 1, StaffEnhanceClientHandler.newControlIndex()));
         final boolean functionActive = StaffEnhanceClientHandler.newControlFunctionActive();
 
-        // 缓动推进
         modeAnim = approach(modeAnim, 1.0f, 7.0f, dt);
         descAnim = approach(descAnim, 1.0f, 9.0f, dt);
-        selPos = approach(selPos, index, 14.0f, dt);
+        selPos = approach(selPos, index, 13.0f, dt);
         if (streak >= 0.0f) {
             if (streakLoop && functionActive) {
-                streak = (streak + dt * 1.1f) % 1.0f;
+                streak = (streak + dt * 0.85f) % 1.0f;
             } else {
-                streak += dt * 2.2f;
+                streak += dt * 2.0f;
                 if (streak >= 1.0f) {
                     streak = -1.0f;
                 }
             }
         }
 
-        final GuiGraphics gg = event.getGuiGraphics();
-        final var font = mc.font;
-
-        // 模式切换：先向左消失(0..0.5)，再从左侧进入(0.5..1)
-        final float slideOut = modeAnim < 0.5f ? (1.0f - modeAnim * 2.0f) : 0.0f;
-        final float slideIn = modeAnim < 0.5f ? 1.0f : (1.0f - (modeAnim - 0.5f) * 2.0f);
-        final float blockX = MARGIN_X - (slideOut + slideIn) * 46.0f;
-        final float blockAlpha = Math.max(0.0f, modeAnim < 0.5f ? 1.0f - modeAnim * 2.0f : (modeAnim - 0.5f) * 2.0f);
-
-        final int x = Math.round(blockX);
+        final float blockAlpha = modeAnim < 0.5f ? 1.0f - modeAnim * 2.0f : (modeAnim - 0.5f) * 2.0f;
+        final float shift = modeAnim < 0.5f ? modeAnim * 2.0f : 1.0f - (modeAnim - 0.5f) * 2.0f;
+        final int x = MARGIN_X - Math.round(shift * 44.0f);
         int y = MARGIN_Y;
 
-        // ---- 模式标签（右边缘斜切）----
+        // ---- 模式标签 ----
         final String modeName = I18n.get(mode.nameKey);
-        final int bannerW = font.width(modeName) + 14;
-        drawBanner(gg, x, y, bannerW, BANNER_H, BANNER_SLANT, blockAlpha);
-        gg.drawString(font, modeName, x + 6, y + 4, withAlpha(TEXT, blockAlpha), false);
+        drawBanner(gg, x, y, mc.font.width(modeName) + 13, BANNER_H, BANNER_SLANT, blockAlpha);
+        gg.drawString(mc.font, modeName, x + 6, y + 3, withAlpha(TEXT, blockAlpha), false);
         y += BANNER_H + LIST_GAP;
 
-        // ---- 功能列表（全部，按距离虚化）----
-        final int selRowY = y + Math.round(selPos * ROW_H);
+        // ---- 功能列表：先画会滑动的选框，再画文字 ----
+        final float selY = y + selPos * ROW_H;
+        final int boxY = Math.round(selY);
+        fillBox(gg, x, boxY, BOX_W, ROW_H - 1, blockAlpha);
+        drawArrow(gg, x + BOX_W + 2, boxY + (ROW_H - 1) / 2, blockAlpha);
         for (int i = 0; i < fns.size(); i++) {
-            final int rowY = y + i * ROW_H;
             final float distance = Math.abs(i - selPos);
-            final boolean isSelected = Math.abs(i - selPos) < 0.5f;
-            final float rowAlpha = blockAlpha * Math.max(0.16f, 1.0f - 0.30f * distance);
-            final String name = I18n.get(fns.get(i).nameKey);
-
-            if (isSelected) {
-                // 选框 + 右侧三角
-                fillBox(gg, x, rowY, BOX_W, ROW_H - 2, blockAlpha);
-                gg.drawString(font, name, x + 6, rowY + 3, withAlpha(TEXT, blockAlpha), false);
-                drawArrow(gg, x + BOX_W + 2, rowY + (ROW_H - 2) / 2, blockAlpha);
-            } else {
-                gg.drawString(font, name, x + 6, rowY + 3, withAlpha(TEXT_DIM, rowAlpha), false);
-            }
+            final float rowAlpha = blockAlpha * Math.max(0.14f, 1.0f - 0.30f * distance);
+            final int color = distance < 0.5f ? withAlpha(TEXT, blockAlpha) : withAlpha(TEXT_DIM, rowAlpha);
+            gg.drawString(mc.font, I18n.get(fns.get(i).nameKey), x + 6, y + i * ROW_H + 3, color, false);
         }
 
-        // ---- 选中项描述（右侧，从右消失/从左进入）----
-        final float descOut = descAnim < 0.5f ? (1.0f - descAnim * 2.0f) : 0.0f;
-        final float descIn = descAnim < 0.5f ? 1.0f : (1.0f - (descAnim - 0.5f) * 2.0f);
-        final String desc = I18n.get(fns.get(index).descKey);
-        final int descX = x + BOX_W + 14 + Math.round((descOut + descIn) * 24.0f);
-        gg.drawString(font, desc, descX, selRowY + 3, withAlpha(TEXT_DIM, blockAlpha), false);
+        // ---- 描述：带左侧三角凸起的面板，最多两行；先向右淡出，再从左侧从左到右出现 ----
+        final float descAlpha;
+        final float descOffset;
+        if (descAnim < 0.5f) {
+            final float a = descAnim * 2.0f;
+            descAlpha = blockAlpha * (1.0f - a);
+            descOffset = a * 26.0f;
+        } else {
+            final float a = (descAnim - 0.5f) * 2.0f;
+            descAlpha = blockAlpha * a;
+            descOffset = -(1.0f - a) * 26.0f;
+        }
+        if (descAlpha > 0.02f) {
+            final List<FormattedCharSequence> lines = wrap(mc, I18n.get(fns.get(index).descKey), DESC_W);
+            drawNotchedPanel(gg, mc, x + BOX_W + DESC_GAP + Math.round(descOffset), boxY, lines, descAlpha);
+        }
 
-        // ---- 光条（沿选框边缘）----
+        // ---- 光条 ----
         if (streak >= 0.0f) {
-            drawStreak(gg, x, selRowY, BOX_W, ROW_H - 2, streak, blockAlpha);
+            drawStreak(gg, x, boxY, BOX_W, ROW_H - 1, streak, blockAlpha);
         }
 
-        // ---- 底部提示 ----
-        int hintY = y + fns.size() * ROW_H + 3;
+        // ---- 底部提示（换行）----
+        int hintY = y + fns.size() * ROW_H + 2;
         final String wheelKey = fns.get(index).wheelKey;
         if (functionActive && wheelKey != null) {
-            gg.drawString(font, I18n.get(wheelKey), x, hintY, withAlpha(TEXT_DIM, blockAlpha), false);
-            hintY += 10;
+            for (final FormattedCharSequence line : wrap(mc, I18n.get(wheelKey), HINT_W)) {
+                gg.drawString(mc.font, line, x, hintY, withAlpha(TEXT_DIM, blockAlpha), false);
+                hintY += LINE_H;
+            }
         }
         final boolean dragMode = mode == StaffControl.Mode.DRAG;
-        gg.drawString(font, I18n.get(dragMode
+        for (final FormattedCharSequence line : wrap(mc, I18n.get(dragMode
                 ? "sablestopnow.control.hint.switch_ctrl"
-                : "sablestopnow.control.hint.switch"), x, hintY, withAlpha(TEXT_DIM, blockAlpha * 0.85f), false);
+                : "sablestopnow.control.hint.switch"), HINT_W)) {
+            gg.drawString(mc.font, line, x, hintY, withAlpha(TEXT_DIM, blockAlpha * 0.85f), false);
+            hintY += LINE_H;
+        }
+
+        // ---- 准星右侧：实时穿透层数 ----
+        final int penetration = StaffEnhanceClientHandler.getPenetration();
+        gg.drawString(mc.font, I18n.get("sablestopnow.control.penetration", penetration),
+                gg.guiWidth() / 2 + 10, gg.guiHeight() / 2 - 4,
+                withAlpha(penetration > 0 ? TEXT : TEXT_DIM, penetration > 0 ? 1.0f : 0.7f), true);
+    }
+
+    /** 右上角：瞄准结构信息面板（从右侧滑入滑出）。 */
+    private static void renderBodyInfo(final GuiGraphics gg, final float dt) {
+        final Minecraft mc = Minecraft.getInstance();
+        final UUID id = StaffEnhanceClientHandler.getInfoBody();
+        final boolean show = id != null;
+        infoAnim = approach(infoAnim, show ? 1.0f : 0.0f, show ? 9.0f : 7.0f, dt);
+        if (infoAnim < 0.02f) {
+            return;
+        }
+
+        final List<String> lines = new ArrayList<>();
+        final String name = StaffEnhanceClientHandler.getInfoName();
+        lines.add(name != null && !name.isBlank() ? name : I18n.get("sablestopnow.info.unnamed"));
+        lines.add(I18n.get("sablestopnow.info.owner",
+                StaffEnhanceClientHandler.ownerNameOf(id) != null && !StaffEnhanceClientHandler.ownerNameOf(id).isBlank()
+                        ? StaffEnhanceClientHandler.ownerNameOf(id)
+                        : I18n.get("sablestopnow.info.owner.none")));
+        if (StaffEnhanceClientHandler.hasBodyInfo(id)) {
+            lines.add(I18n.get("sablestopnow.info.speed", String.format("%.1f", StaffEnhanceClientHandler.getInfoSpeed())));
+            lines.add(I18n.get("sablestopnow.info.mass", String.format("%.0f", StaffEnhanceClientHandler.getInfoMass())));
+        } else {
+            lines.add(I18n.get("sablestopnow.info.speed", "…"));
+            lines.add(I18n.get("sablestopnow.info.mass", "…"));
+        }
+        lines.add(I18n.get("sablestopnow.info.scale", String.format("%.2f", StaffEnhanceClientHandler.scaleOf(id))));
+        lines.add(I18n.get("sablestopnow.info.collision", I18n.get(
+                StaffEnhanceClientHandler.getNoCollision().contains(id)
+                        ? "sablestopnow.info.no" : "sablestopnow.info.yes")));
+        lines.add(I18n.get("sablestopnow.info.snapshot", I18n.get(
+                StaffEnhanceClientHandler.getSnapshotIds().contains(id)
+                        ? "sablestopnow.info.yes" : "sablestopnow.info.no")));
+
+        int width = 0;
+        for (final String line : lines) {
+            width = Math.max(width, mc.font.width(line));
+        }
+        final int panelW = width + 12;
+        final int panelH = lines.size() * LINE_H + 8;
+        final int slide = Math.round((1.0f - infoAnim) * (panelW + 14));
+        final int px = gg.guiWidth() - MARGIN_X - panelW + slide;
+        final int py = MARGIN_Y;
+
+        fillBox(gg, px, py, panelW, panelH, infoAnim);
+        int ty = py + 4;
+        for (int i = 0; i < lines.size(); i++) {
+            final float a = i == 0 ? infoAnim : infoAnim * 0.92f;
+            gg.drawString(mc.font, lines.get(i), px + 6, ty, withAlpha(i == 0 ? TEXT : TEXT_DIM, a), false);
+            ty += LINE_H;
+        }
     }
 
     // ------------------------------------------------------------------
     // 绘制辅助
     // ------------------------------------------------------------------
 
+    /** 按像素宽度换行（行数不设上限，面板高度自适应）。 */
+    private static List<FormattedCharSequence> wrap(final Minecraft mc, final String text, final int maxWidth) {
+        return mc.font.split(Component.literal(text), maxWidth);
+    }
+
+    /** 右边缘斜切的标签：底色 + 一圈连续描边（上边画满到斜切顶端）。 */
     private static void drawBanner(final GuiGraphics gg, final int x, final int y,
                                    final int w, final int h, final int slant, final float alpha) {
         final int fill = withAlpha(PANEL, alpha);
         final int dark = withAlpha(PANEL_DARK, alpha);
         final int edge = withAlpha(EDGE, alpha);
         for (int j = 0; j < h; j++) {
-            // 右边缘从下往上向左收，形成斜切
-            final int extra = slant * (h - 1 - j) / Math.max(1, h - 1);
-            gg.fill(x, y + j, x + w + extra, y + j + 1, j == 0 || j == h - 1 ? dark : fill);
+            final int xr = x + w + slant * (h - 1 - j) / Math.max(1, h - 1);
+            gg.fill(x, y + j, xr, y + j + 1, (j == 0 || j == h - 1) ? dark : fill);
         }
+        gg.fill(x, y, x + w + slant, y + 1, edge);
+        gg.fill(x, y + h - 1, x + w, y + h, edge);
         gg.fill(x, y, x + 1, y + h, edge);
-        gg.fill(x, y, x + w, y + 1, edge);
-        gg.fill(x, y + h - 1, x + w + slant, y + h, edge);
         for (int j = 0; j < h; j++) {
-            final int extra = slant * (h - 1 - j) / Math.max(1, h - 1);
-            gg.fill(x + w + extra - 1, y + j, x + w + extra, y + j + 1, edge);
+            final int xr = x + w + slant * (h - 1 - j) / Math.max(1, h - 1);
+            gg.fill(xr - 1, y + j, xr, y + j + 1, edge);
         }
     }
 
@@ -219,6 +293,33 @@ public final class StaffControlHud {
         gg.fill(x + w - 1, y, x + w, y + h, edge);
     }
 
+    /**
+     * 描述面板：蓝色长方体 + **左侧三角凸起**（指向选中行），内容两行、左对齐、垂直居中。
+     * {@code anchorY} 是选中行的顶部 y，面板以该行为中心上下对齐。
+     */
+    private static void drawNotchedPanel(final GuiGraphics gg, final Minecraft mc,
+                                         final int x, final int anchorY,
+                                         final List<FormattedCharSequence> lines, final float alpha) {
+        int textW = 0;
+        for (final FormattedCharSequence line : lines) {
+            textW = Math.max(textW, mc.font.width(line));
+        }
+        final int h = lines.size() * LINE_H + 6;
+        final int w = textW + 12;
+        final int y = anchorY + (ROW_H - 1) / 2 - h / 2;
+        final int tip = x - 5;
+        // 左侧三角凸起（尖朝左，指向选中行）
+        for (int i = 0; i < 5; i++) {
+            gg.fill(tip + i, y + h / 2 - i, tip + i + 1, y + h / 2 + i + 1, withAlpha(PANEL, alpha));
+        }
+        fillBox(gg, x, y, w, h, alpha);
+        int ty = y + 3;
+        for (final FormattedCharSequence line : lines) {
+            gg.drawString(mc.font, line, x + 6, ty, withAlpha(TEXT_DIM, alpha), false);
+            ty += LINE_H;
+        }
+    }
+
     private static void drawArrow(final GuiGraphics gg, final int x, final int cy, final float alpha) {
         final int color = withAlpha(EDGE, alpha);
         for (int i = 0; i < 4; i++) {
@@ -226,41 +327,43 @@ public final class StaffControlHud {
         }
     }
 
-    /** 沿选框周长跑一条「蓝灰渐变到透明」的光条。 */
+    /** 沿选框周长跑一条连续的「蓝灰渐变到透明」光条（逐像素步进）。 */
     private static void drawStreak(final GuiGraphics gg, final int x, final int y,
                                    final int w, final int h, final float phase, final float alpha) {
         final int perimeter = 2 * (w + h);
         if (perimeter <= 0) {
             return;
         }
-        final int segments = 30;
-        for (int i = 0; i < segments; i++) {
-            float t = (phase * perimeter) - i * (perimeter / (float) segments);
+        final int tail = Math.max(10, perimeter / 4);
+        for (int i = 0; i < tail; i++) {
+            float t = phase * perimeter - i;
             while (t < 0) {
                 t += perimeter;
             }
-            final float fade = 1.0f - (float) i / segments;
-            final float a = alpha * fade * fade * 0.9f;
+            while (t >= perimeter) {
+                t -= perimeter;
+            }
+            final float fade = 1.0f - (float) i / tail;
+            final float a = alpha * fade * fade;
             if (a <= 0.02f) {
                 continue;
             }
-            final int color = withAlpha(0xFFC9D6E6, a);
             final int px;
             final int py;
             if (t < w) {
-                px = x + Math.round(t);
+                px = x + (int) t;
                 py = y;
             } else if (t < w + h) {
                 px = x + w;
-                py = y + Math.round(t - w);
+                py = y + (int) (t - w);
             } else if (t < 2 * w + h) {
-                px = x + w - Math.round(t - w - h);
+                px = x + w - (int) (t - w - h);
                 py = y + h;
             } else {
                 px = x;
-                py = y + h - Math.round(t - 2 * w - h);
+                py = y + h - (int) (t - 2 * w - h);
             }
-            gg.fill(px - 1, py - 1, px + 1, py + 1, color);
+            gg.fill(px, py, px + 1, py + 1, withAlpha(STREAK, a));
         }
     }
 
@@ -282,7 +385,8 @@ public final class StaffControlHud {
     }
 
     private static int withAlpha(final int argb, final float alpha) {
-        final int a = Math.max(0, Math.min(255, Math.round(((argb >>> 24) & 0xFF) * Math.max(0.0f, Math.min(1.0f, alpha)))));
+        final int a = Math.max(0, Math.min(255,
+                Math.round(((argb >>> 24) & 0xFF) * Math.max(0.0f, Math.min(1.0f, alpha)))));
         return (a << 24) | (argb & 0x00FFFFFF);
     }
 }

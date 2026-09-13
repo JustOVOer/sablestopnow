@@ -20,7 +20,9 @@
   "client": [
     "input.MouseHandlerStaffEnhanceMixin",
     "client.VanillaChunkedSubLevelRenderScaleMixin",
-    "client.FancySubLevelRenderScaleMixin"
+    "client.VanillaSingleSubLevelRenderScaleMixin",
+    "client.FancySubLevelRenderScaleMixin",
+    "client.LevelRendererOutlineScaleMixin"
   ],
   "server": [],
   "injectors": {

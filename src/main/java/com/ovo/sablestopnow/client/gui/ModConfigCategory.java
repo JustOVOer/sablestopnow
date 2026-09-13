@@ -80,6 +80,7 @@ public enum ModConfigCategory {
             case STAFF -> List.of(
                     ConfigOption.bool("enable_staff_enhance", config.enableStaffEnhance),
                     ConfigOption.bool("new_control_scheme", config.newControlScheme),
+                    ConfigOption.bool("show_body_info", config.showBodyInfo),
                     ConfigOption.number("staff_outline_thickness", config.staffOutlineThickness, 0.005, 0.5, 0.005),
                     ConfigOption.number("staff_outline_bold_scale", config.staffOutlineBoldScale, 1.0, 8.0, 0.1),
                     ConfigOption.number("rotate_sensitivity", config.staffRotateSensitivity, 0.001, 10.0, 0.05),

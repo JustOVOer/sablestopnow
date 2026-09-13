@@ -42,6 +42,15 @@ public class SablestopNowConfig {
         }
     }
 
+    /** 右上角「瞄准结构信息面板」是否显示（默认开）。配置未加载时按默认 true 处理。 */
+    public static boolean isShowBodyInfo() {
+        try {
+            return INSTANCE.showBodyInfo.get();
+        } catch (IllegalStateException e) {
+            return true;
+        }
+    }
+
     public static double rotateSensitivity() {
         try {
             return INSTANCE.staffRotateSensitivity.get();
@@ -188,6 +197,7 @@ public class SablestopNowConfig {
         public final ModConfigSpec.DoubleValue outlineThickness;
         public final ModConfigSpec.BooleanValue enableStaffEnhance;
         public final ModConfigSpec.BooleanValue newControlScheme;
+        public final ModConfigSpec.BooleanValue showBodyInfo;
         public final ModConfigSpec.DoubleValue staffOutlineThickness;
         public final ModConfigSpec.DoubleValue staffOutlineBoldScale;
         public final ModConfigSpec.DoubleValue staffScaleSensitivity;
@@ -288,6 +298,11 @@ public class SablestopNowConfig {
                             + "(Z/V/O/K/R/C/X) are used instead.")
                     .translation("config.sablestopnow.staff_enhance.new_control_scheme")
                     .define("new_control_scheme", true);
+            showBodyInfo = builder
+                    .comment("Show the aiming body info panel at the top right while holding the physics staff "
+                            + "(owner, speed, mass, scale, collision, snapshot).")
+                    .translation("config.sablestopnow.staff_enhance.show_body_info")
+                    .define("show_body_info", true);
             staffOutlineThickness = builder
                     .comment("Thickness (in blocks) of the box-style outline drawn for selected/hovered physics bodies. Default 0.06.")
                     .translation("config.sablestopnow.staff_enhance.staff_outline_thickness")
@@ -317,9 +332,9 @@ public class SablestopNowConfig {
                     .translation("config.sablestopnow.staff_enhance.dragged_no_player_collision")
                     .define("dragged_no_player_collision", true);
             scaledNoPlayerCollision = builder
-                    .comment("A scaled physics body no longer collides with ANY player. Needed because Sable's physics collider does not scale, so an enlarged body would otherwise drag players around.")
+                    .comment("A scaled physics body no longer collides with ANY player. Off by default now that scaling rebuilds the rapier collider (the body collides with players at its real size); turn this on only if you want scaled bodies to be walk-through.")
                     .translation("config.sablestopnow.staff_enhance.scaled_no_player_collision")
-                    .define("scaled_no_player_collision", true);
+                    .define("scaled_no_player_collision", false);
             staffRotateSensitivity = builder
                     .comment("Group rotation sensitivity (TAB + mouse). Default 0.35.")
                     .defineInRange("rotate_sensitivity", 0.35, 0.001, 10.0);

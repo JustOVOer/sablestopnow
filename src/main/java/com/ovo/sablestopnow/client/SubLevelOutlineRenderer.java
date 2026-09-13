@@ -253,9 +253,14 @@ public class SubLevelOutlineRenderer {
         poseStack.translate(relative.x, relative.y, relative.z);
         poseStack.mulPose(new Quaternionf(renderPose.orientation()));
 
-        // 方块位置已被 transformPosition 乘过 pose.scale，盒子本身也要跟着乘（否则整块线框模式同样会错位）
-        float half = 0.5f * scale * (float) renderPose.scale().x();
-        AABB aabb = new AABB(-half, -half, -half, half, half, half);
+        // 方块位置已被 transformPosition 乘过 pose.scale，盒子本身也必须同样乘上 scale（否则整块线框模式同样会错位）。
+        // 逐轴取 scale：物理体目前只会等比缩放，但按轴写才和逻辑变换 pos + R·S·(p − rotPoint) 完全一致，
+        // 将来支持非等比缩放时也不会画歪（旧实现只乘 scale().x()）。
+        final Vector3dc poseScale = renderPose.scale();
+        final float halfX = (float) (0.5 * scale * poseScale.x());
+        final float halfY = (float) (0.5 * scale * poseScale.y());
+        final float halfZ = (float) (0.5 * scale * poseScale.z());
+        AABB aabb = new AABB(-halfX, -halfY, -halfZ, halfX, halfY, halfZ);
         LevelRenderer.renderLineBox(poseStack, vertexConsumer, aabb, r, g, b, 1.0f);
 
         poseStack.popPose();
@@ -285,7 +290,11 @@ public class SubLevelOutlineRenderer {
         float half = 0.5f * scale;
         // ⚠ 物理体整体缩放时，方块位置会被 renderPose.transformPosition 乘上 scale，
         // 但方块盒子本身必须同样乘上 scale，否则描边之间会出现空隙。
-        half *= (float) renderPose.scale().x();
+        // 逐轴取 scale（旧实现只乘 scale().x()，非等比缩放时会画歪）。
+        final Vector3dc poseScale = renderPose.scale();
+        final float halfX = (float) (half * poseScale.x());
+        final float halfY = (float) (half * poseScale.y());
+        final float halfZ = (float) (half * poseScale.z());
         PoseStack.Pose pose = poseStack.last();
 
         int edgeCount = 0;
@@ -307,7 +316,14 @@ public class SubLevelOutlineRenderer {
                     continue;
                 }
                 drawnEdges |= bit;
-                BoxOutlineRenderer.addCubeEdge(pose, vertexConsumer, half, cornerA, cornerB, thickness, r, g, b, 1.0f);
+                // 逐轴半边长 → BoxOutlineRenderer.addEdge 支持任意轴对齐盒（12 条棱天然轴对齐），
+                // 因此这里不再需要 addCubeEdge 的单一 half。
+                final float[] p1 = BoxOutlineRenderer.CUBE_CORNERS[cornerA];
+                final float[] p2 = BoxOutlineRenderer.CUBE_CORNERS[cornerB];
+                BoxOutlineRenderer.addEdge(pose, vertexConsumer,
+                        p1[0] * halfX, p1[1] * halfY, p1[2] * halfZ,
+                        p2[0] * halfX, p2[1] * halfY, p2[2] * halfZ,
+                        thickness, r, g, b, 1.0f);
                 edgeCount++;
             }
         }

@@ -192,6 +192,8 @@ public final class StaffEnhanceNetworking {
         MANAGER.registerClientbound(SyncSelectionsPayload.TYPE, SyncSelectionsPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(SyncOwnershipPayload.TYPE, SyncOwnershipPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(SyncSuperliminalPayload.TYPE, SyncSuperliminalPayload.CODEC, (payload, context) -> payload.handle(context));
+        MANAGER.registerServerbound(RequestBodyInfoPayload.TYPE, RequestBodyInfoPayload.CODEC, (payload, context) -> payload.handle(context));
+        MANAGER.registerClientbound(BodyInfoPayload.TYPE, BodyInfoPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(SyncActiveGhostsPayload.TYPE, SyncActiveGhostsPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(SelectionDeniedPayload.TYPE, SelectionDeniedPayload.CODEC, (payload, context) -> payload.handle(context));
     }
@@ -853,6 +855,71 @@ public final class StaffEnhanceNetworking {
 
         public void handle(final PacketContext context) {
             StaffEnhanceClientHandler.setSuperliminal(this.on);
+        }
+    }
+
+    // ============ C2S：请求某个物理结构的实时信息（速度/质量只有服务端有） ============
+    public static final class RequestBodyInfoPayload implements CustomPacketPayload {
+        public static final Type<RequestBodyInfoPayload> TYPE =
+                new Type<>(ResourceLocation.fromNamespaceAndPath(SablestopNow.MOD_ID, "staff_body_info_req"));
+        public static final StreamCodec<ByteBuf, RequestBodyInfoPayload> CODEC = StreamCodec.composite(
+                UUID_CODEC, payload -> payload.id,
+                RequestBodyInfoPayload::new);
+
+        private final UUID id;
+
+        public RequestBodyInfoPayload(final UUID id) {
+            this.id = id;
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        public void handle(final PacketContext context) {
+            if (context.player() instanceof ServerPlayer serverPlayer) {
+                StaffEnhanceServer.sendBodyInfo(serverPlayer, this.id);
+            }
+        }
+    }
+
+    // ============ S2C：物理结构实时信息（线速度 + 质量），供右上角信息面板显示 ============
+    public static final class BodyInfoPayload implements CustomPacketPayload {
+        public static final Type<BodyInfoPayload> TYPE =
+                new Type<>(ResourceLocation.fromNamespaceAndPath(SablestopNow.MOD_ID, "staff_body_info"));
+        private static final StreamCodec<ByteBuf, Double> DOUBLE_CODEC =
+                StreamCodec.of((buf, value) -> buf.writeDouble(value), ByteBuf::readDouble);
+        public static final StreamCodec<ByteBuf, BodyInfoPayload> CODEC = StreamCodec.composite(
+                UUID_CODEC, payload -> payload.id,
+                DOUBLE_CODEC, payload -> payload.vx,
+                DOUBLE_CODEC, payload -> payload.vy,
+                DOUBLE_CODEC, payload -> payload.vz,
+                DOUBLE_CODEC, payload -> payload.mass,
+                BodyInfoPayload::new);
+
+        private final UUID id;
+        private final double vx;
+        private final double vy;
+        private final double vz;
+        private final double mass;
+
+        public BodyInfoPayload(final UUID id, final double vx, final double vy,
+                               final double vz, final double mass) {
+            this.id = id;
+            this.vx = vx;
+            this.vy = vy;
+            this.vz = vz;
+            this.mass = mass;
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        public void handle(final PacketContext context) {
+            StaffEnhanceClientHandler.setBodyInfo(this.id, this.vx, this.vy, this.vz, this.mass);
         }
     }
 

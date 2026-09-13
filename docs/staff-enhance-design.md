@@ -164,6 +164,22 @@ Sable 的 `Pose3d` 有 `scale` 字段，但**除了它自己的方块描边，�
    - 推导依据：原生顶点路径的 translation 列恒为 0，相机偏移被折进每 section 的 `CHUNK_OFFSET` uniform（`sectionPos − origin + R⁻¹·(renderPos − cam)`）；因此把「先缩放再平移」改写成上式的纯矩阵组合即可，且 `(1−s)` 那一项**不能**改 translation 列（那是恒 0 的）。
 4. **超速自动锁定**：马达瞬移成员的线速度远超阈值 → 被自家 `speedScan` 锁定，表现为「松开滚轮就弹回/卡住」。修法：`StaffScaleData.activeOrScaledIds` 里的物理体在速度扫描中豁免，且缩放会话开始时把已锁定的成员临时解锁、结束时恢复；会话中若被锁定则直接解锁。
 
+> **v1.1.1 补充：还有两处独立漏缩放（已用 javap 在 2.0.4 的真实 jar 上核实，不是推测）**
+> - **Sable 自己的方块描边把缩放乘错了顺序**：`block_outline_render.LevelRendererMixin` 压的是
+>   `T(pos−cam)·R·T(plotCam−rotPoint)·S`，而逻辑变换（碰撞/拾取/我们补过的模型）是
+>   `T(pos−cam)·R·S·T(plotCam−rotPoint)`，误差是纯平移 `R·(I−S)·(plotCam−rotPoint)` ——
+>   ×0.5 时描边会被推到相机附近（屏幕上看着比模型大得多），×2 时被甩到体后面。
+>   修法：`mixin/client/LevelRendererOutlineScaleMixin`（`priority = 1000` 的 `@WrapOperation`，
+>   在 Sable 自己的 priority 2000 wrap **内层**再补 `T((I−S⁻¹)(plotCam−rotPoint))`，
+>   `T(A)R T(u)S T((I−S⁻¹)u) = T(A)R S T(u)`；并用 `camera instanceof SubLevelCamera` 兜底，
+>   万一将来 MixinExtras 的链接顺序反了也只是「什么都不做」，不会更糟）。
+> - **单方块渲染路径根本不读 scale**：`VanillaSingleSubLevelRenderData.renderSingleBlock` 只有
+>   translate→rotate（`VanillaSubLevelRenderDispatcher.isSingleBlock()` 会把 1 格包围盒的结构导到这条路径）。
+>   于是轮廓（×S）与碰撞（重采样到 `rotPoint + S·(blockPos−rotPoint)`）都缩了、模型没缩。
+>   修法：`mixin/client/VanillaSingleSubLevelRenderScaleMixin`（`@Redirect` 那次唯一的
+>   `Matrix4f.rotate`，追加枢轴夹心 `T(pivot)·S·T(−pivot)`；直接改原生 `TRANSFORM` 实例，
+>   后续 `transform.normal(...)` 的光照也跟着正确）。
+
 其它：`@ModifyArg` 的处理器参数类型必须写成目标方法**声明的**类型（`Matrix4fc`），写 `Object` 会 `InvalidInjectionException: Could not find arg matching type Ljava/lang/Object;`，表现却是「Network Protocol Error」/掉线，极易误判成网络问题。
 
 ### 8.13 幽灵化（拖拽体 / 缩放体不与玩家碰撞，v1.1.0）
@@ -195,6 +211,11 @@ Sable 的 `Pose3d` 有 `scale` 字段，但**除了它自己的方块描边，�
 - **编译依赖**：`Rapier3D`/`RapierPhysicsPipeline`/`RapierVoxelColliderData` 不在 `sable-common`，而在 Sable jar 的 `META-INF/jarjar/` 内 → 解出 `lib/sable-rapier.jar` 作为 **compileOnly**（`lib/` 不入库，README 里有解压命令）。
 
 **尚未接线（本次有意不做）**：关节/马达侧的 4 个约束 Mixin 未移植，所以 `ScaledConstraints.register()` 没有调用者、`reaim()` 目前是 no-op —— 缩放后的机械关节仍保持 scale=1 的锚点与 PD 增益（表现为关节错位/软硬不对）。原版的 `TerrainClearance`（缩放后重新贴地）也**没有**移植。旧的 `sablestopnow_scale.dat` 不再读取，老存档里已缩放的体在重新缩放前会回到 1.0。
+
+> **另有两处已知的缩放缺口（子代理核实过，属后续工作）**
+> - **Flywheel 实例化方块（Create 的轴/齿轮/传送带等）不跟随缩放**：`BlockEntityStorageMixin.sable$updateEmbeddingTransforms` 构造的是 `setTranslation(pos)·R·T(−localOffset)`，**没有 S**。要修得移植参考实现的 `SableFlywheelEmbeddingScaleMixin`，而它依赖 **MixinSquared**（`@TargetHandler`）和 Flywheel 的 compileOnly 依赖 → 需要动 `build.gradle` 与新增 mixin 配置。
+> - **scale≠1 时的拾取/破坏框定位**：Sable 的 `BlockGetter.clip` overwrite 在 plot 空间与世界空间之间比距离、且用的是**未缩放**的 rapier broadphase；参考实现的 `BlockGetterClipScaleMixin` 属 common 侧（`mixin/` 根，不在 `mixin/client/`）。拾取错了会导致描边画在错误的方块上，值得做。
+> - 仅在用户反馈「缩放后变暗/发黑」时再处理：`SableDynamicShadingNormalScaleMixin` + `ClientSubLevelSkyLightScaleMixin`（法线要走 ModelViewMat，而现在后者带了 S）。
 
 ### 8.16 新控制逻辑与 HUD（v1.1.1）
 

@@ -97,12 +97,20 @@ public final class StaffEnhanceClientHandler {
     /** 整组拖拽会话（非空=正在拖拽整组）。 */
     @Nullable private static ClientGroupDrag groupDrag;
     /**
-     * 当前这次拖拽用的队列是不是「为拖单个结构临时建的组」。
+     * 当前这次拖拽用的组是不是「为拖单个结构临时建的组」。
      *
-     * <p>空队列右键单个结构时会把它当作只有一个成员的结构组来拖，退出拖拽后要把这个临时组清掉，
-     * 否则那个结构会一直留在选中队列里（用户不想留残余选中）。原本就有多成员的队列不受影响。</p>
+     * <p>右键一个不在主队列里的结构时，只为它建一个单成员组来拖；退出拖拽后这个临时组会被清掉，
+     * 不留残余选中。主多选队列 {@link #selected} 完全不受影响（见 {@link #dragMembers}）。</p>
      */
     private static boolean tempDragGroup;
+    /**
+     * **本次拖拽会话的成员**（与主多选队列 {@link #selected} 分开存放）。
+     *
+     * <p>这样「临时单成员组」与玩家的主多选队列可以**并存、互不干扰**：拖一个不在队列里的结构
+     * 不会动到队列，退出拖拽后临时组清掉、主队列原样保留。拖拽期间的功能（锁定/无碰撞/快照/缩放等）
+     * 也以这份成员为准。</p>
+     */
+    private static final Set<UUID> dragMembers = new LinkedHashSet<>();
 
     // ---- 多人选择同步（功能2） ----
     /** 服务端同步过来的“其他玩家”的选中集合（玩家 -> 物理结构）。 */
@@ -568,22 +576,19 @@ public final class StaffEnhanceClientHandler {
             if (superliminalOn) {
                 final Pick pick = pickAtDepth(penetration);
                 if (pick != null) {
-                    selected.add(pick.body.getUniqueId());
+                    // 也走「临时单成员组」，不动主多选队列
                     startGroupDrag(pick);
                     return true;
                 }
             }
-            // 队列为空时，对准星指向的**单个**结构右键也能直接拖：把它当作「只有一个成员的结构组」，
-            // 于是同样进入整组拖拽模式（HUD 与功能清单和多成员时完全一致）。
-            final Pick pick = isArmed() ? pickQueueLeader() : pickAtDepth(penetration);
+            // 右键 = 开始拖拽。成员来源：
+            //  · 队列里已经有这个结构（或视线上有队列成员）→ 拖整个主队列；
+            //  · 否则只拖准星指向的**这一个**结构 —— 建一个**临时单成员组**，与主队列并存、互不影响。
+            Pick pick = selected.isEmpty() ? pickAtDepth(penetration) : pickQueueLeader();
+            if (pick == null && !selected.isEmpty()) {
+                pick = pickAtDepth(penetration);
+            }
             if (pick != null) {
-                if (selected.isEmpty()) {
-                    // 记录这是「为拖单个结构临时建的组」，退出拖拽时要清掉
-                    selected.add(pick.body.getUniqueId());
-                    tempDragGroup = true;
-                } else {
-                    tempDragGroup = false;
-                }
                 startGroupDrag(pick);
                 return true;
             }
@@ -1265,6 +1270,7 @@ public final class StaffEnhanceClientHandler {
         ctrlChordUsed = false;
         controlArmed = false;
         tempDragGroup = false;
+        dragMembers.clear();
         StaffControlHud.notifySustainedEnded();
         releaseAllClaims();
         multiSelect = false;
@@ -1349,6 +1355,10 @@ public final class StaffEnhanceClientHandler {
      * 对单个结构也能直接用，不需要先 Ctrl 多选）。</p>
      */
     private static Set<UUID> operationTargets() {
+        // 拖拽中：以本次拖拽的成员为准（可能是临时单成员组，与主队列并存）
+        if (groupDrag != null && !dragMembers.isEmpty()) {
+            return dragMembers;
+        }
         if (!selected.isEmpty()) {
             return selected;
         }
@@ -1621,10 +1631,16 @@ public final class StaffEnhanceClientHandler {
         }
         final UUID leaderUuid = pick.body.getUniqueId();
 
-        final List<UUID> members = new ArrayList<>(selected);
-        if (!members.contains(leaderUuid)) {
-            members.add(0, leaderUuid);
+        // 成员来源：leader 在主队列里 → 拖整个主队列；否则只为它建一个**临时单成员组**（主队列不动）
+        dragMembers.clear();
+        if (selected.contains(leaderUuid)) {
+            dragMembers.addAll(selected);
+            tempDragGroup = false;
+        } else {
+            dragMembers.add(leaderUuid);
+            tempDragGroup = true;
         }
+        final List<UUID> members = new ArrayList<>(dragMembers);
 
         // 把“质心 − 眼睛”向量分解到“视线坐标系”（前/右/上）并保持：初始时由真实质心解出，
         // 因此第一帧目标=当前质心，无瞬间位移；此后转动视线会带动质心按同分量环绕移动。
@@ -1661,9 +1677,9 @@ public final class StaffEnhanceClientHandler {
     private static void beginSuperliminalScaling(final LocalPlayer player) {
         scalingSession = true;
         scaleFactor = 1.0f;
-        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.BeginScalePayload(new ArrayList<>(selected)));
+        VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.BeginScalePayload(new ArrayList<>(dragMembers)));
         final double maxDistance = SablestopNowConfig.superliminalMaxDistance();
-        final double half = groupHalfExtent(selected);
+        final double half = groupHalfExtent(dragMembers);
         final Vec3 target = superliminalTargetPoint(player, maxDistance, half);
         superliminalBaseDistance = target != null
                 ? Math.max(0.5, target.distanceTo(player.getEyePosition(1.0f)))
@@ -1823,11 +1839,10 @@ public final class StaffEnhanceClientHandler {
             stopScaling();
         }
         prompt("sablestopnow.staff.group_stop");
-        // 只为拖单个结构而临时建立的「单成员结构组」：退出拖拽即清除，不留残余选中
+        // 只是为拖单个结构而临时建的组：退出拖拽即清掉（主多选队列不动）
         if (tempDragGroup) {
             tempDragGroup = false;
-            selected.clear();
-            releaseAllClaims();
+            dragMembers.clear();
         }
     }
 
@@ -1853,7 +1868,7 @@ public final class StaffEnhanceClientHandler {
         //   与缩放会话的“相对偏移 × 倍率”互相打架，表现就是结构乱飘。
         if (superliminalOn) {
             final double maxDistance = SablestopNowConfig.superliminalMaxDistance();
-            final double baseHalf = groupHalfExtent(selected);
+            final double baseHalf = groupHalfExtent(dragMembers);
             final BlockHitResult hit = clipOnce(player, eye, eye.add(look.scale(maxDistance)), null);
             Vec3 surface = null;
             Vec3 normal = null;
@@ -2064,7 +2079,13 @@ public final class StaffEnhanceClientHandler {
     }
 
     public static Collection<UUID> selectedSnapshot() {
-        return List.copyOf(selected);
+        // 渲染用：主队列 + 本次拖拽的成员（临时单成员组也要被描边高亮）
+        if (dragMembers.isEmpty()) {
+            return List.copyOf(selected);
+        }
+        final Set<UUID> all = new LinkedHashSet<>(selected);
+        all.addAll(dragMembers);
+        return List.copyOf(all);
     }
 
     /** 整组拖拽会话（客户端）。 */

@@ -152,10 +152,9 @@ public final class StaffControlHud {
         fillBox(gg, x, boxY, BOX_W, ROW_H - 1, blockAlpha);
         drawArrow(gg, x + BOX_W + 2, boxY + (ROW_H - 1) / 2, blockAlpha);
         for (int i = 0; i < fns.size(); i++) {
-            final float distance = Math.abs(i - selPos);
-            final float rowAlpha = blockAlpha * Math.max(0.14f, 1.0f - 0.30f * distance);
-            final int color = distance < 0.5f ? withAlpha(TEXT, blockAlpha) : withAlpha(TEXT_DIM, rowAlpha);
-            gg.drawString(mc.font, I18n.get(fns.get(i).nameKey), x + 6, y + i * ROW_H + 3, color, false);
+            // 不做虚化：所有功能项同一亮度（用户要求取消距离虚化）
+            gg.drawString(mc.font, I18n.get(fns.get(i).nameKey), x + 6, y + i * ROW_H + 3,
+                    withAlpha(TEXT_DIM, blockAlpha), false);
         }
 
         // ---- 描述：带左侧三角凸起的面板，最多两行；先向右淡出，再从左侧从左到右出现 ----

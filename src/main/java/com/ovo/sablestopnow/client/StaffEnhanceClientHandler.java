@@ -310,13 +310,15 @@ public final class StaffEnhanceClientHandler {
         }
         if (SablestopNowConfig.isNewControlScheme()) {
             // 新控制逻辑：其余功能不再由按键直接触发，改为「滚轮选中 + 左键应用」。
-            // Ctrl 采用「点击」语义：按下期间若用过滚轮（Ctrl+滚轮 = 原版切物品栏），这次按下不算点击。
+            // Ctrl 采用「点击」语义：**从按下到松开之间没有任何其它操作**才算点击切多选；
+            // 期间用过滚轮（Ctrl+滚轮 = 原版切物品栏）或点过鼠标（handleMouseNewScheme 里标记）
+            // 就只算组合键，不切多选。整组拖拽模式下 Ctrl 一律不切多选。
             if (multiSelectPressed) {
                 ctrlChordUsed = false;
-                ctrlPending = active;
+                ctrlPending = active && newControlMode() != StaffControl.Mode.DRAG;
             }
             if (ctrlPending && !StaffKeyMappings.MULTI_SELECT.isDown()) {
-                if (!ctrlChordUsed) {
+                if (!ctrlChordUsed && newControlMode() != StaffControl.Mode.DRAG) {
                     toggleMultiSelect();
                 }
                 ctrlPending = false;
@@ -446,6 +448,11 @@ public final class StaffEnhanceClientHandler {
     private static boolean handleMouseNewScheme(final int button, final int action, final int modifiers) {
         final StaffControl.Mode mode = newControlMode();
         final StaffControl.Fn fn = currentFunction();
+
+        // Ctrl 按住期间的任何鼠标操作都算「用了组合键」：这次 Ctrl 不再切多选
+        if (isControlModifierDown()) {
+            ctrlChordUsed = true;
+        }
 
         // 按住型功能：左键按下/抬起
         if (button == MOUSE_LEFT && (fn == StaffControl.Fn.CENTER || fn == StaffControl.Fn.VIEW_LOCK)) {

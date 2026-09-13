@@ -12,6 +12,7 @@
     "BlockPlaceContextOverrideMixin",
     "SubLevelHeatMapManagerMixin",
     "SubLevelEntityCollisionGhostMixin",
+    "SubLevelEntityCollisionScaleMixin",
     "scale.Rapier3DAccessor",
     "scale.RapierPhysicsPipelineMixin",
     "scale.SableBufferUtilsMixin",

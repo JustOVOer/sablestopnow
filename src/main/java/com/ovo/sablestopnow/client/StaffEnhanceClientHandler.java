@@ -566,12 +566,15 @@ public final class StaffEnhanceClientHandler {
                     return true;
                 }
             }
-            if (isArmed()) {
-                final Pick pick = pickQueueLeader();
-                if (pick != null) {
-                    startGroupDrag(pick);
-                    return true;
+            // 队列为空时，对准星指向的**单个**结构右键也能直接拖：把它当作「只有一个成员的结构组」，
+            // 于是同样进入整组拖拽模式（HUD 与功能清单和多成员时完全一致）。
+            final Pick pick = isArmed() ? pickQueueLeader() : pickAtDepth(penetration);
+            if (pick != null) {
+                if (selected.isEmpty()) {
+                    selected.add(pick.body.getUniqueId());
                 }
+                startGroupDrag(pick);
+                return true;
             }
             return false;
         }

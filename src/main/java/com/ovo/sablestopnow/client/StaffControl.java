@@ -62,16 +62,22 @@ public final class StaffControl {
         }
     }
 
-    /** 普通模式：原来的 K R O V X、左键锁定、Ctrl+O；另外把「视角锁定」（原长按 C）也做成按住型功能。 */
+    /**
+     * 普通模式：第一个必须是「锁定切换」（对应原版左键锁定）。
+     * 后面依次是视角锁定（原长按 C）、快照 K、回退 R、所有权 O、无碰撞 V、缩放 X、Ctrl+O。
+     */
     private static final List<Fn> NORMAL = List.of(
-            Fn.VIEW_LOCK, Fn.LOCK, Fn.SNAPSHOT, Fn.RESTORE, Fn.OWNERSHIP, Fn.NO_COLLISION, Fn.SCALE, Fn.OPEN_CONFIG);
+            Fn.LOCK, Fn.VIEW_LOCK, Fn.SNAPSHOT, Fn.RESTORE, Fn.OWNERSHIP, Fn.NO_COLLISION, Fn.SCALE,
+            Fn.OPEN_CONFIG);
 
     /** 多选模式：原来的 Z 键功能 + 清空队列。 */
     private static final List<Fn> MULTI = List.of(Fn.REGION, Fn.CLEAR);
 
-    /** 整组拖拽模式：原来的 K R C O V X + 左键锁定。 */
+    /**
+     * 整组拖拽模式：第一个同样是「锁定切换」，其后是归中 C、无碰撞 V、快照 K、回退 R、所有权 O、缩放 X。
+     */
     private static final List<Fn> DRAG = List.of(
-            Fn.CENTER, Fn.LOCK, Fn.NO_COLLISION, Fn.SNAPSHOT, Fn.RESTORE, Fn.OWNERSHIP, Fn.SCALE);
+            Fn.LOCK, Fn.CENTER, Fn.NO_COLLISION, Fn.SNAPSHOT, Fn.RESTORE, Fn.OWNERSHIP, Fn.SCALE);
 
     private StaffControl() {
     }

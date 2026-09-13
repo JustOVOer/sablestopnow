@@ -1,16 +1,12 @@
 package com.ovo.sablestopnow.server;
 
+import com.ovo.sablestopnow.scale.ScaledColliders;
+import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
@@ -19,82 +15,51 @@ import org.joml.Vector3dc;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.WeakHashMap;
 
 /**
- * 物理结构缩放（视觉 + 实体碰撞；Sable 的 rapier 刚体不支持缩放，见 docs/staff-enhance-design.md §8.12）。
+ * 物理结构缩放 —— 活跃会话 + 与 rapier 碰撞体/质量的联动。
  *
- * <p>两个职责：
+ * <p><b>职责范围（v1.1.0 起）</b>：
  * <ol>
  *   <li><b>活跃缩放会话</b>：按住 X 开始（先把选中的结构统一回 1.0 倍），滚轮给一个绝对倍率 f，
  *       每个成员被驱动到 {@code centroid0 + (pos0 - centroid0) * f}，自身缩放为 {@code f}
  *       —— 组内形状（相对质心的布局）保持不变；</li>
- *   <li><b>缩放持久化</b>：Sable 自己的序列化不写 scale，退出/重载会丢；这里自己存一份并定期回灌。</li>
+ *   <li><b>碰撞体 + 质量同步</b>：Sable 的 rapier 刚体没有 shape-scale，缩放后必须把体素晶格按新尺寸重采样
+ *       （{@link com.ovo.sablestopnow.scale.ScaledColliders}），并把质量/惯量按体积因子重新上传
+ *       （{@link com.ovo.sablestopnow.scale.ScaledMass}，由 {@code RapierPhysicsPipelineMixin} 接管）。</li>
  * </ol>
+ *
+ * <p><b>缩放值本身不再由本类持久化，也不再自建网络同步</b>：scale 就住在子关卡自己的位姿里，
+ * 靠 {@code SableNBTUtilsMixin} 随子关卡 NBT 落盘、靠 {@code SableBufferUtilsMixin} 随 Sable 自己的位姿包
+ * 到客户端。因此原来的 {@code SavedData}（sablestopnow_scale）与 {@code SyncScalesPayload} 都已删除。
+ * 「哪些结构当前是缩放的」改为直接读已加载子关卡的位姿 scale（{@link #activeOrScaledIds}）。
  */
-public final class StaffScaleData extends net.minecraft.world.level.saveddata.SavedData {
-    public static final String ID = "sablestopnow_scale";
+public final class StaffScaleData {
 
-    /** 物理结构 -> 缩放倍率（只记录 ≠1 的，用于跨存档恢复）。 */
-    private final Map<UUID, Float> scales = new HashMap<>();
-
-    public StaffScaleData() {
+    private StaffScaleData() {
     }
 
-    public static StaffScaleData get(final ServerLevel level) {
-        return level.getChunkSource().getDataStorage().computeIfAbsent(
-                new net.minecraft.world.level.saveddata.SavedData.Factory<>(StaffScaleData::new, StaffScaleData::load, null),
-                StaffScaleData.ID);
-    }
-
-    private static StaffScaleData load(final CompoundTag tag, final HolderLookup.Provider provider) {
-        final StaffScaleData data = new StaffScaleData();
-        final ListTag list = tag.getList(ID, Tag.TAG_COMPOUND);
-        for (int i = 0; i < list.size(); i++) {
-            final CompoundTag entry = list.getCompound(i);
-            data.scales.put(NbtUtils.loadUUID(entry.get("sub")), entry.getFloat("scale"));
-        }
-        return data;
-    }
-
-    @Override
-    public @NotNull CompoundTag save(final CompoundTag tag, final HolderLookup.@NotNull Provider provider) {
-        final ListTag list = new ListTag();
-        for (final Map.Entry<UUID, Float> entry : this.scales.entrySet()) {
-            final CompoundTag entryTag = new CompoundTag();
-            entryTag.put("sub", NbtUtils.createUUID(entry.getKey()));
-            entryTag.putFloat("scale", entry.getValue());
-            list.add(entryTag);
-        }
-        tag.put(ID, list);
-        return tag;
-    }
-
-    public float scaleOf(final UUID subLevel) {
-        return this.scales.getOrDefault(subLevel, 1.0f);
-    }
-
-    public void setScale(final UUID subLevel, final float scale) {
-        if (Math.abs(scale - 1.0f) < 1.0e-3f) {
-            this.scales.remove(subLevel);
-        } else {
-            this.scales.put(subLevel, scale);
-        }
-        this.setDirty(true);
-    }
-
-    public Map<UUID, Float> allScales() {
-        return this.scales;
-    }
+    /** 位姿 scale 与 1.0 的判定阈值。 */
+    private static final double SCALE_EPSILON = 1.0e-3;
 
     // ==================================================================
     //  活跃缩放会话
     // ==================================================================
 
     private static final Map<UUID, ScaleSession> SESSIONS = new HashMap<>();
+
+    /**
+     * 每个结构「我们上一次看到的位姿 scale」，用于发现不是本次会话造成的缩放（例如从存档载入、
+     * 或其它系统改了 scale），以及避免重复重建。key 用弱引用，维度卸载后自动回收。
+     */
+    private static final Map<ServerLevel, Map<UUID, Float>> OBSERVED_SCALES = new WeakHashMap<>();
 
     /** 一个成员的初始状态（会话开始时记录）。 */
     private static final class Member {
@@ -124,6 +89,56 @@ public final class StaffScaleData extends net.minecraft.world.level.saveddata.Sa
         }
     }
 
+    private static boolean isUnscaled(final Vector3dc scale) {
+        return Math.abs(scale.x() - 1.0) < SCALE_EPSILON
+                && Math.abs(scale.y() - 1.0) < SCALE_EPSILON
+                && Math.abs(scale.z() - 1.0) < SCALE_EPSILON;
+    }
+
+    @Nullable
+    private static PhysicsPipeline pipelineOf(final ServerLevel level, final ServerSubLevel sub) {
+        final ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container == null || sub.isRemoved()) {
+            return null;
+        }
+        final dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem physics = container.physicsSystem();
+        return physics == null ? null : physics.getPipeline();
+    }
+
+    /**
+     * 把 rapier 侧的碰撞体与质量对齐到 {@code sub} 当前位姿 scale —— <b>缩放的真正落地点</b>。
+     *
+     * <p>调用顺序对应参考实现 {@code SubLevelScale.applyToBody}：
+     * <ol>
+     *   <li>{@link ScaledColliders#onScaleChanged} 立刻按新尺寸重采样体素晶格（scale=1 时把碰撞体交还 Sable）；
+     *       必须同步做完 —— 拖到 tick 末的话，这一 tick 里碰撞体还是旧的、而质量已经是新的；</li>
+     *   <li>{@code pipeline.onStatsChanged} 主动推一次质量重传：Sable 只在「未缩放的质量/CoM/惯量变了」时上传，
+     *       纯缩放不会触发它。{@code RapierPhysicsPipelineMixin} 会把质量 ×(sx·sy·sz)、惯量按 S² 变换后上传，
+     *       并把 localBounds 换成缩放后的格子；</li>
+     *   <li>{@code wakeUp} 让睡着的结构在新重量下重新结算；</li>
+     *   <li>把「上次网络化的位置」推远：Sable 只在位姿超出 position/orientation 容差时才发快照
+     *       （{@code Pose3dc.withinTolerance} 忽略 scale），单独改 scale 的静止结构否则永远不发包。</li>
+     * </ol>
+     */
+    private static void syncPhysics(final ServerLevel level, final ServerSubLevel sub) {
+        // 1) 碰撞体：按当前 scale 重采样（这也是 scale=1 时交还 Sable 碰撞体的路径）
+        ScaledColliders.onScaleChanged(sub);
+
+        // 2) 质量 / 惯量 / localBounds；第 3 步唤醒
+        final PhysicsPipeline pipeline = pipelineOf(level, sub);
+        if (pipeline != null) {
+            pipeline.onStatsChanged(sub);
+            pipeline.wakeUp(sub);
+        }
+
+        // 4) 逼 Sable 在下一次跟踪 tick 发一次完整位姿（把 scale 带给客户端）
+        sub.lastNetworkedPose().position().add(0.0, 1.0E7, 0.0);
+
+        // 记下我们看到的 scale，免得 reapply 再重建一次
+        OBSERVED_SCALES.computeIfAbsent(level, key -> new HashMap<>())
+                .put(sub.getUniqueId(), (float) sub.logicalPose().scale().x());
+    }
+
     /**
      * 开始缩放会话：把选中的结构统一回 1.0 倍并记录基线。
      *
@@ -134,7 +149,6 @@ public final class StaffScaleData extends net.minecraft.world.level.saveddata.Sa
         if (container == null) {
             return 0;
         }
-        final StaffScaleData data = get(level);
         final var handler = dev.simulated_team.simulated.content.physics_staff.PhysicsStaffServerHandler.get(level);
         final ScaleSession session = new ScaleSession(level);
         for (final UUID id : ids) {
@@ -147,9 +161,12 @@ public final class StaffScaleData extends net.minecraft.world.level.saveddata.Sa
             if (locked) {
                 handler.toggleLock(id);
             }
-            // 统一到未缩放状态
+            // 统一到未缩放状态（碰撞体也跟着回到 stock：ScaledColliders 会把 resample 过的区块删掉并重放 Sable 的上传）
+            final boolean wasScaled = !isUnscaled(sub.logicalPose().scale());
             sub.logicalPose().scale().set(1.0, 1.0, 1.0);
-            data.setScale(id, 1.0f);
+            if (wasScaled) {
+                syncPhysics(level, sub);
+            }
             session.members.add(new Member(sub, locked));
         }
         if (session.members.isEmpty()) {
@@ -170,7 +187,6 @@ public final class StaffScaleData extends net.minecraft.world.level.saveddata.Sa
         }
         com.ovo.sablestopnow.SablestopNow.LOGGER.info("[staff] scale begin: {} members ({} were locked -> temporarily unlocked)",
                 session.members.size(), lockedCount);
-        broadcastScales(level);
         return session.members.size();
     }
 
@@ -195,8 +211,6 @@ public final class StaffScaleData extends net.minecraft.world.level.saveddata.Sa
         if (session == null || session.level != level) {
             return;
         }
-        final StaffScaleData data = get(level);
-        final var pipeline = SubLevelContainer.getContainer(level).physicsSystem().getPipeline();
         final var handler = dev.simulated_team.simulated.content.physics_staff.PhysicsStaffServerHandler.get(level);
         for (final Member member : session.members) {
             final ServerSubLevel sub = member.sub;
@@ -218,10 +232,12 @@ public final class StaffScaleData extends net.minecraft.world.level.saveddata.Sa
             if (handle != null) {
                 handle.teleport(target, member.orientation);
             }
-            data.setScale(sub.getUniqueId(), factor);
+            // 世界空间包围盒随尺寸变化（客户端 change-bounds 包用）
+            sub.updateBoundingBox();
+            // ★ 关键：让 rapier 的碰撞体与质量跟着新尺寸走
+            syncPhysics(level, sub);
             session.lastTargets.put(sub.getUniqueId(), new Vector3d(target));
         }
-        broadcastScales(level);
     }
 
     /** 诊断：活跃会话成员是否被物理/约束拉回去了（每 20 tick 由 reapply 调用）。 */
@@ -264,8 +280,6 @@ public final class StaffScaleData extends net.minecraft.world.level.saveddata.Sa
                 }
             }
         }
-        get(level).setDirty(true);
-        broadcastScales(level);
     }
 
     public static void releaseAll(final UUID player) {
@@ -274,6 +288,7 @@ public final class StaffScaleData extends net.minecraft.world.level.saveddata.Sa
 
     public static void clearSessions() {
         SESSIONS.clear();
+        OBSERVED_SCALES.clear();
     }
 
     /** 是否正在缩放（用于 HUD/互斥判断）。 */
@@ -281,9 +296,22 @@ public final class StaffScaleData extends net.minecraft.world.level.saveddata.Sa
         return SESSIONS.containsKey(player);
     }
 
-    /** 本维度「正在被缩放」或「已经缩放（倍率≠1）」的所有结构 id（供超速锁豁免等）。 */
-    public static java.util.Set<UUID> activeOrScaledIds(final ServerLevel level) {
-        final java.util.Set<UUID> out = new java.util.HashSet<>(get(level).allScales().keySet());
+    /**
+     * 本维度「正在被缩放」或「已经缩放（倍率≠1）」的所有结构 id（供超速锁豁免等）。
+     *
+     * <p>缩放表不再由本模组保存，所以这里直接读已加载子关卡的位姿 scale —— 存档写进子关卡 NBT 的 scale
+     * 一载入就在这里生效，比原来的 SavedData 更准（不会出现“存档说有、实体已换”的错配）。
+     */
+    public static Set<UUID> activeOrScaledIds(final ServerLevel level) {
+        final Set<UUID> out = new HashSet<>();
+        final ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container != null) {
+            for (final ServerSubLevel sub : container.getAllSubLevels()) {
+                if (!sub.isRemoved() && !isUnscaled(sub.logicalPose().scale())) {
+                    out.add(sub.getUniqueId());
+                }
+            }
+        }
         for (final ScaleSession session : SESSIONS.values()) {
             if (session.level == level) {
                 for (final Member member : session.members) {
@@ -328,61 +356,58 @@ public final class StaffScaleData extends net.minecraft.world.level.saveddata.Sa
     }
 
     /**
-     * 把存档里的缩放值回灌到已加载的物理结构上（Sable 自己的序列化不写 scale，重载后会丢）。
-     * 每 N tick 调一次即可。
+     * 每 N tick 的一致性兜底。现在的「回灌」不再是往位姿里写 SavedData 的旧值（那是重复持久化），
+     * 而是：
+     * <ol>
+     *   <li>诊断活跃会话成员是否被物理/约束拉回（{@link #diagnoseDrift}）；</li>
+     *   <li>发现<b>位姿 scale 在我们背后变了</b>的结构（典型是从存档载入一个已缩放的体、或别的系统改了 scale），
+     *       立刻把它的 rapier 碰撞体与质量对齐到当前 scale。第一次见到某个体时只记录不动手 ——
+     *       从磁盘载入的已缩放体由物理管线自己的 dirty → {@code ScaledColliders.flushAll} 流程处理。</li>
+     * </ol>
      */
     public static void reapply(final ServerLevel level) {
         diagnoseDrift(level);
-        final StaffScaleData data = get(level);
-        if (data.allScales().isEmpty()) {
-            return;
-        }
         final ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
         if (container == null) {
             return;
         }
-        boolean changed = false;
-        for (final Map.Entry<UUID, Float> entry : new ArrayList<>(data.allScales().entrySet())) {
-            final ServerSubLevel sub = (ServerSubLevel) container.getSubLevel(entry.getKey());
-            if (sub == null || sub.isRemoved()) {
+        final Map<UUID, Float> observed = OBSERVED_SCALES.computeIfAbsent(level, key -> new HashMap<>());
+        for (final ServerSubLevel sub : container.getAllSubLevels()) {
+            final UUID id = sub.getUniqueId();
+            if (sub.isRemoved()) {
+                observed.remove(id);
                 continue;
             }
-            // 正在被玩家缩放的结构不插手
-            final UUID id = entry.getKey();
-            boolean active = false;
-            for (final ScaleSession session : SESSIONS.values()) {
-                if (session.level == level && session.members.stream().anyMatch(m -> m.sub.getUniqueId().equals(id))) {
-                    active = true;
-                    break;
+            final float now = (float) sub.logicalPose().scale().x();
+            final Float last = observed.get(id);
+            if (last == null) {
+                // 第一次见到：只记录（普通结构永远是 1，不插手）
+                observed.put(id, now);
+                continue;
+            }
+            if (Math.abs(last - now) < (float) SCALE_EPSILON) {
+                continue; // 稳态
+            }
+            if (isScaling(level, id)) {
+                continue; // 玩家正在缩放它，apply() 负责
+            }
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[staff] scale changed outside a session on {}: {} -> {} - resyncing collider/mass", id, last, now);
+            syncPhysics(level, sub);
+        }
+    }
+
+    /** 该结构是否属于本维度某个活跃会话。 */
+    private static boolean isScaling(final ServerLevel level, final UUID id) {
+        for (final ScaleSession session : SESSIONS.values()) {
+            if (session.level != level) {
+                continue;
+            }
+            for (final Member member : session.members) {
+                if (member.sub.getUniqueId().equals(id)) {
+                    return true;
                 }
             }
-            if (active) {
-                continue;
-            }
-            final float target = entry.getValue();
-            if (Math.abs(sub.logicalPose().scale().x() - target) > 1.0e-3) {
-                sub.logicalPose().scale().set(target, target, target);
-                changed = true;
-            }
         }
-        if (changed) {
-            broadcastScales(level);
-        }
-    }
-
-    /** 把该维度的缩放表广播给所有客户端（Sable 的位姿同步不含 scale）。 */
-    public static void broadcastScales(final ServerLevel level) {
-        final List<com.ovo.sablestopnow.network.StaffEnhanceNetworking.ScaleEntry> entries = scaleEntries(level);
-        foundry.veil.api.network.VeilPacketManager.all(level.getServer())
-                .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncScalesPayload(
-                        level.dimension().location(), entries));
-    }
-
-    public static List<com.ovo.sablestopnow.network.StaffEnhanceNetworking.ScaleEntry> scaleEntries(final ServerLevel level) {
-        final List<com.ovo.sablestopnow.network.StaffEnhanceNetworking.ScaleEntry> out = new ArrayList<>();
-        for (final Map.Entry<UUID, Float> entry : get(level).allScales().entrySet()) {
-            out.add(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.ScaleEntry(entry.getKey(), entry.getValue()));
-        }
-        return out;
+        return false;
     }
 }

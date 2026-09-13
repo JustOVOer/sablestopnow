@@ -2,6 +2,7 @@ package com.ovo.sablestopnow.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.ovo.sablestopnow.SablestopNow;
+import com.ovo.sablestopnow.SablestopNowConfig;
 import dev.simulated_team.simulated.content.physics_staff.PhysicsStaffItem;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -36,6 +37,10 @@ public final class StaffEnhanceHud {
             return;
         }
         final boolean multi = StaffEnhanceClientHandler.isMultiSelect();
+        // 新控制逻辑开启时，左上角交给 StaffControlHud（模式 + 功能清单 + 描述）
+        if (SablestopNowConfig.isNewControlScheme()) {
+            return;
+        }
         final int regionStep = StaffEnhanceClientHandler.getRegionStep();
         final boolean armed = !multi && !StaffEnhanceClientHandler.getSelected().isEmpty();
         final boolean dragging = StaffEnhanceClientHandler.isGroupDragging();

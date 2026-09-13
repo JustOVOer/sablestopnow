@@ -183,6 +183,28 @@ Sable 的 `Pose3d` 有 `scale` 字段，但**除了它自己的方块描边，�
 - **多选模式内外都能用**：非多选时右键会先 `pickAtDepth` 命中体 → `selected.add` → `startGroupDrag`，并**吞掉该次点击**，避免航空学同时启动它自己的拖拽。
 - 既定取舍：落点是「视线命中的平面」，与真实物理（未缩放的碰撞体）会有观感差异。
 
+### 8.15 缩放真正同步碰撞与质量（v1.1.1，移植自 `depends/sable-scale-main`）
+
+原先「缩放只是视觉 + 玩家碰撞」的限制被移除了：现在缩放会**重采样体素格**，让 rapier 的碰撞体跟着变大变小。
+
+- **原理**：rapier 原生拥有体素几何（按 cell 打包上传），**没有 shape-scale API**；但 collider entry 是 Java 侧的 box 列表，而原生 body 变换用的是**未缩放位姿**。所以把每个方块的碰撞盒放到 `rotPoint + S·(blockPos − rotPoint)`，原生变换就会精确落到缩放后的外壳上。盒子在 cell 边界切分 + 缓存去重；回到 scale=1 时移除重采样 section 并恢复 Sable 原生上传。
+- **触发路径**：`UpdateScalePayload/BeginScalePayload.handle` → `StaffScaleData.apply/begin` → 写 `logicalPose().scale()` → `teleport` → `syncPhysics()` → `ScaledColliders.onScaleChanged`（重采样 + `Rapier3DAccessor.addChunk`）→ `pipeline.onStatsChanged`（mixin `@Redirect` → `ScaledMass.upload`：质量 ×k、惯量按二阶矩变换）→ `wakeUp` → 微调 `lastNetworkedPose` 逼出一次位姿包（Sable 的容差判定不看 scale，静止时纯 scale 变化本来不会发）。
+- **方块改动**：`RapierPhysicsPipelineMixin` 对 scale≠1 的 plot **取消** Sable 原生 chunk 上传、改为标脏，`StaffEnhanceServer` 每 server tick `ScaledColliders.flushAll()` 重建。
+- **同步与落盘改为复用 Sable 自己的通道**：`SableBufferUtilsMixin` 在 `SableBufferUtils.write/read(ByteBuf, Pose3dc)`（位姿过网络的**唯一漏斗**）的 TAIL 追加 scale，`SableNBTUtilsMixin` 同理落 NBT。于是自建的 `SyncScalesPayload` + `SavedData(sablestopnow_scale.dat)` 全部删除，客户端改为直接读 `logicalPose().scale()`。
+  > ⚠ **协议被扩展：服务端与客户端都必须装本模组**，否则位姿包解析错位。
+- **编译依赖**：`Rapier3D`/`RapierPhysicsPipeline`/`RapierVoxelColliderData` 不在 `sable-common`，而在 Sable jar 的 `META-INF/jarjar/` 内 → 解出 `lib/sable-rapier.jar` 作为 **compileOnly**（`lib/` 不入库，README 里有解压命令）。
+
+**尚未接线（本次有意不做）**：关节/马达侧的 4 个约束 Mixin 未移植，所以 `ScaledConstraints.register()` 没有调用者、`reaim()` 目前是 no-op —— 缩放后的机械关节仍保持 scale=1 的锚点与 PD 增益（表现为关节错位/软硬不对）。原版的 `TerrainClearance`（缩放后重新贴地）也**没有**移植。旧的 `sablestopnow_scale.dat` 不再读取，老存档里已缩放的体在重新缩放前会回到 1.0。
+
+### 8.16 新控制逻辑与 HUD（v1.1.1）
+
+`[staff_enhance] new_control_scheme`（默认 **true**）开启后覆盖原键位：**Ctrl** 切多选、**滚轮**切功能、**左键**应用功能；旧的 Z/V/O/K/R/C/X 只作为「功能项」存在，不再直接触发（`Ctrl+O` 例外，始终可用）。
+
+- 三种模式由运行时状态**推导**（`newControlMode()`）：`groupDrag != null` → DRAG，否则 `multiSelect ? MULTI : NORMAL`；每个模式各自记住上次选中的功能下标。
+- 持续型功能（区域选择 / 缩放）激活期间，**鼠标与滚轮都归该功能**（`handleMouseNewScheme`/`handleScroll` 最前面就是这两个分支）；按住型功能（视角锁定 / 整组归中）走左键的按下/抬起（`MouseHandlerStaffEnhanceMixin` 本来就转发 release）。
+- 视角锁定在原逻辑里是长按 **C**，新逻辑下没有 C，因此**新增**了 `VIEW_LOCK` 功能项（普通模式，按住左键）以免丢功能。
+- HUD 是独立的 `client/StaffControlHud`（新逻辑开启时旧 `StaffEnhanceHud` 直接 return）：模式标签（右边缘斜切）+ 该模式**全部**功能（离当前项越远 alpha 越低）+ 右侧描述 + 底部提示；动画为指数缓动，模式切换「先向左消失再从左侧进入」，应用功能时沿选框周长跑一条渐变光条（持续型功能一直旋转到动作结束）。配色沿用 `client/gui` 那套 `PANEL/PANEL_DARK/EDGE`。
+
 ## 9. 待办 / 可迭代点
 
 - 大结构整组手感调参（线性 2650/125、角向 10000/850、`rotate/scroll_sensitivity`、`ghost_real` 的 160 格半径）。

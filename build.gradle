@@ -173,6 +173,11 @@ dependencies {
     implementation files('lib/veil-neoforge-1.21.1-4.3.2.jar')
     implementation files('lib/ForgeConfigAPIPort-v21.1.3-1.21.1-NeoForge.jar')
     implementation files('lib/create-1.21.1-6.0.10.jar')
+    // Sable 的 rapier 物理管线（Rapier3D / RapierPhysicsPipeline / RapierVoxelColliderData）：
+    // sable-common 里没有，它被打包在 Sable mod jar 的 META-INF/jarjar/ 里（sable-sable_rapier-*.jar）。
+    // 从 run/mods/sable-neoforge-*.jar 里解出来放在 lib/ 下编译用；运行时由 Sable 自己（JarJar）提供，
+    // 所以这里是 compileOnly —— 绝不把它打进我们的产物。
+    compileOnly files('lib/sable-rapier.jar')
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.

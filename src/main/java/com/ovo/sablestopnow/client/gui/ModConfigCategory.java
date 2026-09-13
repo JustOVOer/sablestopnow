@@ -79,6 +79,7 @@ public enum ModConfigCategory {
                     ConfigOption.number("speed_limit_threshold", config.speedLimitThreshold, 0.1, 200.0, 0.5));
             case STAFF -> List.of(
                     ConfigOption.bool("enable_staff_enhance", config.enableStaffEnhance),
+                    ConfigOption.bool("new_control_scheme", config.newControlScheme),
                     ConfigOption.number("staff_outline_thickness", config.staffOutlineThickness, 0.005, 0.5, 0.005),
                     ConfigOption.number("staff_outline_bold_scale", config.staffOutlineBoldScale, 1.0, 8.0, 0.1),
                     ConfigOption.number("rotate_sensitivity", config.staffRotateSensitivity, 0.001, 10.0, 0.05),

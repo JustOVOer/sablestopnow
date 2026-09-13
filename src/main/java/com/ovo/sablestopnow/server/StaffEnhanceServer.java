@@ -554,7 +554,8 @@ public final class StaffEnhanceServer {
             }
             // 缩放中的结构：物理碰撞体不随缩放变化，避免把玩家"吸住" → 对所有玩家幽灵化
             if (SablestopNowConfig.isScaledNoPlayerCollision()) {
-                globalGhosts.addAll(StaffScaleData.get(level).allScales().keySet());
+                // 缩放表现在住在子关卡自己的位姿里（NBT 持久化 + Sable 位姿包同步），这里直接读已加载的子关卡
+                globalGhosts.addAll(StaffScaleData.activeOrScaledIds(level));
             }
         }
         if (ghosts.equals(lastGhosts) && globalGhosts.equals(lastGlobalGhosts)) {
@@ -633,7 +634,7 @@ public final class StaffEnhanceServer {
         if (server.getTickCount() % 10 == 0) {
             ghostTick(server);
         }
-        // 缩放值回灌（Sable 自己的序列化不写 scale，重载后会丢）
+        // 缩放一致性兜底：诊断漂移 + 把「在我们背后被改过 scale」的结构重新对齐（reapply 内部有稳态短路）
         if (server.getTickCount() % 20 == 0) {
             for (final ServerLevel level : server.getAllLevels()) {
                 StaffScaleData.reapply(level);
@@ -641,6 +642,9 @@ public final class StaffEnhanceServer {
         }
         // 拖拽体对拖拽者幽灵化：每 tick 权威计算并在变化时广播
         ghostSyncTick(server);
+        // 缩放过的结构：把这一 tick 攒下的体素晶格脏标记一次性重建（见 ScaledColliders.flushAll）。
+        // 放在所有维度 tick 完之后、下一物理步之前，保证碰撞体/质量/包围盒同一 tick 内一致。
+        com.ovo.sablestopnow.scale.ScaledColliders.flushAll();
     }
 
     // ============ 无碰撞标记（视觉 + 状态记录；真实只对其它 Sable 体，见上方 ghostTick） ============
@@ -721,10 +725,6 @@ public final class StaffEnhanceServer {
                     .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncLocksPayload(level.dimension(),
                             lockedSnapshot(level)));
             broadcastOwnershipTo(player, level);
-            // 缩放表补发（Sable 的位姿同步不含 scale）
-            foundry.veil.api.network.VeilPacketManager.player(player)
-                    .sendPacket(new com.ovo.sablestopnow.network.StaffEnhanceNetworking.SyncScalesPayload(
-                            level.dimension().location(), StaffScaleData.scaleEntries(level)));
         }
     }
 

@@ -29,6 +29,19 @@ public class SablestopNowConfig {
         }
     }
 
+    /**
+     * 新控制逻辑是否开启（默认开启）：Ctrl 切多选、滚轮切功能、左键应用功能。
+     *
+     * <p>关闭时回到原来的键位（Z/V/O/K/R/C/X）。配置未加载时按默认 true 处理 —— 与配置文件里的默认值保持一致。</p>
+     */
+    public static boolean isNewControlScheme() {
+        try {
+            return INSTANCE.newControlScheme.get();
+        } catch (IllegalStateException e) {
+            return true;
+        }
+    }
+
     public static double rotateSensitivity() {
         try {
             return INSTANCE.staffRotateSensitivity.get();
@@ -174,6 +187,7 @@ public class SablestopNowConfig {
         public final ModConfigSpec.DoubleValue axisAngleDegrees;
         public final ModConfigSpec.DoubleValue outlineThickness;
         public final ModConfigSpec.BooleanValue enableStaffEnhance;
+        public final ModConfigSpec.BooleanValue newControlScheme;
         public final ModConfigSpec.DoubleValue staffOutlineThickness;
         public final ModConfigSpec.DoubleValue staffOutlineBoldScale;
         public final ModConfigSpec.DoubleValue staffScaleSensitivity;
@@ -268,6 +282,12 @@ public class SablestopNowConfig {
                     .comment("Master switch for all physics staff enhancement features (Ctrl multi-select, right-click select, Alt+scroll penetration, Z box select, V collision toggle, group move). When false, the staff behaves exactly as Simulated/Aeronautics' original.")
                     .translation("config.sablestopnow.staff_enhance.enable_staff_enhance")
                     .define("enable_staff_enhance", false);
+            newControlScheme = builder
+                    .comment("New control scheme (on by default): Ctrl = multi-select, mouse wheel = switch function, "
+                            + "left click = apply the selected function. When false, the original key bindings "
+                            + "(Z/V/O/K/R/C/X) are used instead.")
+                    .translation("config.sablestopnow.staff_enhance.new_control_scheme")
+                    .define("new_control_scheme", true);
             staffOutlineThickness = builder
                     .comment("Thickness (in blocks) of the box-style outline drawn for selected/hovered physics bodies. Default 0.06.")
                     .translation("config.sablestopnow.staff_enhance.staff_outline_thickness")

@@ -193,7 +193,6 @@ public final class StaffEnhanceNetworking {
         MANAGER.registerClientbound(SyncOwnershipPayload.TYPE, SyncOwnershipPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(SyncSuperliminalPayload.TYPE, SyncSuperliminalPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(SyncActiveGhostsPayload.TYPE, SyncActiveGhostsPayload.CODEC, (payload, context) -> payload.handle(context));
-        MANAGER.registerClientbound(SyncScalesPayload.TYPE, SyncScalesPayload.CODEC, (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(SelectionDeniedPayload.TYPE, SelectionDeniedPayload.CODEC, (payload, context) -> payload.handle(context));
     }
 
@@ -802,58 +801,6 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             StaffScaleData.end((ServerLevel) context.level(), player.getUUID());
-        }
-    }
-
-    /** S2C：缩放表（Sable 自己的位姿同步不写 scale，必须由我们自己同步，否则客户端看不见缩放）。 */
-    public record ScaleEntry(UUID subLevel, float scale) {
-    }
-
-    static final StreamCodec<ByteBuf, ScaleEntry> SCALE_ENTRY_CODEC = StreamCodec.of(
-            (buf, e) -> {
-                UUID_CODEC.encode(buf, e.subLevel());
-                buf.writeFloat(e.scale());
-            },
-            buf -> new ScaleEntry(UUID_CODEC.decode(buf), buf.readFloat()));
-
-    static final StreamCodec<ByteBuf, List<ScaleEntry>> SCALE_LIST_CODEC = StreamCodec.of(
-            (buf, list) -> {
-                buf.writeInt(list.size());
-                for (final ScaleEntry entry : list) {
-                    SCALE_ENTRY_CODEC.encode(buf, entry);
-                }
-            },
-            buf -> {
-                final int n = buf.readInt();
-                final List<ScaleEntry> out = new ArrayList<>(n);
-                for (int i = 0; i < n; i++) {
-                    out.add(SCALE_ENTRY_CODEC.decode(buf));
-                }
-                return out;
-            });
-
-    public static final class SyncScalesPayload implements CustomPacketPayload {
-        public static final Type<SyncScalesPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(SablestopNow.MOD_ID, "staff_sync_scales"));
-        public static final StreamCodec<ByteBuf, SyncScalesPayload> CODEC = StreamCodec.composite(
-                DIMENSION_CODEC, payload -> payload.dimension,
-                SCALE_LIST_CODEC, payload -> payload.entries,
-                SyncScalesPayload::new);
-
-        private final ResourceLocation dimension;
-        private final List<ScaleEntry> entries;
-
-        public SyncScalesPayload(final ResourceLocation dimension, final List<ScaleEntry> entries) {
-            this.dimension = dimension;
-            this.entries = new ArrayList<>(entries);
-        }
-
-        @Override
-        public Type<? extends CustomPacketPayload> type() {
-            return TYPE;
-        }
-
-        public void handle(final PacketContext context) {
-            StaffEnhanceClientHandler.setScales(this.dimension, this.entries);
         }
     }
 

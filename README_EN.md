@@ -95,6 +95,15 @@ gradlew.bat build        # jar in build/libs/aeronautics-tweaks-toolkit-1.1.0.ja
 gradlew.bat runClient    # dev client
 ```
 
+> ⚠ **Building needs the local jars in `lib/`** (veil / ForgeConfigAPIPort / create / **sable-rapier**); those files are not committed.
+> `lib/sable-rapier.jar` holds the Sable physics pipeline implementation (`Rapier3D` / `RapierPhysicsPipeline` / `RapierVoxelColliderData`).
+> It is not in `sable-common` — it ships inside Sable's own mod jar under `META-INF/jarjar/`, so extract it yourself (**compileOnly, never bundled**):
+>
+> ```powershell
+> tar -xf run\mods\sable-neoforge-1.21.1-2.0.4.jar "META-INF/jarjar/dev.ryanhcode.sable.sable-sable_rapier-1.21.1-2.0.4.jar"
+> Move-Item "META-INF\jarjar\dev.ryanhcode.sable.sable-sable_rapier-1.21.1-2.0.4.jar" lib\sable-rapier.jar
+> ```
+
 ## License
 
 See `mod_license` in `gradle.properties`. `TEMPLATE_LICENSE.txt` is an MIT template — declare the license you intend before publishing.

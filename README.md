@@ -93,6 +93,15 @@ gradlew.bat build        # 产物在 build/libs/aeronautics-tweaks-toolkit-1.1.0
 gradlew.bat runClient    # 开发客户端
 ```
 
+> ⚠ **编译需要本地 `lib/` 下的 jar**（veil / ForgeConfigAPIPort / create / **sable-rapier**），这些文件不入库。
+> 其中 `lib/sable-rapier.jar` 是 Sable 物理管线（`Rapier3D`/`RapierPhysicsPipeline`/`RapierVoxelColliderData`）的实现类，
+> 它不在 `sable-common` 里，而是打包在 Sable mod jar 的 `META-INF/jarjar/` 内，需要自己解出来（**compileOnly，不会打进产物**）：
+>
+> ```powershell
+> tar -xf run\mods\sable-neoforge-1.21.1-2.0.4.jar "META-INF/jarjar/dev.ryanhcode.sable.sable-sable_rapier-1.21.1-2.0.4.jar"
+> Move-Item "META-INF\jarjar\dev.ryanhcode.sable.sable-sable_rapier-1.21.1-2.0.4.jar" lib\sable-rapier.jar
+> ```
+
 ## 许可证
 
 见 `gradle.properties` 的 `mod_license`。仓库内 `TEMPLATE_LICENSE.txt` 为 MIT 模板，发布前请按需声明。

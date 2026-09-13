@@ -123,16 +123,23 @@ public final class StaffEnhanceClientHandler {
     /** 当前缩放倍率（显示用）。 */
     private static float scaleFactor = 1.0f;
 
+    // ---- 新控制逻辑（Ctrl 切多选 / 滚轮切功能 / 左键应用） ----
+    /** 三种模式各自记住上次选中的功能下标。 */
+    private static int newIndexNormal;
+    private static int newIndexMulti;
+    private static int newIndexDrag;
+    /** 「归中」功能：按住左键期间为 true（对应原来的长按 C）。 */
+    private static boolean centerHold;
+    /** 「视角锁定」功能：按住左键期间为 true（对应原来的长按 C）。 */
+    private static boolean viewLockHold;
+    /** 上一 tick 的模式，用于给 HUD 触发切换动画。 */
+    @Nullable private static StaffControl.Mode lastControlMode;
+
     // ---- 彩蛋：Superliminal ----
     /** 服务端同步的彩蛋开关。 */
     private static boolean superliminalOn;
     /** 抓取瞬间「眼睛 → 落点」的距离，用于保持屏幕视觉大小不变。 */
     private static double superliminalBaseDistance = 1.0;
-
-    // ---- 缩放同步（Sable 的位姿同步不含 scale，所以由模组自己同步） ----
-    /** 物理结构 -> 缩放倍率（服务端权威）。 */
-    private static final Map<UUID, Float> syncedScales = new java.util.HashMap<>();
-    private static ResourceLocation scalesDimension;
 
     // ---- 所有权（功能3） ----
     /** 物理结构 -> 所有者 UUID（服务端同步）。 */
@@ -282,6 +289,14 @@ public final class StaffEnhanceClientHandler {
         if (justPressed(StaffKeyMappings.MULTI_SELECT) && active) {
             toggleMultiSelect();
         }
+        if (SablestopNowConfig.isNewControlScheme()) {
+            // 新控制逻辑：其余功能不再由按键直接触发，改为「滚轮选中 + 左键应用」。
+            if (scalingSession && !active) {
+                stopScaling();
+            }
+            suppressVanillaKeyClash();
+            return;
+        }
         if (justPressed(StaffKeyMappings.REGION_SELECT) && active) {
             onRegionSelectKey();
         }
@@ -306,6 +321,199 @@ public final class StaffEnhanceClientHandler {
             stopScaling();
         }
         suppressVanillaKeyClash();
+    }
+
+    // ==================================================================
+    // 新控制逻辑（config: new_control_scheme）
+    // ==================================================================
+
+    /** 由运行时状态推导当前模式。 */
+    public static StaffControl.Mode newControlMode() {
+        if (groupDrag != null) {
+            return StaffControl.Mode.DRAG;
+        }
+        return multiSelect ? StaffControl.Mode.MULTI : StaffControl.Mode.NORMAL;
+    }
+
+    /** 当前模式的功能清单。 */
+    public static List<StaffControl.Fn> newControlFunctions() {
+        return StaffControl.functionsFor(newControlMode());
+    }
+
+    /** 当前模式下选中的功能下标。 */
+    public static int newControlIndex() {
+        final List<StaffControl.Fn> list = newControlFunctions();
+        final int raw = switch (newControlMode()) {
+            case NORMAL -> newIndexNormal;
+            case MULTI -> newIndexMulti;
+            case DRAG -> newIndexDrag;
+        };
+        return Math.max(0, Math.min(list.size() - 1, raw));
+    }
+
+    /** 当前是否有「持续型」功能正在激活（Z 区域选择 / X 缩放）。 */
+    public static boolean newControlFunctionActive() {
+        return regionStep != 0 || scalingSession;
+    }
+
+    /** 当前选中的功能（供内部使用）。 */
+    private static StaffControl.Fn currentFunction() {
+        return newControlFunctions().get(newControlIndex());
+    }
+
+    private static void storeControlIndex(final int index) {
+        switch (newControlMode()) {
+            case NORMAL -> newIndexNormal = index;
+            case MULTI -> newIndexMulti = index;
+            case DRAG -> newIndexDrag = index;
+        }
+    }
+
+    /** 滚轮在功能清单里循环切换。 */
+    private static void cycleFunction(final double deltaY) {
+        final List<StaffControl.Fn> list = newControlFunctions();
+        if (list.size() <= 1 || deltaY == 0) {
+            return;
+        }
+        final int size = list.size();
+        final int next = Math.floorMod(newControlIndex() + (deltaY > 0 ? 1 : -1), size);
+        storeControlIndex(next);
+        StaffControlHud.notifySelectionChanged();
+    }
+
+    /** 左键「应用」当前功能。 */
+    private static void applyFunction(final StaffControl.Fn fn) {
+        switch (fn) {
+            case LOCK -> toggleLocksAll();
+            case SNAPSHOT -> onSnapshotKey();
+            case RESTORE -> onRestoreKey();
+            case OWNERSHIP -> onOwnershipKey();
+            case NO_COLLISION -> onCollisionToggleKey();
+            case CLEAR -> clearQueue();
+            case OPEN_CONFIG -> openConfigScreen();
+            case SCALE -> {
+                if (scalingSession) {
+                    stopScaling();
+                } else {
+                    startScaling();
+                }
+            }
+            case REGION -> onRegionSelectKey();
+            case CENTER, VIEW_LOCK -> {
+                // 按住型功能，由 handleMouse 的按下/抬起设置 centerHold / viewLockHold
+            }
+        }
+        StaffControlHud.notifyApplied(fn.sustained() && newControlFunctionActive());
+    }
+
+    /**
+     * 新控制逻辑的鼠标路由。
+     *
+     * <p>原则：持续型功能（Z 区域选择 / X 缩放）激活时，鼠标与滚轮都归该功能；
+     * 否则右键沿用原行为（多选=加入/移出、普通=拖拽、拖拽中=结束），左键=应用当前功能。</p>
+     */
+    private static boolean handleMouseNewScheme(final int button, final int action, final int modifiers) {
+        final StaffControl.Mode mode = newControlMode();
+        final StaffControl.Fn fn = currentFunction();
+
+        // 按住型功能：左键按下/抬起
+        if (button == MOUSE_LEFT && (fn == StaffControl.Fn.CENTER || fn == StaffControl.Fn.VIEW_LOCK)) {
+            final boolean down = action == GLFW.GLFW_PRESS;
+            final boolean usable = (fn == StaffControl.Fn.CENTER) == (mode == StaffControl.Mode.DRAG);
+            if (usable) {
+                if (fn == StaffControl.Fn.CENTER) {
+                    centerHold = down;
+                } else {
+                    viewLockHold = down;
+                }
+                return true;
+            }
+        }
+        if (action != GLFW.GLFW_PRESS) {
+            // 抬起：只关心是否要停止按住型功能
+            if (button == MOUSE_LEFT) {
+                if (centerHold || viewLockHold) {
+                    centerHold = false;
+                    viewLockHold = false;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // 持续型功能激活中：鼠标归该功能
+        if (regionStep != 0) {
+            if (button == MOUSE_RIGHT) {
+                confirmRegionPoint();
+                if (regionStep == 0) {
+                    StaffControlHud.notifySustainedEnded();
+                }
+            } else if (button == MOUSE_LEFT) {
+                cancelRegionSelect(true);
+                StaffControlHud.notifySustainedEnded();
+            }
+            return true;
+        }
+        if (scalingSession) {
+            if (button == MOUSE_LEFT) {
+                stopScaling();
+                StaffControlHud.notifySustainedEnded();
+            }
+            return true;
+        }
+
+        if (multiSelect) {
+            if (button == MOUSE_RIGHT) {
+                if ((modifiers & GLFW.GLFW_MOD_SHIFT) != 0) {
+                    onShiftRightRemove();
+                } else {
+                    onRightClickAdd();
+                }
+            } else if (button == MOUSE_LEFT) {
+                applyFunction(fn);
+            }
+            return true;
+        }
+
+        if (groupDrag != null) {
+            if (button == MOUSE_RIGHT) {
+                stopGroupDrag();
+            } else if (button == MOUSE_LEFT) {
+                applyFunction(fn);
+            }
+            return true;
+        }
+
+        if (button == MOUSE_RIGHT) {
+            if ((modifiers & GLFW.GLFW_MOD_SHIFT) != 0) {
+                if (isArmed()) {
+                    clearQueue();
+                    return true;
+                }
+                return false;
+            }
+            if (superliminalOn) {
+                final Pick pick = pickAtDepth(penetration);
+                if (pick != null) {
+                    selected.add(pick.body.getUniqueId());
+                    startGroupDrag(pick);
+                    return true;
+                }
+            }
+            if (isArmed()) {
+                final Pick pick = pickQueueLeader();
+                if (pick != null) {
+                    startGroupDrag(pick);
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (button == MOUSE_LEFT) {
+            applyFunction(fn);
+            return true;
+        }
+        return false;
     }
 
     /** Ctrl+O：打开自定义模组设置界面。 */
@@ -354,6 +562,9 @@ public final class StaffEnhanceClientHandler {
     public static boolean handleMouse(final int button, final int action, final int modifiers) {
         if (!isActive()) {
             return false;
+        }
+        if (SablestopNowConfig.isNewControlScheme()) {
+            return handleMouseNewScheme(button, action, modifiers);
         }
         if (action != GLFW.GLFW_PRESS) {
             return false;
@@ -428,7 +639,7 @@ public final class StaffEnhanceClientHandler {
             return false;
         }
         // X + 滚轮：缩放选中队列（倍率是绝对值，服务端按基线重算，不会累积漂移）
-        if (scalingSession && StaffKeyMappings.SCALE.isDown()) {
+        if (scalingSession && (StaffKeyMappings.SCALE.isDown() || SablestopNowConfig.isNewControlScheme())) {
             final float step = 1.0f + (float) SablestopNowConfig.scaleSensitivity();
             scaleFactor = Math.clamp(scaleFactor * (deltaY > 0 ? step : 1.0f / step),
                     (float) SablestopNowConfig.scaleMin(), (float) SablestopNowConfig.scaleMax());
@@ -458,9 +669,19 @@ public final class StaffEnhanceClientHandler {
             return true;
         }
         if (multiSelect) {
+            if (SablestopNowConfig.isNewControlScheme()) {
+                // 新逻辑：多选模式下滚轮切功能（吞掉，避免切快捷栏）
+                cycleFunction(deltaY);
+                return true;
+            }
             return false;
         }
         if (groupDrag != null) {
+            // 新逻辑：拖拽模式下普通滚轮仍调距离，按住 Ctrl 才切功能
+            if (SablestopNowConfig.isNewControlScheme() && isControlModifierDown()) {
+                cycleFunction(deltaY);
+                return true;
+            }
             // 沿“眼睛→质心”连线缩放距离（质心随该方向靠近/远离玩家）
             final LocalPlayer player = localPlayer();
             if (player != null) {
@@ -479,7 +700,23 @@ public final class StaffEnhanceClientHandler {
             }
             return true;
         }
+        // 新逻辑：普通模式下滚轮切功能（功能清单见 StaffControl）
+        if (SablestopNowConfig.isNewControlScheme()) {
+            cycleFunction(deltaY);
+            return true;
+        }
         return false;
+    }
+
+    /** 新逻辑里「拖拽模式下按住 Ctrl 才能切功能」用的 Ctrl 检测。 */
+    private static boolean isControlModifierDown() {
+        final Minecraft mc = Minecraft.getInstance();
+        if (mc.getWindow() == null) {
+            return false;
+        }
+        final long handle = mc.getWindow().getWindow();
+        return com.mojang.blaze3d.platform.InputConstants.isKeyDown(handle, GLFW.GLFW_KEY_LEFT_CONTROL)
+                || com.mojang.blaze3d.platform.InputConstants.isKeyDown(handle, GLFW.GLFW_KEY_RIGHT_CONTROL);
     }
 
     /**
@@ -519,14 +756,19 @@ public final class StaffEnhanceClientHandler {
             resetAll();
             return;
         }
-        // 缩放同步与是否持杖无关（Sable 的位姿同步不含 scale），必须每 tick 都写回
-        applySyncedScales(player);
+        // 缩放不再需要客户端每 tick 写回：scale 现在跟着 Sable 自己的位姿同步一起到达
         if (!PhysicsStaffItem.isHolding(player)) {
             pollKeys();
             resetAll();
             return;
         }
         pollKeys();
+        // 新控制逻辑：模式变化时让 HUD 播「先向左消失再从左侧进入」
+        final StaffControl.Mode mode = newControlMode();
+        if (mode != lastControlMode) {
+            lastControlMode = mode;
+            StaffControlHud.notifyModeChanged();
+        }
         if (groupDrag != null) {
             sendGroupDragTick(player);
         }
@@ -567,7 +809,8 @@ public final class StaffEnhanceClientHandler {
     // ============ 功能8：视角锁定（长按 C） ============
     /** 当前是否处于视角锁定状态（整组控制中 C 仍是“归中”，多选模式下 C 不生效）。 */
     public static boolean isViewLockActive() {
-        return !multiSelect && groupDrag == null && isActive() && StaffKeyMappings.CENTER_PULL.isDown();
+        return !multiSelect && groupDrag == null && isActive()
+                && (StaffKeyMappings.CENTER_PULL.isDown() || viewLockHold);
     }
 
     /** 正在被锁定视角的物理结构 id（未锁定时 null；供 HUD）。 */
@@ -602,83 +845,70 @@ public final class StaffEnhanceClientHandler {
         return superliminalOn;
     }
 
-    /** 该物理结构当前的缩放倍率（1.0 = 未缩放）。 */
+    /**
+     * 该物理结构当前的缩放倍率（1.0 = 未缩放）。
+     *
+     * <p>缩放现在由 Sable 自己的位姿同步送达客户端（{@code SableBufferUtilsMixin} 把 scale 追加进了
+     * 位姿的读写漏斗），所以这里直接读本地位姿，不再需要模组自建的同步包。</p>
+     */
     public static float scaleOf(final UUID subLevel) {
-        return syncedScales.getOrDefault(subLevel, 1.0f);
+        final SubLevel sub = loadedSubLevel(subLevel);
+        return sub == null ? 1.0f : (float) sub.logicalPose().scale().x();
+    }
+
+    /** 按 UUID 取本地已加载的物理体（不存在/已移除则 null）。 */
+    @Nullable
+    private static SubLevel loadedSubLevel(final UUID id) {
+        final LocalPlayer player = localPlayer();
+        if (player == null || player.level() == null) {
+            return null;
+        }
+        final SubLevelContainer container = SubLevelContainer.getContainer(player.level());
+        if (container == null) {
+            return null;
+        }
+        final SubLevel sub = container.getSubLevel(id);
+        return sub == null || sub.isRemoved() ? null : sub;
     }
 
     /** 当前是否有任何「缩放 ≠ 1」的物理结构（供渲染/HUD 判断是否需要绘制）。 */
     public static boolean hasAnyScaled() {
-        for (final Float value : syncedScales.values()) {
-            if (value != null && Math.abs(value - 1.0f) > 1.0e-3f) {
-                return true;
-            }
-        }
-        return false;
+        return !scaledFactors().isEmpty();
     }
 
     /** 已缩放结构的数量（HUD 用）。 */
     public static int scaledCount() {
-        int count = 0;
-        for (final Float value : syncedScales.values()) {
-            if (value != null && Math.abs(value - 1.0f) > 1.0e-3f) {
-                count++;
-            }
-        }
-        return count;
+        return scaledFactors().size();
     }
 
     /** 已缩放结构的倍率（降序，最多 n 个；HUD 用）。 */
     public static List<Float> topScaleFactors(final int n) {
-        final List<Float> out = new ArrayList<>();
-        for (final Float value : syncedScales.values()) {
-            if (value != null && Math.abs(value - 1.0f) > 1.0e-3f) {
-                out.add(value);
-            }
-        }
+        final List<Float> out = scaledFactors();
         out.sort(java.util.Comparator.reverseOrder());
         return out.size() > n ? new ArrayList<>(out.subList(0, n)) : out;
     }
 
-    /** S2C：服务端权威的缩放表。 */
-    public static void setScales(final ResourceLocation dimension, final List<StaffEnhanceNetworking.ScaleEntry> entries) {
+    /** 扫描本地已加载的物理体，收集缩放 ≠ 1 的倍率。 */
+    private static List<Float> scaledFactors() {
+        final List<Float> out = new ArrayList<>();
         final LocalPlayer player = localPlayer();
         if (player == null || player.level() == null) {
-            return;
-        }
-        scalesDimension = dimension;
-        if (!player.level().dimension().location().equals(dimension)) {
-            return;
-        }
-        syncedScales.clear();
-        for (final StaffEnhanceNetworking.ScaleEntry entry : entries) {
-            syncedScales.put(entry.subLevel(), entry.scale());
-        }
-    }
-
-    /**
-     * 每 tick 把同步来的缩放写进客户端物理体的位姿。
-     * ⚠ Sable 的位姿同步包（SableBufferUtils.write(Pose3d)）只写 position/orientation/rotationPoint，
-     * <b>不写 scale</b>，所以不这样做客户端永远看不见缩放。
-     */
-    private static void applySyncedScales(final LocalPlayer player) {
-        if (syncedScales.isEmpty()) {
-            return;
+            return out;
         }
         final SubLevelContainer container = SubLevelContainer.getContainer(player.level());
         if (container == null) {
-            return;
+            return out;
         }
-        for (final Map.Entry<UUID, Float> entry : syncedScales.entrySet()) {
-            final SubLevel sub = container.getSubLevel(entry.getKey());
+        for (final SubLevel sub : container.getAllSubLevels()) {
             if (sub == null || sub.isRemoved()) {
                 continue;
             }
-            final float scale = entry.getValue();
-            if (Math.abs(sub.logicalPose().scale().x() - scale) > 1.0e-3) {
-                sub.logicalPose().scale().set(scale, scale, scale);
+            final float scale = (float) sub.logicalPose().scale().x();
+            if (Math.abs(scale - 1.0f) > 1.0e-3f) {
+                out.add(scale);
             }
         }
+        return out;
     }
 
     /** S2C：彩蛋开关状态。 */
@@ -875,6 +1105,10 @@ public final class StaffEnhanceClientHandler {
 
     private static void resetAll() {
         stopScaling();
+        // 新控制逻辑的按住型功能与光条
+        centerHold = false;
+        viewLockHold = false;
+        StaffControlHud.notifySustainedEnded();
         releaseAllClaims();
         multiSelect = false;
         selected.clear();
@@ -1469,7 +1703,7 @@ public final class StaffEnhanceClientHandler {
 
         final Vec3 right = viewRight(look);
         final Vec3 up = viewUp(look, right);
-        if (StaffKeyMappings.CENTER_PULL.isDown()) {
+        if (StaffKeyMappings.CENTER_PULL.isDown() || centerHold) {
             drag.offsetF += (drag.distance - drag.offsetF) * SablestopNowConfig.centerPullSpeed();
             drag.offsetR *= (1.0 - SablestopNowConfig.centerPullSpeed());
             drag.offsetU *= (1.0 - SablestopNowConfig.centerPullSpeed());

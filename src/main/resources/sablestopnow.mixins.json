@@ -11,12 +11,19 @@
     "SubLevelAssemblyHelperMixin",
     "BlockPlaceContextOverrideMixin",
     "SubLevelHeatMapManagerMixin",
-    "SubLevelEntityCollisionGhostMixin"
+    "SubLevelEntityCollisionGhostMixin",
+    "scale.Rapier3DAccessor",
+    "scale.RapierPhysicsPipelineMixin",
+    "scale.SableBufferUtilsMixin",
+    "scale.SableNBTUtilsMixin"
   ],
   "client": [
     "input.MouseHandlerStaffEnhanceMixin",
     "client.VanillaChunkedSubLevelRenderScaleMixin",
     "client.FancySubLevelRenderScaleMixin"
   ],
-  "server": []
+  "server": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
 }

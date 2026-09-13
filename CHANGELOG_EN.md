@@ -5,6 +5,44 @@
 Release history for **Aeronautics: Tweaks & Toolkit** (mod id stays `sablestopnow`).
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the version numbers follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-09
+
+The physics staff got a new, **wheel-centric** control scheme and HUD, and scaling went from "it only looks bigger" to **actually rebuilding the collider and mass** — with **entity collision honouring the scale** too.
+
+### Added
+
+- **New control scheme** (`new_control_scheme`, on by default, overrides the old bindings): **Ctrl** toggles multi-select, the **wheel** switches function, **LMB** applies the selected function; the old Z/V/O/K/R/C/X now exist only as function entries. Three modes (normal / multi-select / group drag) each have their own function list and remember the last selection.
+  - **Sustained functions take over the mouse and wheel**: scale = LMB to start → wheel to resize → LMB to confirm; region select = LMB to start → RMB sets the corners → wheel adjusts the distance → LMB cancels; hold-type functions (view lock / centre group) work while LMB is held.
+  - **Ctrl is a "click"**: it only toggles when **nothing else happened** between press and release. A mouse click or wheel use during the hold turns it into a chord instead (Ctrl+wheel falls through to the vanilla hotbar in normal and multi-select mode), and **group-drag mode never toggles multi-select**.
+  - **Idle state**: switching to the staff does **not** enter any mode — the wheel and RMB pass straight through so you can scroll past the staff to another item, and the HUD just says "LMB to enable". One LMB (or Ctrl) enables it; switching away resets it.
+  - View lock (formerly hold-C) had no key left in the new scheme, so it became a **function entry** (normal mode, hold LMB) — the feature itself is unchanged.
+- **New HUD**: a slanted mode banner, the mode's *entire* function list, a selection box that slides smoothly, a description panel with a left triangle notch that wraps its text, and a wrapped switch hint. Changing mode slides the block out to the left and back in from the left; the description fades out to the right and reappears left-to-right; applying a function runs a continuous light streak around the selection box (Z/X keep it rotating until the action ends). Same palette as the in-game settings screen, and **the text follows the game language**.
+- **Aiming body info panel** at the top right (`show_body_info`, on by default): owner / speed / mass / scale / collision / snapshot of the body under the crosshair, sliding in and out from the right. Speed and mass only exist server-side, so they come over a new request/response packet pair (immediately on target change, refreshed every 10 ticks).
+- **Live penetration depth next to the crosshair.**
+- **Scaling now really rebuilds the rapier collider** (ported from `sable-scale`): the voxel lattice is resampled so the native unscaled-pose transform lands the collision boxes exactly on the scaled hull; returning to ×1 removes the resampled sections and restores the stock upload. **Mass follows** (`m' = k·m`, inertia via the second-moment transform).
+- **Entity collision honours the scale** — scaled bodies no longer push players around at their pre-scale size.
+- **Scale now rides Sable's own channels**: `SableBufferUtils` (the single pose wire funnel) and `SableNBTUtils` (disk), so our custom sync payload and SavedData are gone.
+
+### Changed
+
+- `scaled_no_player_collision` now defaults to **false**: the collider scales with the body, so scaled bodies are no longer ghosted against players (turn it on if you want them walk-through).
+- The function list is no longer faded by distance (every entry has the same brightness).
+
+### Fixed
+
+- **Ctrl could not enter multi-select**: the same `KeyMapping` had its rising edge polled twice in one tick, so the first call consumed it.
+- **No player collision after scaling**: the existing config already contained `scaled_no_player_collision=true`, and NeoForge only rewrites missing or invalid entries — so changing the default had no effect on an existing config.
+- **Model vs. collision-outline size mismatch** (two independent causes): (1) Sable's own block outline multiplies the scale in the **wrong order** (`T(pos−cam)·R·T(plotCam−rotPoint)·S` instead of `…·R·S·T(plotCam−rotPoint)`, leaving a pure translation error `R·(I−S)·(plotCam−rotPoint)`) — corrected from inside its wrap with a priority-1000 `@WrapOperation`; (2) the **single-block render path never reads scale at all** (`renderSingleBlock` only translates and rotates) — patched with a new mixin. The outline renderer now uses per-axis scaling too.
+- HUD: the mode banner's outline was discontinuous (the top edge stopped short of the slanted corner), the light streak was sparse and gappy, the wheel scrolled the list backwards, the selection box only jumped between whole rows, and the description appeared from the wrong side — all fixed.
+
+### Known limitations
+
+- **Flywheel instanced blocks** (Create shafts / cogs / belts) do not follow the scale.
+- **Picking / breaking-box targeting at scale ≠ 1** can be off (Sable's `BlockGetter.clip` uses the unscaled broadphase).
+- Joint / motor anchors are not re-aimed when scaling (scale first, then assemble); the reference's `TerrainClearance` (re-seating a resized body) was not ported.
+- The old `sablestopnow_scale.dat` is no longer read, so bodies scaled before this version come back at ×1 (just scale them again).
+- **The pose wire format was extended: the mod must be installed on both sides.**
+
 ## [1.1.0] — 2026-09
 
 The physics staff enhancements grew from "it works" into a complete tool chain: multiplayer coexistence, ownership, a reworked region select, snapshots, scaling, ghosting — plus a full in-game settings screen.

@@ -106,10 +106,38 @@ public final class StaffControlHud {
         final float dt = frameDelta();
 
         if (SablestopNowConfig.isNewControlScheme()) {
-            renderControlHud(gg, dt);
+            if (StaffEnhanceClientHandler.isControlArmed()) {
+                renderControlHud(gg, dt);
+            } else {
+                renderIdleHud(gg, dt);
+            }
         }
         if (SablestopNowConfig.isShowBodyInfo()) {
             renderBodyInfo(gg, dt);
+        }
+    }
+
+    /**
+     * 未启用：只显示「物理手杖」标签 + 一行「左键启用」提示。
+     *
+     * <p>刚把手杖切到手上时**不进入任何模式**，滚轮与右键都放行，玩家可以直接滚过手杖去选别的东西；
+     * 想用增强功能时按一次左键（或按一下 Ctrl）即可启用。</p>
+     */
+    private static void renderIdleHud(final GuiGraphics gg, final float dt) {
+        final Minecraft mc = Minecraft.getInstance();
+        modeAnim = approach(modeAnim, 1.0f, 7.0f, dt);
+        final float alpha = modeAnim < 0.5f ? 1.0f - modeAnim * 2.0f : (modeAnim - 0.5f) * 2.0f;
+        final float shift = modeAnim < 0.5f ? modeAnim * 2.0f : 1.0f - (modeAnim - 0.5f) * 2.0f;
+        final int x = MARGIN_X - Math.round(shift * 44.0f);
+
+        final String title = I18n.get("sablestopnow.control.idle.title");
+        drawBanner(gg, x, MARGIN_Y, mc.font.width(title) + 13, BANNER_H, BANNER_SLANT, alpha);
+        gg.drawString(mc.font, title, x + 6, MARGIN_Y + 3, withAlpha(TEXT, alpha), false);
+
+        int y = MARGIN_Y + BANNER_H + LIST_GAP;
+        for (final FormattedCharSequence line : wrap(mc, I18n.get("sablestopnow.control.idle.hint"), HINT_W)) {
+            gg.drawString(mc.font, line, x, y, withAlpha(TEXT_DIM, alpha * 0.9f), false);
+            y += LINE_H;
         }
     }
 

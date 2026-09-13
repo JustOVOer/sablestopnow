@@ -109,6 +109,8 @@
   "config.sablestopnow.staff_enhance.new_control_scheme": "新控制逻辑（Ctrl 切多选 / 滚轮切功能 / 左键应用） | New control scheme",
   "gui.sablestopnow.opt.new_control_scheme": "新控制逻辑 | New control scheme",
   "gui.sablestopnow.opt.new_control_scheme.desc": "开启后：Ctrl 切多选、滚轮切功能、左键应用功能（Z/V/O/K/R/C/X 等旧键位不再直接生效）；关闭则完全回到原来的控制方式 | Ctrl = multi-select, wheel = switch function, LMB = apply",
+  "sablestopnow.control.idle.title": "Physics staff",
+  "sablestopnow.control.idle.hint": "LMB to enable · wheel still switches the hotbar",
   "sablestopnow.control.mode.normal": "Normal",
   "sablestopnow.control.mode.normal.desc": "Not selecting, not dragging",
   "sablestopnow.control.mode.multi": "Multi-select",

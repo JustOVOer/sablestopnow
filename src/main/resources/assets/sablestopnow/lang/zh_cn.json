@@ -108,6 +108,8 @@
   "config.sablestopnow.staff_enhance.new_control_scheme": "新控制逻辑（Ctrl 切多选 / 滚轮切功能 / 左键应用；关闭则回到原键位）",
   "gui.sablestopnow.opt.new_control_scheme": "新控制逻辑 | New control scheme",
   "gui.sablestopnow.opt.new_control_scheme.desc": "开启后：Ctrl 切多选、滚轮切功能、左键应用功能（Z/V/O/K/R/C/X 等旧键位不再直接生效）；关闭则完全回到原来的控制方式 | Ctrl = multi-select, wheel = switch function, LMB = apply",
+  "sablestopnow.control.idle.title": "物理手杖",
+  "sablestopnow.control.idle.hint": "左键启用 · 未启用时滚轮可正常切物品栏",
   "sablestopnow.control.mode.normal": "普通模式",
   "sablestopnow.control.mode.normal.desc": "未多选、未拖拽",
   "sablestopnow.control.mode.multi": "多选模式",

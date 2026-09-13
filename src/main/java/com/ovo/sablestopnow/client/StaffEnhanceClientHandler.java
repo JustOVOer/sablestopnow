@@ -138,6 +138,13 @@ public final class StaffEnhanceClientHandler {
     private static boolean ctrlChordUsed;
     /** Ctrl 已按下、等待抬起判定。 */
     private static boolean ctrlPending;
+    /**
+     * 新控制逻辑是否已经「启用」。
+     *
+     * <p>刚切到物理手杖时**不进入任何模式**：此时滚轮/右键全部放行（玩家可以继续滚物品栏越过手杖，
+     * 右键也还是航空学原生的用法），HUD 只提示「左键启用」。按一次左键（或按一下 Ctrl）才启用。</p>
+     */
+    private static boolean controlArmed;
 
     // ---- 彩蛋：Superliminal ----
     /** 服务端同步的彩蛋开关。 */
@@ -313,9 +320,14 @@ public final class StaffEnhanceClientHandler {
             // Ctrl 采用「点击」语义：**从按下到松开之间没有任何其它操作**才算点击切多选；
             // 期间用过滚轮（Ctrl+滚轮 = 原版切物品栏）或点过鼠标（handleMouseNewScheme 里标记）
             // 就只算组合键，不切多选。整组拖拽模式下 Ctrl 一律不切多选。
+            // 未启用（刚切到手杖）时，Ctrl 也用来启用。
+            if (multiSelectPressed && !controlArmed) {
+                controlArmed = true;
+                StaffControlHud.notifyModeChanged();
+            }
             if (multiSelectPressed) {
                 ctrlChordUsed = false;
-                ctrlPending = active && newControlMode() != StaffControl.Mode.DRAG;
+                ctrlPending = active && controlArmed && newControlMode() != StaffControl.Mode.DRAG;
             }
             if (ctrlPending && !StaffKeyMappings.MULTI_SELECT.isDown()) {
                 if (!ctrlChordUsed && newControlMode() != StaffControl.Mode.DRAG) {
@@ -358,6 +370,11 @@ public final class StaffEnhanceClientHandler {
     // ==================================================================
     // 新控制逻辑（config: new_control_scheme）
     // ==================================================================
+
+    /** 新控制逻辑是否已启用（未启用时只提示「左键启用」，不接管滚轮/右键）。 */
+    public static boolean isControlArmed() {
+        return controlArmed;
+    }
 
     /** 由运行时状态推导当前模式。 */
     public static StaffControl.Mode newControlMode() {
@@ -448,6 +465,17 @@ public final class StaffEnhanceClientHandler {
     private static boolean handleMouseNewScheme(final int button, final int action, final int modifiers) {
         final StaffControl.Mode mode = newControlMode();
         final StaffControl.Fn fn = currentFunction();
+
+        // 未启用：左键启用，其余按键一律放行（滚轮继续切物品栏、右键仍是航空学原生用法），
+        // 这样玩家只是路过物理手杖、想滚到别的东西时不会被接管。
+        if (SablestopNowConfig.isNewControlScheme() && !controlArmed) {
+            if (button == MOUSE_LEFT && action == GLFW.GLFW_PRESS) {
+                controlArmed = true;
+                StaffControlHud.notifyModeChanged();
+                return true;
+            }
+            return false;
+        }
 
         // Ctrl 按住期间的任何鼠标操作都算「用了组合键」：这次 Ctrl 不再切多选
         if (isControlModifierDown()) {
@@ -674,6 +702,10 @@ public final class StaffEnhanceClientHandler {
 
     public static boolean handleScroll(final double deltaY) {
         if (!isActive()) {
+            return false;
+        }
+        // 未启用：滚轮放行给原版（继续切物品栏），玩家可以滚过手杖去选别的东西
+        if (SablestopNowConfig.isNewControlScheme() && !controlArmed) {
             return false;
         }
         // X + 滚轮：缩放选中队列（倍率是绝对值，服务端按基线重算，不会累积漂移）
@@ -1217,6 +1249,7 @@ public final class StaffEnhanceClientHandler {
         viewLockHold = false;
         ctrlPending = false;
         ctrlChordUsed = false;
+        controlArmed = false;
         StaffControlHud.notifySustainedEnded();
         releaseAllClaims();
         multiSelect = false;

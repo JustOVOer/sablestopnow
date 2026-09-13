@@ -8,6 +8,8 @@ version = "${mod_version}"
 displayName = "${mod_name}"
 authors = "${mod_authors}"
 description = "${mod_description}"
+# NeoForge 模组列表（「模组」界面）展示的图标；文件在 src/main/resources/icon.png
+logoFile = "icon.png"
 
 [[dependencies.${mod_id}]]
 modId = "neoforge"

@@ -96,6 +96,13 @@ public final class StaffEnhanceClientHandler {
 
     /** 整组拖拽会话（非空=正在拖拽整组）。 */
     @Nullable private static ClientGroupDrag groupDrag;
+    /**
+     * 当前这次拖拽用的队列是不是「为拖单个结构临时建的组」。
+     *
+     * <p>空队列右键单个结构时会把它当作只有一个成员的结构组来拖，退出拖拽后要把这个临时组清掉，
+     * 否则那个结构会一直留在选中队列里（用户不想留残余选中）。原本就有多成员的队列不受影响。</p>
+     */
+    private static boolean tempDragGroup;
 
     // ---- 多人选择同步（功能2） ----
     /** 服务端同步过来的“其他玩家”的选中集合（玩家 -> 物理结构）。 */
@@ -571,7 +578,11 @@ public final class StaffEnhanceClientHandler {
             final Pick pick = isArmed() ? pickQueueLeader() : pickAtDepth(penetration);
             if (pick != null) {
                 if (selected.isEmpty()) {
+                    // 记录这是「为拖单个结构临时建的组」，退出拖拽时要清掉
                     selected.add(pick.body.getUniqueId());
+                    tempDragGroup = true;
+                } else {
+                    tempDragGroup = false;
                 }
                 startGroupDrag(pick);
                 return true;
@@ -1253,6 +1264,7 @@ public final class StaffEnhanceClientHandler {
         ctrlPending = false;
         ctrlChordUsed = false;
         controlArmed = false;
+        tempDragGroup = false;
         StaffControlHud.notifySustainedEnded();
         releaseAllClaims();
         multiSelect = false;
@@ -1811,6 +1823,12 @@ public final class StaffEnhanceClientHandler {
             stopScaling();
         }
         prompt("sablestopnow.staff.group_stop");
+        // 只为拖单个结构而临时建立的「单成员结构组」：退出拖拽即清除，不留残余选中
+        if (tempDragGroup) {
+            tempDragGroup = false;
+            selected.clear();
+            releaseAllClaims();
+        }
     }
 
     /** 静默发送锁定/解锁请求（不带提示）。 */

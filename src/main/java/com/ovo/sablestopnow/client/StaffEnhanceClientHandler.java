@@ -331,18 +331,24 @@ public final class StaffEnhanceClientHandler {
             }
         }
         if (SablestopNowConfig.isNewControlScheme()) {
+            if (!controlArmed) {
+                // 未启用：忽略**所有**手杖操作 —— Ctrl 也不切多选（只由左键启用），
+                // 滚轮交给原版切物品栏（handleScroll 里放行）。
+                ctrlPending = false;
+                ctrlChordUsed = false;
+                if (scalingSession) {
+                    stopScaling();
+                }
+                suppressVanillaKeyClash();
+                return;
+            }
             // 新控制逻辑：其余功能不再由按键直接触发，改为「滚轮选中 + 左键应用」。
             // Ctrl 采用「点击」语义：**从按下到松开之间没有任何其它操作**才算点击切多选；
             // 期间用过滚轮（Ctrl+滚轮 = 原版切物品栏）或点过鼠标（handleMouseNewScheme 里标记）
             // 就只算组合键，不切多选。整组拖拽模式下 Ctrl 一律不切多选。
-            // 未启用（刚切到手杖）时，Ctrl 也用来启用。
-            if (multiSelectPressed && !controlArmed) {
-                controlArmed = true;
-                StaffControlHud.notifyModeChanged();
-            }
             if (multiSelectPressed) {
                 ctrlChordUsed = false;
-                ctrlPending = active && controlArmed && newControlMode() != StaffControl.Mode.DRAG;
+                ctrlPending = active && newControlMode() != StaffControl.Mode.DRAG;
             }
             if (ctrlPending && !StaffKeyMappings.MULTI_SELECT.isDown()) {
                 if (!ctrlChordUsed && newControlMode() != StaffControl.Mode.DRAG) {
@@ -481,15 +487,15 @@ public final class StaffEnhanceClientHandler {
         final StaffControl.Mode mode = newControlMode();
         final StaffControl.Fn fn = currentFunction();
 
-        // 未启用：左键启用，其余按键一律放行（滚轮继续切物品栏、右键仍是航空学原生用法），
-        // 这样玩家只是路过物理手杖、想滚到别的东西时不会被接管。
+        // 未启用：只认「左键启用」；其余鼠标操作（右键/中键/抬起）**全部吞掉**，
+        // 也就是不执行任何物理手杖操作（包括航空学原生的右键拖拽）。
+        // 滚轮不在这里处理：handleScroll 会把它放行给原版去切物品栏。
         if (SablestopNowConfig.isNewControlScheme() && !controlArmed) {
             if (button == MOUSE_LEFT && action == GLFW.GLFW_PRESS) {
                 controlArmed = true;
                 StaffControlHud.notifyModeChanged();
-                return true;
             }
-            return false;
+            return true;
         }
 
         // Ctrl 按住期间的任何鼠标操作都算「用了组合键」：这次 Ctrl 不再切多选

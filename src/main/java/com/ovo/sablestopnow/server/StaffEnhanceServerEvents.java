@@ -36,6 +36,8 @@ public final class StaffEnhanceServerEvents {
                             StaffSuperliminalState.isEnabled(player.getUUID())));
             // 「拖拽体对拖拽者幽灵化」的状态补发
             StaffEnhanceServer.sendGhostsTo(player);
+            // 配合系统：补发所有维度的配合表（客户端据此画树形界面）
+            com.ovo.sablestopnow.network.MateNetworking.sendAllTo(player);
         }
     }
 
@@ -50,6 +52,8 @@ public final class StaffEnhanceServerEvents {
         }
         if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player) {
             StaffSnapshotRegistry.release(player.getUUID());
+            // 配合模式是「持杖时的临时状态」，掉线即清，避免留下选了半截的待选
+            MateSelectionRegistry.release(player.getUUID());
         }
     }
 
@@ -58,5 +62,6 @@ public final class StaffEnhanceServerEvents {
         StaffEnhanceServer.clearAll();
         StaffSelectionRegistry.clearAll();
         StaffSnapshotRegistry.clearAll();
+        MateRegistry.clearAll();
     }
 }

@@ -48,6 +48,17 @@ public final class StaffKeyMappings {
     public static final KeyMapping SCALE = create("scale", GLFW.GLFW_KEY_X);
     /** 穿透层数修饰键（默认 Alt，配合滚轮使用）。 */
     public static final KeyMapping PENETRATION_MODIFIER = create("penetration_modifier", GLFW.GLFW_KEY_LEFT_ALT);
+    /** 进入/退出配合模式（默认 Y）；配合模式下按住 Ctrl 可切到结构级参考、滚轮循环。 */
+    public static final KeyMapping MATE_MODE = create("mate_mode", GLFW.GLFW_KEY_Y);
+    /** 打开配合界面（默认 M）。 */
+    public static final KeyMapping MATE_TREE = create("mate_tree", GLFW.GLFW_KEY_M);
+    /**
+     * 配合模式下释放/锁回鼠标（默认 Tab）。
+     *
+     * <p>配合模式的边栏是<b>常驻</b>的，进入时鼠标保持锁定（准星可转、右键可选取）；
+     * 想点边栏上的按钮就得先把鼠标放出来。这个键在边栏里也有一个对应按钮（放出来之后才点得到）。
+     */
+    public static final KeyMapping MATE_MOUSE = create("mate_mouse", GLFW.GLFW_KEY_TAB);
     /** 打开模组设置界面（默认 Ctrl+O，与所有权键 O 不冲突）。 */
     public static final KeyMapping OPEN_CONFIG = new KeyMapping("key.sablestopnow.open_config",
             KeyConflictContext.UNIVERSAL,
@@ -58,7 +69,8 @@ public final class StaffKeyMappings {
 
     private static final List<KeyMapping> ALL = List.of(
             MULTI_SELECT, REGION_SELECT, COLLISION_TOGGLE, CENTER_PULL,
-            OWNERSHIP, SNAPSHOT, RESTORE, SCALE, PENETRATION_MODIFIER, OPEN_CONFIG);
+            OWNERSHIP, SNAPSHOT, RESTORE, SCALE, PENETRATION_MODIFIER, OPEN_CONFIG,
+            MATE_MODE, MATE_TREE, MATE_MOUSE);
 
     private StaffKeyMappings() {
     }

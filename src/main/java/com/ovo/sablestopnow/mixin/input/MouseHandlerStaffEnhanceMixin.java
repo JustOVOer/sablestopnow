@@ -28,8 +28,9 @@ public class MouseHandlerStaffEnhanceMixin {
                 ci.cancel();
             }
         } catch (final Throwable t) {
-            // 启动早期/异常状态兜底：绝不因我们的输入处理把游戏打崩
-            SablestopNow.LOGGER.debug("Staff enhance mouse handler skipped", t);
+            // ⚠ 必须是 ERROR：运行期实际日志级别是 INFO，原先写成 DEBUG 等于把异常彻底吞掉，
+            // 输入处理器一旦抛错就完全查不出原因（配合模式边栏「闪一下就没」就是这么被掩盖的）。
+            SablestopNow.LOGGER.error("Staff enhance mouse handler threw", t);
         }
     }
 
@@ -41,7 +42,7 @@ public class MouseHandlerStaffEnhanceMixin {
                 ci.cancel();
             }
         } catch (final Throwable t) {
-            SablestopNow.LOGGER.debug("Staff enhance scroll handler skipped", t);
+            SablestopNow.LOGGER.error("Staff enhance scroll handler threw", t);
         }
     }
 
@@ -60,7 +61,7 @@ public class MouseHandlerStaffEnhanceMixin {
                 ci.cancel();
             }
         } catch (final Throwable t) {
-            SablestopNow.LOGGER.debug("Staff enhance turn handler skipped", t);
+            SablestopNow.LOGGER.error("Staff enhance turn handler threw", t);
         }
     }
 }

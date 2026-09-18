@@ -18,7 +18,17 @@ public final class StaffControl {
         /** 多选模式（Ctrl）。 */
         MULTI("sablestopnow.control.mode.multi", "sablestopnow.control.mode.multi.desc"),
         /** 整组拖拽模式（退出多选后右键队列成员进入）。 */
-        DRAG("sablestopnow.control.mode.drag", "sablestopnow.control.mode.drag.desc");
+        DRAG("sablestopnow.control.mode.drag", "sablestopnow.control.mode.drag.desc"),
+        /**
+         * 配合模式（Y 进入/退出）。
+         *
+         * <p>与其它模式<b>同级</b>：状态在 {@code MateClientState}，画面由
+         * {@code MateSidebarRenderer} 画成 HUD 覆盖层（常驻右侧边栏），输入同样走
+         * {@code StaffEnhanceClientHandler.handleMouse/handleScroll}。
+         * 它<b>不是一个 Screen</b> —— 用 Screen 的话任何 {@code setScreen(其它界面)}
+         * 都会把常驻边栏顶掉（实测按 Y 后 18ms 内被顶掉两次）。
+         */
+        MATE("sablestopnow.control.mode.mate", "sablestopnow.control.mode.mate.desc");
 
         public final String nameKey;
         public final String descKey;
@@ -79,6 +89,12 @@ public final class StaffControl {
     private static final List<Fn> DRAG = List.of(
             Fn.LOCK, Fn.CENTER, Fn.NO_COLLISION, Fn.SNAPSHOT, Fn.RESTORE, Fn.OWNERSHIP, Fn.SCALE);
 
+    /**
+     * 配合模式：功能由右栏与鼠标按键承担，这里只列「锁回鼠标」这一项 —— 它是配合模式里
+     * 唯一需要用键盘模拟的开关（鼠标释放后要靠它回去）。
+     */
+    private static final List<Fn> MATE = List.of(Fn.LOCK, Fn.NO_COLLISION, Fn.SNAPSHOT, Fn.OWNERSHIP);
+
     private StaffControl() {
     }
 
@@ -87,6 +103,7 @@ public final class StaffControl {
             case NORMAL -> NORMAL;
             case MULTI -> MULTI;
             case DRAG -> DRAG;
+            case MATE -> MATE;
         };
     }
 }

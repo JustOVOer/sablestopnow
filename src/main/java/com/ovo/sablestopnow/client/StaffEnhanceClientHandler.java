@@ -1,5 +1,6 @@
 package com.ovo.sablestopnow.client;
 
+import com.ovo.sablestopnow.SablestopNow;
 import com.ovo.sablestopnow.SablestopNowConfig;
 import com.ovo.sablestopnow.network.StaffEnhanceNetworking;
 import dev.ryanhcode.sable.Sable;
@@ -143,6 +144,8 @@ public final class StaffEnhanceClientHandler {
     private static int newIndexNormal;
     private static int newIndexMulti;
     private static int newIndexDrag;
+    /** 配合模式自己的功能下标（与其它模式互不干扰）。 */
+    private static int newIndexMate;
     /** 「归中」功能：按住左键期间为 true（对应原来的长按 C）。 */
     private static boolean centerHold;
     /** 「视角锁定」功能：按住左键期间为 true（对应原来的长按 C）。 */
@@ -399,6 +402,10 @@ public final class StaffEnhanceClientHandler {
 
     /** 由运行时状态推导当前模式。 */
     public static StaffControl.Mode newControlMode() {
+        // 配合模式优先级最高：它同样是一等模式，与普通/多选/拖拽同级
+        if (com.ovo.sablestopnow.client.MateClientState.inMode()) {
+            return StaffControl.Mode.MATE;
+        }
         if (groupDrag != null) {
             return StaffControl.Mode.DRAG;
         }
@@ -417,6 +424,7 @@ public final class StaffEnhanceClientHandler {
             case NORMAL -> newIndexNormal;
             case MULTI -> newIndexMulti;
             case DRAG -> newIndexDrag;
+            case MATE -> newIndexMate;
         };
         return Math.max(0, Math.min(list.size() - 1, raw));
     }
@@ -436,6 +444,7 @@ public final class StaffEnhanceClientHandler {
             case NORMAL -> newIndexNormal = index;
             case MULTI -> newIndexMulti = index;
             case DRAG -> newIndexDrag = index;
+            case MATE -> newIndexMate = index;
         }
     }
 
@@ -624,7 +633,7 @@ public final class StaffEnhanceClientHandler {
      * 这里以“上一 tick 未按下 → 本 tick 按下”作为上升沿；若按下与抬起发生在同一 tick 内
      * （{@code isDown()} 已为 false）则仍按一次点击处理。
      */
-    private static boolean justPressed(final KeyMapping mapping) {
+    public static boolean justPressed(final KeyMapping mapping) {
         boolean clicked = false;
         while (mapping.consumeClick()) {
             clicked = true;
@@ -651,6 +660,17 @@ public final class StaffEnhanceClientHandler {
     }
 
     public static boolean handleMouse(final int button, final int action, final int modifiers) {
+        // 配合模式优先级最高，且刻意放在 isActive() 之前：配合是独立功能，
+        // 不该因为「手杖增强总开关」关着就用不了。
+        try {
+            if (MateModeInput.handleMouse(button, action, modifiers)) {
+                return true;
+            }
+        } catch (final Throwable t) {
+            // ⚠ 必须 ERROR：运行期的日志级别是 INFO，DEBUG 写进去等于没写，
+            // 之前「按 Y 界面闪一下就没了」就是因为这里把异常吞掉了、什么都没留下。
+            SablestopNow.LOGGER.error("[mate] mouse handler threw", t);
+        }
         if (!isActive()) {
             return false;
         }
@@ -726,6 +746,14 @@ public final class StaffEnhanceClientHandler {
     }
 
     public static boolean handleScroll(final double deltaY) {
+        // 同 handleMouse：配合模式最优先，且不受手杖增强总开关影响
+        try {
+            if (MateModeInput.handleScroll(deltaY)) {
+                return true;
+            }
+        } catch (final Throwable t) {
+            SablestopNow.LOGGER.error("[mate] scroll handler threw", t);
+        }
         if (!isActive()) {
             return false;
         }
@@ -852,6 +880,13 @@ public final class StaffEnhanceClientHandler {
 
     // ============ 每 tick ============
     public static void tick() {
+        try {
+            MateModeInput.tick();
+        } catch (final Throwable t) {
+            // ⚠ 必须 ERROR：这条 catch 会把「打开边栏时抛的异常」一起吞掉，
+            // 而运行期日志级别是 INFO —— 之前写成 DEBUG，导致界面闪退却毫无痕迹。
+            SablestopNow.LOGGER.error("[mate] tick handler threw", t);
+        }
         final Minecraft mc = Minecraft.getInstance();
         final LocalPlayer player = mc.player;
         if (player == null || mc.level == null) {
@@ -1877,6 +1912,34 @@ public final class StaffEnhanceClientHandler {
             return;
         }
         VeilPacketManager.server().sendPacket(new StaffEnhanceNetworking.SetLocksPayload(lock, new ArrayList<>(ids)));
+    }
+
+    /**
+     * 该物理结构当前是否处于「锁定」状态（航空学 FixedConstraint）。
+     *
+     * <p>供配合边栏在结构行上画锁图标 —— 它<b>复用</b>左键锁定那一套状态，不另起一份，
+     * 否则「左键锁了但边栏显示没锁」这种不一致迟早会出现。
+     */
+    public static boolean isBodyLocked(final UUID id) {
+        return staffLocks.contains(id);
+    }
+
+    /**
+     * 幂等地把一组物理结构设为锁定/解锁，并乐观更新本地状态（服务端随后会 S2C 回推校准）。
+     *
+     * <p>与左键锁定 {@code toggleLocksAll} 走同一条发送路径，区别只是目标集合由调用方给，
+     * 这样配合边栏可以精确地只锁它列出来的那一个结构。
+     */
+    public static void setBodiesLocked(final boolean lock, final Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return;
+        }
+        sendSetLocks(lock, ids);
+        if (lock) {
+            staffLocks.addAll(ids);
+        } else {
+            staffLocks.removeAll(ids);
+        }
     }
 
     /** 每 tick：组中心 = 眼睛 + (前/右/上 视线分量偏移)；长按 C 时把分量缓推向“正前方 distance”。 */

@@ -35,12 +35,16 @@ public class SablestopNow {
         );
         LOGGER.info("Sable Force Limiter initialized.");
         StaffEnhanceNetworking.init();
+        // SolidWorks 式「配合」系统：独立通道 + 独立物理子步钩子
+        com.ovo.sablestopnow.network.MateNetworking.init();
         // 模组列表里的“配置”按钮 → 本模组的自定义设置界面（仅客户端）
         if (net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) {
             com.ovo.sablestopnow.client.ClientConfigScreens.register(container);
         }
         // 整组拖拽：每物理子步驱动（跨平台 API，同 Simulated.init() 用法）
         SableEventPlatform.INSTANCE.onPhysicsTick(StaffEnhanceServer::physicsTick);
+        // 配合：每物理子步补齐/重建关节（创建时的吸附要先落到 rapier 上，所以关节不能在创建当帧就建）
+        SableEventPlatform.INSTANCE.onPhysicsTick(com.ovo.sablestopnow.server.MateRegistry::physicsTick);
         NeoForge.EVENT_BUS.addListener(this::registerCommands);
     }
 

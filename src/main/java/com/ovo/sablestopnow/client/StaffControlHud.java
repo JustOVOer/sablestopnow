@@ -106,10 +106,15 @@ public final class StaffControlHud {
         final float dt = frameDelta();
 
         if (SablestopNowConfig.isNewControlScheme()) {
-            if (StaffEnhanceClientHandler.isControlArmed()) {
-                renderControlHud(gg, dt);
-            } else {
-                renderIdleHud(gg, dt);
+            // 配合模式是与普通/多选/拖拽同级的模式，但它有自己的左上角卡片（类型、拾取进度、
+            // 冲突提示），由 MateSidebarRenderer 在同一套 RenderGuiEvent 上绘制；
+            // 这里跳过，免得两套模式横幅叠在一起。
+            if (StaffEnhanceClientHandler.newControlMode() != StaffControl.Mode.MATE) {
+                if (StaffEnhanceClientHandler.isControlArmed()) {
+                    renderControlHud(gg, dt);
+                } else {
+                    renderIdleHud(gg, dt);
+                }
             }
         }
         if (SablestopNowConfig.isShowBodyInfo()) {
@@ -270,7 +275,9 @@ public final class StaffControlHud {
         final int panelW = width + 12;
         final int panelH = lines.size() * LINE_H + 8;
         final int slide = Math.round((1.0f - infoAnim) * (panelW + 14));
-        final int px = gg.guiWidth() - MARGIN_X - panelW + slide;
+        // 配合模式的边栏常驻右侧：详情面板整体让出边栏宽度，否则会盖在边栏上
+        final int reserved = MateClientState.sidebarWidth();
+        final int px = gg.guiWidth() - MARGIN_X - reserved - panelW + slide;
         final int py = MARGIN_Y;
 
         fillBox(gg, px, py, panelW, panelH, infoAnim);

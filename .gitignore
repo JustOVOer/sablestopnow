@@ -45,6 +45,8 @@ repo/
 .dsh-tmp/
 .dshwolf/
 .tmp-jarjar/
+# 开发客户端在仓库根目录留下的日志（每次跑 runClient 都会生成，不入库）
+logs/
 # dsh-openwolf 自动生成的代码地图（每次扫描都会变，不入库）
 AGENTS.md
 

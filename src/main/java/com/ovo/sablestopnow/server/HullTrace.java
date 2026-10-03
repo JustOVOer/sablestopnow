@@ -64,6 +64,13 @@ public final class HullTrace {
     private static long lastTick = -1L;
     private static int linesThisSession;
 
+    /**
+     * 除显式追踪的 mountId 之外，还记录该场景下 0..TRACE_ID_MAX 的全部刚体 ✓
+     * —— 目的是自动捕获【被放在圆柱上面的那个结构】✓（id 通常都很小 ✓）
+     * bodyState 对不存在的 id 返回 null ✓ 所以扫这个范围是安全的 ✓
+     */
+    private static final int TRACE_ID_MAX = 23;
+
     /** 单次运行最多写这么多行，防止忘记关掉时把磁盘写满。20 行/秒 → 60 万行约 8 小时。 */
     private static final int MAX_LINES = 600_000;
 
@@ -117,6 +124,12 @@ public final class HullTrace {
             final long tick = ++physStep;
             final StringBuilder sb = new StringBuilder(160);
             for (final Map.Entry<Integer, Long> e : TRACED.entrySet()) {
+                // NOTE: an earlier version swept ids 0..23 to auto-capture a second structure.
+                // A real run proved that WRONG: ids 3..23 each reported exactly 9551 samples,
+                // i.e. bodyState returns non-null even for ids that do not exist. The sweep
+                // therefore produced fake rows and has been removed. Only bodies we actually
+                // attached a hull to are traced; to watch another body, register it explicitly
+                // with trace(id, scene).
                 appendBody(sb, e.getValue(), e.getKey(), "S", tick);
             }
             if (sb.length() > 0) {

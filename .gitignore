@@ -11,7 +11,9 @@ build/
 *.ipr
 out/
 !**/src/**/out/
-lib/
+# 编译用的本地依赖 jar（仓库根目录的 lib/）。
+# 必须写成 /lib/，否则会连带忽略 src/main/java/**/gui/lib/** —— GUI 库的源码会被静默丢掉。
+/lib/
 .run/
 
 ### Eclipse ###
@@ -53,4 +55,11 @@ AGENTS.md
 ### External reference sources (not part of this repository) ###
 # 参考源码树统一放在 depends/（sable-main、Simulated-Project-main、Veil-1.21、
 # neoforge-Documentation-main、sable-schematic-api-master 等），整目录不入库。
+# ⚠ 这些代码受**各自的许可**约束：本项目只读它们来确认行为，不复制、不再分发。
 /depends/
+
+### Third-party reference archives (never part of this repository) ###
+# 下载下来的参考仓库压缩包：只用来"读"，不入库。
+# 若真的采用了其中某段代码，必须先把对应许可与声明写进 THIRD-PARTY-NOTICES.md。
+/UnityNonConvexMeshColliders-main.zip
+/UnityNonConvexMeshColliders-main/

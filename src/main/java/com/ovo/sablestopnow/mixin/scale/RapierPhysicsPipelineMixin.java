@@ -129,10 +129,48 @@ public abstract class RapierPhysicsPipelineMixin implements ScaledColliderPipeli
             target = "Ldev/ryanhcode/sable/physics/impl/rapier/Rapier3D;setMassPropertiesFrom(JILdev/ryanhcode/sable/api/physics/mass/MassData;)V"))
     private void sablestopnow$scaledMassProperties(final long handle, final int bodyId, final MassData massData,
                                                    final ServerSubLevel subLevel) {
+        // Compose our solids' mass/inertia into Sable's tracker value.
+        //
+        // WHY HERE: this redirect is the SINGLE place where Sable uploads mass (its own doc
+        // says every mass upload funnels through this call). Adding mass anywhere else gets
+        // overwritten by this very call - measured: total mass stayed 0.5000 (one block).
+        final MassData composed = composeWithSolids(handle, bodyId, massData, subLevel);
         if (ScaledColliders.isManaged(subLevel))
-            ScaledMass.upload(handle, bodyId, massData, subLevel.logicalPose().scale());
+            ScaledMass.upload(handle, bodyId, composed, subLevel.logicalPose().scale());
         else
-            Rapier3DAccessor.sablestopnow$setMassPropertiesFrom(handle, bodyId, massData);
+            Rapier3DAccessor.sablestopnow$setMassPropertiesFrom(handle, bodyId, composed);
+    }
+
+    /**
+     * Tracker value + every solid's mass part, combined with the parallel axis theorem.
+     * Returns the tracker value unchanged when there is nothing to add.
+     */
+    private static MassData composeWithSolids(final long handle, final int bodyId,
+                                              final MassData tracker,
+                                              final ServerSubLevel subLevel) {
+        final java.util.List<com.ovo.sablestopnow.physics.SolidMassComposition.Part> parts =
+                com.ovo.sablestopnow.server.VoxelCollisionService.partsForBody(bodyId);
+        if (parts.isEmpty() || tracker == null || tracker.isInvalid()) {
+            return tracker;
+        }
+        final org.joml.Vector3dc c = tracker.getCenterOfMass();
+        final org.joml.Matrix3dc i = tracker.getInertiaTensor();
+        final java.util.List<com.ovo.sablestopnow.physics.SolidMassComposition.Part> all =
+                new java.util.ArrayList<>(parts.size() + 1);
+        all.add(new com.ovo.sablestopnow.physics.SolidMassComposition.Part(
+                tracker.getMass(), c.x(), c.y(), c.z(),
+                i.m00(), i.m11(), i.m22(), i.m01(), i.m02(), i.m12()));
+        all.addAll(parts);
+        final com.ovo.sablestopnow.physics.SolidMassComposition.Result r =
+                com.ovo.sablestopnow.physics.SolidMassComposition.combine(all);
+        if (r == null) {
+            return tracker;
+        }
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sablestopnow] mass composed: tracker={} + solids={} -> total={}",
+                String.format(java.util.Locale.ROOT, "%.3f", tracker.getMass()),
+                parts.size(), String.format(java.util.Locale.ROOT, "%.3f", r.mass()));
+        return new com.ovo.sablestopnow.physics.SolidMassComposition.Composed(r);
     }
 
     @Redirect(

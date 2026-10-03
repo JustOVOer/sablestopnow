@@ -1,5 +1,15 @@
 # 配合系统 交接文档（给下一个接手的人 / AI）
 
+> ⚠ **本文的界面部分已过时（2026-09 起）**：`client/MateModeInput.java`、`client/MateSidebarRenderer.java`、
+> `client/gui/MateTreeScreen.java` **都已删除**。现在：
+> - **Y 键 = 模型模式**（`client/model/`）：自由光标 + 轨道相机 + 碰撞箱点/棱/面选择 + 左键拖动模型；
+> - 配合只是模型模式下的一个功能，**上边栏/左边栏/右边栏**全部由自研 GUI 库 `client/gui/lib` 搭建；
+> - **比例 / 齿轮**这两类高级配合已实现（不是「未实现」，见 `docs/advanced-mates-design.md`）；
+> - 现行总览见 [`gui-library-and-model-mode.md`](./gui-library-and-model-mode.md)，
+>   验收清单见 [`test-checklist.md`](./test-checklist.md)。
+>
+> 本文保留的是**几何/约束/踩坑史**那部分，读它仍然能省很多时间。
+>
 > 目标读者：**没有参与过本功能开发**、要在本仓库继续做「SolidWorks 式配合」的人。
 > 读这份就够开工；想理解几何推导再看 [`mate-system-design.md`](./mate-system-design.md)。
 >

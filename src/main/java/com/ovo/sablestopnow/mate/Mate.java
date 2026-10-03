@@ -10,8 +10,10 @@ import java.util.UUID;
  * @param id        配合自身的 UUID（删除/定位用）
  * @param type      配合类型
  * @param a         参考 A（保持不动的那个结构）
- * @param b         参考 B（创建时被吸附到位的那个结构）
- * @param value     距离（方块）或角度（度）；{@link MateType.ValueKind#NONE} 时无意义
+ * @param b         参考 B（创建时被缓慢搬运到位的那个结构）
+ * @param value     距离（方块）或角度（度）；{@link MateType.ValueKind#NONE} 时无意义。
+ *                  区间类型（{@link MateType.ValueKind#DISTANCE_RANGE}，即「限制」）时是<b>下限</b>。
+ * @param value2    区间类型的<b>上限</b>（{@link MateType#needsSecondValue()} 为 false 时无意义）
  * @param flip      配合对齐：false=同向对齐，true=反向对齐；见 {@link MateType#supportsAlignment()}
  * @param name      显示名（GUI 树里的「配合N」）；为空时由 GUI 按序号生成
  * @param owner     创建者（用来做权限判断）
@@ -23,6 +25,7 @@ public record Mate(
         MateRef a,
         MateRef b,
         double value,
+        double value2,
         boolean flip,
         @Nullable String name,
         UUID owner,
@@ -46,6 +49,16 @@ public record Mate(
     /** 以 {@code body} 为“本侧”时的对面参考。 */
     public MateRef oppositeRef(final UUID body) {
         return this.a.body().equals(body) ? this.b : this.a;
+    }
+
+    /** 区间的下限（非区间类型时等于 {@link #value}）。 */
+    public double rangeMin() {
+        return Math.min(this.value, this.value2);
+    }
+
+    /** 区间的上限（非区间类型时等于 {@link #value}）。 */
+    public double rangeMax() {
+        return this.type.needsSecondValue() ? Math.max(this.value, this.value2) : this.value;
     }
 
     /**
@@ -72,14 +85,23 @@ public record Mate(
     }
 
     public Mate withValue(final double newValue) {
-        return new Mate(this.id, this.type, this.a, this.b, newValue, this.flip, this.name, this.owner, this.ownerName);
+        return new Mate(this.id, this.type, this.a, this.b, newValue, this.value2,
+                this.flip, this.name, this.owner, this.ownerName);
+    }
+
+    /** 区间类型的两个端点（下限、上限）。 */
+    public Mate withRange(final double min, final double max) {
+        return new Mate(this.id, this.type, this.a, this.b, min, max,
+                this.flip, this.name, this.owner, this.ownerName);
     }
 
     public Mate withFlip(final boolean newFlip) {
-        return new Mate(this.id, this.type, this.a, this.b, this.value, newFlip, this.name, this.owner, this.ownerName);
+        return new Mate(this.id, this.type, this.a, this.b, this.value, this.value2,
+                newFlip, this.name, this.owner, this.ownerName);
     }
 
     public Mate withName(@Nullable final String newName) {
-        return new Mate(this.id, this.type, this.a, this.b, this.value, this.flip, newName, this.owner, this.ownerName);
+        return new Mate(this.id, this.type, this.a, this.b, this.value, this.value2,
+                this.flip, newName, this.owner, this.ownerName);
     }
 }

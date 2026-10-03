@@ -31,6 +31,7 @@ import org.joml.Quaternionf;
 import org.joml.Vector3dc;
 import com.ovo.sablestopnow.client.ModRenderTypes;
 import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 @EventBusSubscriber(modid = "sablestopnow", value = Dist.CLIENT)
@@ -52,6 +53,10 @@ public class SubLevelOutlineRenderer {
             loggedConfig = true;
         }
         if (!enabled) return;
+
+        // 碰撞箱缓存按帧清一次：同一个方块会被它周围最多 36 个面问到，
+        // 不清缓存会跨帧无限增长，每帧清一次则刚好覆盖一帧内的重复查询。
+        clearBoxCache();
 
         Minecraft mc = Minecraft.getInstance();
         Level level = mc.level;
@@ -268,16 +273,28 @@ public class SubLevelOutlineRenderer {
     }
 
     /**
-     * 只描「暴露在空气中的棱线」（轮廓）。改用细长长方体盒绘制（{@link ModRenderTypes#BOXES}）。
+     * 只描「暴露在空气中的棱线」（轮廓），<b>按方块的碰撞箱</b>取形状。
      *
-     * <p>共面接缝判定：一条棱只可能跨过一条轴（垂直于面法线的那两条轴里，中点带 ±half 偏移的那条）。
-     * 旧实现要求「这条棱两侧的两个邻居都存在且都暴露」，于是平坦表面最外圈方块的那条内部接缝
-     * 因为一侧邻居是空气而不再被跳过 → 表现为「边缘 + 向内一层的棱」同时被描边。这里改为只看
-     * 跨过这条棱的那唯一一个邻居。
+     * <h2>为什么从「整格」改成「碰撞箱」</h2>
+     * 以前无论方块长什么样都按 1×1×1 的整格描边，于是台阶、楼梯、栅栏、半砖这类方块
+     * 描出来的框和它实际的物理形状对不上（用户实测反馈「模型描边要按碰撞箱描」）。
+     * 现在取 {@code state.getCollisionShape(level, pos)} 的每一个子盒，逐个盒子判断六个面
+     * 是否被邻居的碰撞箱挡住，再描没被挡住的那些面的棱。
+     *
+     * <p>碰撞箱为空的方块（火把、花草这类没有碰撞的装饰）退回它的视觉形状；
+     * 两者都空时退回整格，避免「有的方块整个不参与描边」这种更难解释的表现。
+     *
+     * <p>「共面接缝不画」这条规则保留（否则平坦表面会被内部网格线切碎），
+     * 但判定改成按<b>碰撞箱平面</b>比：邻居在同一平面上也有暴露面时才跳过这条棱。
      */
     private static int drawBlockOutlineContour(PoseStack poseStack, VertexConsumer vertexConsumer, Camera camera,
                                                Pose3dc renderPose, BlockPos pos, float r, float g, float b,
                                                float scale, float thickness, Level level, ClientSubLevel subLevel) {
+        final List<AABB> boxes = collisionBoxes(level, pos);
+        if (boxes.isEmpty()) {
+            return 0;
+        }
+        diagBlock();
         Vec3 posCenter = pos.getCenter();
         Vector3dc transformedPosJoml = renderPose.transformPosition(new org.joml.Vector3d(posCenter.x, posCenter.y, posCenter.z));
         Vec3 transformedPos = new Vec3(transformedPosJoml.x(), transformedPosJoml.y(), transformedPosJoml.z());
@@ -287,49 +304,236 @@ public class SubLevelOutlineRenderer {
         poseStack.translate(relative.x, relative.y, relative.z);
         poseStack.mulPose(new Quaternionf(renderPose.orientation()));
 
-        float half = 0.5f * scale;
         // ⚠ 物理体整体缩放时，方块位置会被 renderPose.transformPosition 乘上 scale，
         // 但方块盒子本身必须同样乘上 scale，否则描边之间会出现空隙。
-        // 逐轴取 scale（旧实现只乘 scale().x()，非等比缩放时会画歪）。
         final Vector3dc poseScale = renderPose.scale();
-        final float halfX = (float) (half * poseScale.x());
-        final float halfY = (float) (half * poseScale.y());
-        final float halfZ = (float) (half * poseScale.z());
+        final float sx = (float) (scale * poseScale.x());
+        final float sy = (float) (scale * poseScale.y());
+        final float sz = (float) (scale * poseScale.z());
         PoseStack.Pose pose = poseStack.last();
 
         int edgeCount = 0;
-        int drawnEdges = 0;
-        for (int i = 0; i < 6; i++) {
-            Direction faceDir = Direction.values()[i];
-            if (!level.getBlockState(pos.relative(faceDir)).isAir()) {
-                continue;
-            }
-            int[] face = BoxOutlineRenderer.CUBE_FACES[i];
-            for (int k = 0; k < 4; k++) {
-                int cornerA = face[k];
-                int cornerB = face[(k + 1) & 3];
-                int bit = BoxOutlineRenderer.edgeBit(cornerA, cornerB);
-                if ((drawnEdges & bit) != 0) {
-                    continue; // 相邻的暴露面已经画过这条棱
-                }
-                if (isInteriorSeam(level, pos, subLevel, faceDir, cornerA, cornerB)) {
+        // 去重键按「棱的<b>实际位置</b>」算，不能再用整格的角点下标：
+        // 一个台阶的两个子盒可能共用同一个角点下标但位置完全不同（会把该画的棱吃掉）。
+        final java.util.HashSet<Long> drawn = new java.util.HashSet<>();
+        for (final AABB box : boxes) {
+            for (final Direction faceDir : Direction.values()) {
+                if (coveredByNeighbour(level, pos, box, faceDir)) {
                     continue;
                 }
-                drawnEdges |= bit;
-                // 逐轴半边长 → BoxOutlineRenderer.addEdge 支持任意轴对齐盒（12 条棱天然轴对齐），
-                // 因此这里不再需要 addCubeEdge 的单一 half。
-                final float[] p1 = BoxOutlineRenderer.CUBE_CORNERS[cornerA];
-                final float[] p2 = BoxOutlineRenderer.CUBE_CORNERS[cornerB];
-                BoxOutlineRenderer.addEdge(pose, vertexConsumer,
-                        p1[0] * halfX, p1[1] * halfY, p1[2] * halfZ,
-                        p2[0] * halfX, p2[1] * halfY, p2[2] * halfZ,
-                        thickness, r, g, b, 1.0f);
-                edgeCount++;
+                // 该面的 4 条棱：轴对齐盒的每个面用两个垂直轴的 ± 组合表示
+                final Direction.Axis a = faceDir.getAxis();
+                final Direction.Axis[] pq = perpendicularAxes(a);
+                final Direction.Axis p = pq[0];
+                final Direction.Axis q = pq[1];
+                final double plane = faceDir.getAxisDirection() == Direction.AxisDirection.POSITIVE
+                        ? box.max(a) : box.min(a);
+                for (int i = 0; i < 4; i++) {
+                    // 面的四个角：(p 低/高) × (q 低/高)
+                    final double[] c1 = {0, 0, 0};
+                    final double[] c2 = {0, 0, 0};
+                    final int e = i;
+                    // 棱 i 的两端：固定一个轴，另一个轴走一遍
+                    final boolean pFixed = (e & 1) == 0;
+                    final boolean pHigh = (e & 2) != 0;
+                    put(c1, a, plane);
+                    put(c2, a, plane);
+                    if (pFixed) {
+                        put(c1, p, pHigh ? box.max(p) : box.min(p));
+                        put(c2, p, pHigh ? box.max(p) : box.min(p));
+                        put(c1, q, box.min(q));
+                        put(c2, q, box.max(q));
+                    } else {
+                        put(c1, q, pHigh ? box.max(q) : box.min(q));
+                        put(c2, q, pHigh ? box.max(q) : box.min(q));
+                        put(c1, p, box.min(p));
+                        put(c2, p, box.max(p));
+                    }
+                    final long key = edgeKey(c1, c2);
+                    if (!drawn.add(key)) {
+                        continue;
+                    }
+                    if (isInteriorSeamShape(level, subLevel, pos, box, faceDir, c1, c2)) {
+                        DIAG_CULLED++;
+                        continue;
+                    }
+                    BoxOutlineRenderer.addEdge(pose, vertexConsumer,
+                            (float) ((c1[0] - 0.5) * sx), (float) ((c1[1] - 0.5) * sy), (float) ((c1[2] - 0.5) * sz),
+                            (float) ((c2[0] - 0.5) * sx), (float) ((c2[1] - 0.5) * sy), (float) ((c2[2] - 0.5) * sz),
+                            thickness, r, g, b, 1.0f);
+                    DIAG_EDGES++;
+                    edgeCount++;
+                }
             }
         }
-
         poseStack.popPose();
         return edgeCount;
+    }
+
+    private static void put(final double[] v, final Direction.Axis axis, final double value) {
+        switch (axis) {
+            case X -> v[0] = value;
+            case Y -> v[1] = value;
+            case Z -> v[2] = value;
+        }
+    }
+
+    private static Direction.Axis[] perpendicularAxes(final Direction.Axis axis) {
+        return switch (axis) {
+            case X -> new Direction.Axis[] {Direction.Axis.Y, Direction.Axis.Z};
+            case Y -> new Direction.Axis[] {Direction.Axis.X, Direction.Axis.Z};
+            case Z -> new Direction.Axis[] {Direction.Axis.X, Direction.Axis.Y};
+        };
+    }
+
+    /** 棱的位置键（方块局部 1/16 精度，端点排序后打包）。 */
+    private static long edgeKey(final double[] a, final double[] b) {
+        final int ea = quant(a);
+        final int eb = quant(b);
+        final int lo = Math.min(ea, eb);
+        final int hi = Math.max(ea, eb);
+        return ((long) lo << 32) | (hi & 0xFFFFFFFFL);
+    }
+
+    private static int quant(final double[] v) {
+        final int x = (int) Math.round(v[0] * 16.0) & 0x3FF;
+        final int y = (int) Math.round(v[1] * 16.0) & 0x3FF;
+        final int z = (int) Math.round(v[2] * 16.0) & 0x3FF;
+        return (x << 20) | (y << 10) | z;
+    }
+
+    /**
+     * 方块的碰撞箱子盒（方块局部 0..1）；空碰撞箱退回视觉形状，再空则退回整格。
+     *
+     * <h2>TODO / 已知取舍</h2>
+     * <ul>
+     *   <li><b>性能未实测</b>：一次描边会对每个表面方块问 6 次邻居的碰撞箱；大结构（上千方块）
+     *       上的开销还没在实机上量过。已经加了「一帧内按 BlockPos 缓存」把重复查询压掉，
+     *       但如果实机掉帧，第一个要看的就是这里。</li>
+     *   <li><b>预筛选仍是「有空气邻居」</b>：完全被非空气包围、但碰撞箱没填满整格的方块
+     *       （例如一堵内部全是半砖的墙）不会被扫到。刻意的：那种方块的面本来也被邻居挡住了。</li>
+     *   <li>没有碰撞箱也没有视觉形状的方块（火把、花草）按整格描边，宁可多画也不要整块消失。</li>
+     * </ul>
+     */
+    private static List<AABB> collisionBoxes(final Level level, final BlockPos pos) {
+        final List<AABB> cached = BOX_CACHE.get(pos);
+        if (cached != null) {
+            return cached;
+        }
+        final net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
+        net.minecraft.world.phys.shapes.VoxelShape shape = state.getCollisionShape(level, pos);
+        if (shape.isEmpty()) {
+            shape = state.getShape(level, pos);
+        }
+        final List<AABB> result = shape.isEmpty()
+                ? List.of(new AABB(0, 0, 0, 1, 1, 1))
+                : shape.toAabbs();
+        BOX_CACHE.put(pos.immutable(), result);
+        return result;
+    }
+
+    /** 一帧内的碰撞箱缓存（渲染是单线程的，不需要并发容器）。 */
+    private static final java.util.HashMap<BlockPos, List<AABB>> BOX_CACHE = new java.util.HashMap<>();
+
+    /** 每帧/每次描边开始时清空缓存。 */
+    private static void clearBoxCache() {
+        if (!BOX_CACHE.isEmpty()) {
+            BOX_CACHE.clear();
+        }
+    }
+
+    /** 这个子盒在 {@code d} 方向上的面是否被邻居的碰撞箱完全挡住。 */
+    private static boolean coveredByNeighbour(final Level level, final BlockPos pos,
+                                              final AABB box, final Direction d) {
+        final BlockPos neighbour = pos.relative(d);
+        if (level.getBlockState(neighbour).isAir()) {
+            return false;
+        }
+        final List<AABB> boxes = collisionBoxes(level, neighbour);
+        for (final AABB n : boxes) {
+            if (OutlineGeometry.coversFace(n, box, d)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final double EPS = OutlineGeometry.EPS;
+
+    // ---- 临时诊断（确认「平坦表面被网格线切碎」不再出现后删）----
+    // 关键数字是 culled：平坦表面上每两个共面方块之间的接缝都应当被剔除，
+    // 所以 culled 应当与 edges 同量级。culled=0 就说明剔除规则又写死了（用户实测「糊成一片」的成因）。
+    private static long DIAG_BLOCKS;
+    private static long DIAG_EDGES;
+    private static long DIAG_CULLED;
+    private static long DIAG_LAST_MS;
+
+    static void diagBlock() {
+        DIAG_BLOCKS++;
+    }
+
+    static void diagFlush(final String label) {
+        final long now = System.currentTimeMillis();
+        if (now - DIAG_LAST_MS < 2000L || DIAG_BLOCKS == 0) {
+            return;
+        }
+        DIAG_LAST_MS = now;
+        SablestopNow.LOGGER.info("[model-diag] outline[{}] blocks={} edges={} culled={}",
+                label, DIAG_BLOCKS, DIAG_EDGES, DIAG_CULLED);
+        DIAG_BLOCKS = 0;
+        DIAG_EDGES = 0;
+        DIAG_CULLED = 0;
+    }
+
+    /**
+     * 这条棱是否为「两个共面表面之间的内部接缝」：跨过这条棱的邻居属于同一物理体、
+     * 且它在同一平面上也有暴露面 —— 此时两个表面共面连续，这条棱不该画。
+     */
+    private static boolean isInteriorSeamShape(final Level level, final ClientSubLevel subLevel,
+                                               final BlockPos pos, final AABB box, final Direction faceDir,
+                                               final double[] c1, final double[] c2) {
+        final Direction.Axis a = faceDir.getAxis();
+        final Direction.Axis[] pq = perpendicularAxes(a);
+        // 棱的方向轴：两端点坐标不同的那一条；跨出棱的方向就是另一条
+        final Direction.Axis edgeAxis = Math.abs(c1[0] - c2[0]) > EPS ? Direction.Axis.X
+                : (Math.abs(c1[1] - c2[1]) > EPS ? Direction.Axis.Y : Direction.Axis.Z);
+        final Direction.Axis crossAxis = edgeAxis == pq[0] ? pq[1] : pq[0];
+        final double mid = (axisValue(c1, crossAxis) + axisValue(c2, crossAxis)) * 0.5;
+        // 棱在跨出方向上必须贴着盒子的边（在盒子内部就不是接缝了）
+        if (Math.abs(mid - box.min(crossAxis)) > EPS && Math.abs(mid - box.max(crossAxis)) > EPS) {
+            return false;
+        }
+        final Direction dir = Direction.fromAxisAndDirection(crossAxis,
+                mid > box.min(crossAxis) + EPS ? Direction.AxisDirection.POSITIVE
+                        : Direction.AxisDirection.NEGATIVE);
+        final BlockPos neighbour = pos.relative(dir);
+        if (level.getBlockState(neighbour).isAir()) {
+            return false;
+        }
+        if (Sable.HELPER.getContaining(level, neighbour) != subLevel) {
+            return false;
+        }
+        // ⚠ 邻居是沿 crossAxis 平移过去的，**面法线方向的坐标不会变**：
+        // 我们顶面在 y=1，东边那个方块的顶面同样在 y=1（世界系里共面）。
+        // 这里一度写成「ourPlane ∓ 1」（把方块偏移也算到了面法线上），于是这个判定<b>永远不成立</b> ——
+        // 平坦表面上的内部接缝一条都没被剔除，整块平面被网格线切碎，看起来就是「糊成一片」。
+        for (final AABB n : collisionBoxes(level, neighbour)) {
+            if (!OutlineGeometry.coplanarFace(box, n, faceDir)) {
+                continue;
+            }
+            if (!coveredByNeighbour(level, neighbour, n, faceDir)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static double axisValue(final double[] v, final Direction.Axis axis) {
+        return switch (axis) {
+            case X -> v[0];
+            case Y -> v[1];
+            case Z -> v[2];
+        };
     }
 
     /**
@@ -427,6 +631,10 @@ public class SubLevelOutlineRenderer {
     public static void drawSubLevelContourOutline(final PoseStack poseStack, final VertexConsumer vc, final Camera camera,
                                                   final ClientSubLevel subLevel, final float r, final float g, final float b,
                                                   final float thickness) {
+        // 一次描边内部会反复问同一个邻居方块的碰撞箱（每个方块最多 6 个面 × 每个面 4 条棱），
+        // 这里清一次缓存即可覆盖整个结构的重复查询。
+        clearBoxCache();
+        diagFlush("contour");
         final Level level = subLevel.getLevel();
         final Pose3dc renderPose = subLevel.renderPose();
         final var plot = subLevel.getPlot();

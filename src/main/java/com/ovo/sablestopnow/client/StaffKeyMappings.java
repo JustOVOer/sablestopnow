@@ -67,10 +67,35 @@ public final class StaffKeyMappings {
             GLFW.GLFW_KEY_O,
             CATEGORY);
 
+    /**
+     * GUI 自检报告（默认 F9，调试用）。
+     *
+     * <p>把当前所有界面的控件树、状态读写、命令派发情况打到日志并写成 {@code run/ui-lint.txt}。
+     * 有它之后，「按钮写了没接动作」「两个控件抢同一块矩形」「状态写了没人读」这类问题
+     * 在实机测试之前就能看见，而不是等玩家截图反馈。
+     */
+    public static final KeyMapping UI_LINT = create("ui_lint", GLFW.GLFW_KEY_F9);
+
+    // ---- 模型模式：相机平移（六向）----
+    //
+    // 为什么不用 Q/E 做上下：**Q 是原版的「丢弃物品」**，按下去会把手里的东西扔了。
+    // 上下改用方向键上/下，六项全部是可以改键的 KeyMapping ——
+    // 模型模式下玩家被冻结、不会用 WASD 走路，所以与移动键同名没有副作用，
+    // 但玩家如果觉得冲突（比如装了别的模组），可以在「选项 → 按键控制」里改。
+    public static final KeyMapping MODEL_FORWARD = create("model_forward", GLFW.GLFW_KEY_W);
+    public static final KeyMapping MODEL_BACK = create("model_back", GLFW.GLFW_KEY_S);
+    public static final KeyMapping MODEL_LEFT = create("model_left", GLFW.GLFW_KEY_A);
+    public static final KeyMapping MODEL_RIGHT = create("model_right", GLFW.GLFW_KEY_D);
+    /** 上升（默认方向键上）。 */
+    public static final KeyMapping MODEL_UP = create("model_up", GLFW.GLFW_KEY_UP);
+    /** 下降（默认方向键下）。 */
+    public static final KeyMapping MODEL_DOWN = create("model_down", GLFW.GLFW_KEY_DOWN);
+
     private static final List<KeyMapping> ALL = List.of(
             MULTI_SELECT, REGION_SELECT, COLLISION_TOGGLE, CENTER_PULL,
             OWNERSHIP, SNAPSHOT, RESTORE, SCALE, PENETRATION_MODIFIER, OPEN_CONFIG,
-            MATE_MODE, MATE_TREE, MATE_MOUSE);
+            MATE_MODE, MATE_TREE, MATE_MOUSE, UI_LINT,
+            MODEL_FORWARD, MODEL_BACK, MODEL_LEFT, MODEL_RIGHT, MODEL_UP, MODEL_DOWN);
 
     private StaffKeyMappings() {
     }

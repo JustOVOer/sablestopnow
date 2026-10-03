@@ -2,6 +2,7 @@ package com.ovo.sablestopnow.mate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.phys.AABB;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Vector3d;
 
@@ -21,6 +22,10 @@ import java.util.UUID;
  *   <li>{@link RefKind#FACE}：-1（面本身）。</li>
  * </ul>
  *
+ * <p><b>几何基准是方块碰撞箱</b>：{@code box} 是「命中方块的本地方盒」（方块局部 0..1 坐标），
+ * 台阶/楼梯这类一个方块有多个碰撞盒时，点/棱/面都取<b>那个被命中的子盒</b>，而不是整格。
+ * {@code box == null} 表示整格（{@link #FULL_BOX}），这也是旧存档与结构级参考的取值。
+ *
  * <p>结构级参考用 {@code axis}（0=X, 1=Y, 2=Z）描述方向；中心点用 -1。
  * 结构级参考从 {@code plot.getBoundingBox()} 现算，因此结构被编辑后依然有效。
  */
@@ -30,7 +35,11 @@ public record MateRef(
         @Nullable BlockPos block,
         @Nullable Direction face,
         int feature,
-        int axis) {
+        int axis,
+        @Nullable AABB box) {
+
+    /** 整格（方块局部 0..1）。 */
+    public static final AABB FULL_BOX = new AABB(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
 
     // ============ 面内局部基 ============
 
@@ -52,28 +61,72 @@ public record MateRef(
         };
     }
 
+    /** 盒在某个单位方向上的尺度（只对轴对齐方向有意义）。 */
+    public static double extentOf(final AABB box, final Vector3d dir) {
+        return Math.abs(dir.x) * box.getXsize() + Math.abs(dir.y) * box.getYsize()
+                + Math.abs(dir.z) * box.getZsize();
+    }
+
+    private static double extent(final AABB box, final Vector3d dir) {
+        return extentOf(box, dir);
+    }
+
     /** 面心（plot 局部）。 */
     public static Vector3d faceCenter(final BlockPos block, final Direction face) {
+        return faceCenter(block, face, FULL_BOX);
+    }
+
+    /** 面心（plot 局部）：把盒的该面摆到命中面所在的平面上。 */
+    public static Vector3d faceCenter(final BlockPos block, final Direction face, final AABB box) {
         return new Vector3d(
-                block.getX() + 0.5 + face.getStepX() * 0.5,
-                block.getY() + 0.5 + face.getStepY() * 0.5,
-                block.getZ() + 0.5 + face.getStepZ() * 0.5);
+                block.getX() + axisCenter(box.minX, box.maxX, face.getStepX()),
+                block.getY() + axisCenter(box.minY, box.maxY, face.getStepY()),
+                block.getZ() + axisCenter(box.minZ, box.maxZ, face.getStepZ()));
+    }
+
+    /** 面法线轴上取「面所在的坐标」，其余轴取盒中心。 */
+    private static double axisCenter(final double min, final double max, final int step) {
+        if (step > 0) {
+            return max;
+        }
+        if (step < 0) {
+            return min;
+        }
+        return (min + max) * 0.5;
     }
 
     /** 面内第 {@code index}（0..3）个角点（plot 局部）。 */
     public static Vector3d faceCorner(final BlockPos block, final Direction face, final int index) {
-        final Vector3d center = faceCenter(block, face);
+        return faceCorner(block, face, index, FULL_BOX);
+    }
+
+    /** 面内第 {@code index}（0..3）个角点（plot 局部），按碰撞盒子盒取尺寸。 */
+    public static Vector3d faceCorner(final BlockPos block, final Direction face, final int index, final AABB box) {
+        final Vector3d center = faceCenter(block, face, box);
         final Vector3d u = faceU(face);
         final Vector3d v = faceV(face);
-        final double su = (index & 1) == 0 ? -0.5 : 0.5;
-        final double sv = (index & 2) == 0 ? -0.5 : 0.5;
+        final double su = ((index & 1) == 0 ? -0.5 : 0.5) * extent(box, u);
+        final double sv = ((index & 2) == 0 ? -0.5 : 0.5) * extent(box, v);
         return center.fma(su, u).fma(sv, v);
     }
 
     /** 面内第 {@code index}（0..3）条棱的中点（plot 局部）。 */
     public static Vector3d faceEdgeMidpoint(final BlockPos block, final Direction face, final int index) {
-        final Vector3d a = faceCorner(block, face, index);
-        final Vector3d b = faceCorner(block, face, (index + 1) & 3);
+        return faceEdgeMidpoint(block, face, index, FULL_BOX);
+    }
+
+    /** 面内第 {@code index}（0..3）条棱的中点（plot 局部），按碰撞盒子盒取尺寸。 */
+    public static Vector3d faceEdgeMidpoint(final BlockPos block, final Direction face, final int index,
+                                            final AABB box) {
+        // ⚠ 角点序号不是「沿着面转一圈」的顺序：bit0 = u 正负、bit1 = v 正负，
+        // 所以绕面的正确顺序是 0→1→3→2（见 faceCorner）。
+        // 以前这里是 (index, index+1)，于是棱 1 = corner1–corner2、棱 2 = corner2–corner3 都取到了
+        // **对角线**，而对角线的中点恰好是面心 —— 玩家瞄准一条棱，锚点却落在面正中间，
+        // 高亮画出来就是「一条穿过面中心、连着对边的线」（用户实测反复反馈的「选到面中线」）。
+        // 棱序号与 faceEdgeDirection 一致：0=+u, 1=+v, 2=-u, 3=-v。
+        final int[] ring = {0, 1, 3, 2};
+        final Vector3d a = faceCorner(block, face, ring[index & 3], box);
+        final Vector3d b = faceCorner(block, face, ring[(index + 1) & 3], box);
         return a.add(b).mul(0.5);
     }
 
@@ -91,25 +144,36 @@ public record MateRef(
 
     // ============ 工厂 ============
 
-    /** 方块级参考。 */
+    /** 方块级参考（整格）。 */
     public static MateRef block(final UUID body, final RefKind kind, final BlockPos block,
                                final Direction face, final int feature) {
-        return new MateRef(body, kind, block.immutable(), face, feature, -1);
+        return block(body, kind, block, face, feature, null);
+    }
+
+    /** 方块级参考（指定碰撞盒子盒；{@code box == null} 表示整格）。 */
+    public static MateRef block(final UUID body, final RefKind kind, final BlockPos block,
+                               final Direction face, final int feature, @Nullable final AABB box) {
+        return new MateRef(body, kind, block.immutable(), face, feature, -1, box);
     }
 
     /** 结构包围盒中心。 */
     public static MateRef center(final UUID body) {
-        return new MateRef(body, RefKind.BODY_CENTER, null, null, -1, -1);
+        return new MateRef(body, RefKind.BODY_CENTER, null, null, -1, -1, null);
     }
 
     /** 结构包围盒主轴（axis: 0=X, 1=Y, 2=Z）。 */
     public static MateRef axis(final UUID body, final int axis) {
-        return new MateRef(body, RefKind.BODY_AXIS, null, null, -1, axis);
+        return new MateRef(body, RefKind.BODY_AXIS, null, null, -1, axis, null);
     }
 
     /** 结构包围盒基准面（axis 为其法线轴）。 */
     public static MateRef plane(final UUID body, final int axis) {
-        return new MateRef(body, RefKind.BODY_PLANE, null, null, -1, axis);
+        return new MateRef(body, RefKind.BODY_PLANE, null, null, -1, axis, null);
+    }
+
+    /** 该参考使用的盒子（null → 整格）。 */
+    public AABB boxOrDefault() {
+        return this.box == null ? FULL_BOX : this.box;
     }
 
     // ============ 校验 ============
@@ -145,7 +209,10 @@ public record MateRef(
         return switch (this.kind) {
             case VERTEX -> "vertex@" + this.block + "#" + this.feature;
             case EDGE -> "edge@" + this.block + "#" + this.feature;
+            case EDGE_CENTER -> "edgeCenter@" + this.block + "#" + this.feature;
             case FACE -> "face@" + this.block + "/" + (this.face == null ? "?" : this.face.getName());
+            case FACE_CENTER -> "faceCenter@" + this.block + "/"
+                    + (this.face == null ? "?" : this.face.getName());
             case BODY_CENTER -> "center";
             case BODY_AXIS -> "axis" + this.axis;
             case BODY_PLANE -> "plane" + this.axis;

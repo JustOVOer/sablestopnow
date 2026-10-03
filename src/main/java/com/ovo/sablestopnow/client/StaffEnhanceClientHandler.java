@@ -622,7 +622,7 @@ public final class StaffEnhanceClientHandler {
         if (mc.screen != null) {
             return;
         }
-        mc.setScreen(new com.ovo.sablestopnow.client.gui.ModConfigScreen(null));
+        mc.setScreen(com.ovo.sablestopnow.client.gui.ModSettingsScreen.create(null));
     }
 
     /**
@@ -660,17 +660,8 @@ public final class StaffEnhanceClientHandler {
     }
 
     public static boolean handleMouse(final int button, final int action, final int modifiers) {
-        // 配合模式优先级最高，且刻意放在 isActive() 之前：配合是独立功能，
-        // 不该因为「手杖增强总开关」关着就用不了。
-        try {
-            if (MateModeInput.handleMouse(button, action, modifiers)) {
-                return true;
-            }
-        } catch (final Throwable t) {
-            // ⚠ 必须 ERROR：运行期的日志级别是 INFO，DEBUG 写进去等于没写，
-            // 之前「按 Y 界面闪一下就没了」就是因为这里把异常吞掉了、什么都没留下。
-            SablestopNow.LOGGER.error("[mate] mouse handler threw", t);
-        }
+        // 配合/模型模式的鼠标由 GUI 库与模型模式更早接管（见 MouseHandlerStaffEnhanceMixin），
+        // 这里只剩手杖本身的交互。
         if (!isActive()) {
             return false;
         }
@@ -746,14 +737,7 @@ public final class StaffEnhanceClientHandler {
     }
 
     public static boolean handleScroll(final double deltaY) {
-        // 同 handleMouse：配合模式最优先，且不受手杖增强总开关影响
-        try {
-            if (MateModeInput.handleScroll(deltaY)) {
-                return true;
-            }
-        } catch (final Throwable t) {
-            SablestopNow.LOGGER.error("[mate] scroll handler threw", t);
-        }
+        // 同上：模型模式的滚轮在更早的 mixin 里就被接管了
         if (!isActive()) {
             return false;
         }
@@ -880,13 +864,7 @@ public final class StaffEnhanceClientHandler {
 
     // ============ 每 tick ============
     public static void tick() {
-        try {
-            MateModeInput.tick();
-        } catch (final Throwable t) {
-            // ⚠ 必须 ERROR：这条 catch 会把「打开边栏时抛的异常」一起吞掉，
-            // 而运行期日志级别是 INFO —— 之前写成 DEBUG，导致界面闪退却毫无痕迹。
-            SablestopNow.LOGGER.error("[mate] tick handler threw", t);
-        }
+        // 配合/模型模式的每 tick 工作由 ModelModeHooks 驱动（旧的 MateModeInput 已退役）
         final Minecraft mc = Minecraft.getInstance();
         final LocalPlayer player = mc.player;
         if (player == null || mc.level == null) {

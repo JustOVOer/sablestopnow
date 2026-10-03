@@ -24,6 +24,7 @@ public final class ConfigOption {
     }
 
     private final Kind kind;
+    private final String name;
     private final String labelKey;
     private final String descKey;
     private final Supplier<Object> getter;
@@ -33,12 +34,20 @@ public final class ConfigOption {
     private final double step;
     private final boolean integer;
     private final Runnable action;
+    /**
+     * 写入配置之后要顺带做的事（例如界面开关要立刻同步给 GUI 库）。
+     *
+     * <p>界面只在「库里通用的控件」上调 {@code setXxx}，没法知道某一项还有副作用；
+     * 让选项自己带一个回调，界面就不需要为个别配置项写 if。
+     */
+    private Runnable onChange;
 
-    private ConfigOption(final Kind kind, final String labelKey, final String descKey,
+    private ConfigOption(final Kind kind, final String name, final String labelKey, final String descKey,
                          final Supplier<Object> getter, final Consumer<Object> setter,
                          final double min, final double max, final double step, final boolean integer,
                          final Runnable action) {
         this.kind = kind;
+        this.name = name;
         this.labelKey = labelKey;
         this.descKey = descKey;
         this.getter = getter;
@@ -50,31 +59,41 @@ public final class ConfigOption {
         this.action = action;
     }
 
+    /** 追加一个「写完之后」的回调，返回自身便于链式书写。 */
+    public ConfigOption withChange(final Runnable listener) {
+        this.onChange = listener;
+        return this;
+    }
+
+    public Runnable onChange() {
+        return this.onChange;
+    }
+
     public static ConfigOption bool(final String name, final ModConfigSpec.BooleanValue value) {
-        return new ConfigOption(Kind.BOOL, label(name), desc(name),
+        return new ConfigOption(Kind.BOOL, name, label(name), desc(name),
                 value::get, v -> value.set((Boolean) v), 0, 0, 0, false, null);
     }
 
     public static ConfigOption number(final String name, final ModConfigSpec.DoubleValue value,
                                       final double min, final double max, final double step) {
-        return new ConfigOption(Kind.NUMBER, label(name), desc(name),
+        return new ConfigOption(Kind.NUMBER, name, label(name), desc(name),
                 value::get, v -> value.set((Double) v), min, max, step, false, null);
     }
 
     public static ConfigOption number(final String name, final ModConfigSpec.IntValue value,
                                       final double min, final double max) {
-        return new ConfigOption(Kind.NUMBER, label(name), desc(name),
+        return new ConfigOption(Kind.NUMBER, name, label(name), desc(name),
                 value::get, v -> value.set((int) Math.round((Double) v)), min, max, 1.0, true, null);
     }
 
     public static ConfigOption stringList(final String name,
                                           final ModConfigSpec.ConfigValue<List<? extends String>> value) {
-        return new ConfigOption(Kind.STRING_LIST, label(name), desc(name),
+        return new ConfigOption(Kind.STRING_LIST, name, label(name), desc(name),
                 value::get, v -> value.set((List<String>) v), 0, 0, 0, false, null);
     }
 
     public static ConfigOption action(final String name, final Runnable action) {
-        return new ConfigOption(Kind.ACTION, label(name), desc(name), () -> null, v -> {
+        return new ConfigOption(Kind.ACTION, name, label(name), desc(name), () -> null, v -> {
         }, 0, 0, 0, false, action);
     }
 
@@ -90,6 +109,11 @@ public final class ConfigOption {
 
     public Kind kind() {
         return this.kind;
+    }
+
+    /** 选项名（与配置文件里的键一致）：分组、id、按名取选项都靠它。 */
+    public String name() {
+        return this.name;
     }
 
     public String labelKey() {
@@ -156,6 +180,20 @@ public final class ConfigOption {
         this.setter.accept(this.integer ? (double) (int) Math.round(value) : value);
     }
 
+    /**
+     * 直接写入数值（滑条用）。
+     *
+     * <p>滑条自己算出来的就是「范围内的数值」，若还要界面换算成 0..1 的比例再让选项换回来，
+     * 一来一回会引入一次多余的取整，拖动时末位数字会跳。
+     */
+    public void setNumber(final double value) {
+        double clamped = Math.clamp(value, this.min, this.max);
+        if (this.step > 0) {
+            clamped = this.min + Math.round((clamped - this.min) / this.step) * this.step;
+        }
+        this.setter.accept(this.integer ? (double) (int) Math.round(clamped) : clamped);
+    }
+
     public void setText(final String text) {
         final List<String> out = new ArrayList<>();
         for (final String part : text.split(",")) {
@@ -175,7 +213,11 @@ public final class ConfigOption {
 
     /** 数值显示文本。 */
     public String displayValue() {
-        final double value = getNumber();
+        return displayValue(getNumber());
+    }
+
+    /** 数值显示文本（滑条每帧拿当前拖动值调它，避免显示比滑块慢一帧）。 */
+    public String displayValue(final double value) {
         if (this.integer) {
             return String.valueOf((int) Math.round(value));
         }

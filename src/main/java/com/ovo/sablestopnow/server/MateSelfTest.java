@@ -209,12 +209,13 @@ public final class MateSelfTest {
         CASES.add(new Case("DISTANCE=2", a.getUniqueId(), b.getUniqueId(), planeA, planeB,
                 new Vector3d(0, 1, 0), new Vector3d(0, -1, 0)));
 
-        // 2) CONCENTRIC：X 主轴共线，两侧沿 Z 反向推开（垂直于约束轴）
+        // 2) PARALLEL：X 主轴互相对齐；两侧沿 Z 反向推开（垂直于约束轴）后仍须保持平行
+        //    （原来是 CONCENTRIC，但回转面在方块世界里没有意义，该类型已移除）
         final MateRef axisC = MateRef.axis(c.getUniqueId(), 0);
         final MateRef axisD = MateRef.axis(d.getUniqueId(), 0);
-        expectCreate("CONCENTRIC", MateRegistry.create(level, owner, name,
-                MateType.CONCENTRIC, axisC, axisD, 0.0, false));
-        CASES.add(new Case("CONCENTRIC", c.getUniqueId(), d.getUniqueId(), axisC, axisD,
+        expectCreate("PARALLEL", MateRegistry.create(level, owner, name,
+                MateType.PARALLEL, axisC, axisD, 0.0, false));
+        CASES.add(new Case("PARALLEL", c.getUniqueId(), d.getUniqueId(), axisC, axisD,
                 new Vector3d(0, 0, 1), new Vector3d(0, 0, -1)));
 
         // 3) LOCK：两侧沿相反方向拉开；独立的一对体，不与上面两对共用
@@ -356,20 +357,15 @@ public final class MateSelfTest {
                     final double gap = uA == null ? Double.NaN : new Vector3d(qB).sub(qA).dot(uA);
                     check("DISTANCE gap held at 2.0 despite opposing impulses", gap, 2.0, TOL);
                 }
-                case "CONCENTRIC" -> {
-                    final Vector3d axis = MateFrames.worldDirection(a, MateFrames.resolveLocal(a, testCase.refA()));
-                    final Vector3d pA = MateFrames.worldPoint(a, MateFrames.resolveLocal(a, testCase.refA()));
-                    final Vector3d pB = MateFrames.worldPoint(b, MateFrames.resolveLocal(b, testCase.refB()));
-                    if (axis == null) {
-                        fail("CONCENTRIC: no axis direction");
+                case "PARALLEL" -> {
+                    final Vector3d axisA = MateFrames.worldDirection(a, MateFrames.resolveLocal(a, testCase.refA()));
+                    final Vector3d axisB = MateFrames.worldDirection(b, MateFrames.resolveLocal(b, testCase.refB()));
+                    if (axisA == null || axisB == null) {
+                        fail("PARALLEL: no axis direction");
                         break;
                     }
-                    final Vector3d rel = new Vector3d(pB).sub(pA);
-                    final Vector3d perp = new Vector3d(rel).fma(-rel.dot(axis), axis);
-                    check("CONCENTRIC perpendicular offset held at 0", perp.length(), 0.0, TOL);
-                    final Vector3d axisB = MateFrames.worldDirection(b, MateFrames.resolveLocal(b, testCase.refB()));
-                    check("CONCENTRIC axes stayed parallel",
-                            axisB == null ? 0.0 : Math.abs(axis.dot(axisB)), 1.0, TOL);
+                    check("PARALLEL axes stayed parallel",
+                            Math.abs(axisA.dot(axisB)), 1.0, TOL);
                 }
                 case "LOCK" -> {
                     final Vector3d after = relative(a, b);

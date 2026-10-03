@@ -1,10 +1,20 @@
 package com.ovo.sablestopnow;
 
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.ModConfigSpec;
+import net.neoforged.bus.api.SubscribeEvent;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.List;
 
+/**
+ * 模组配置。除了各个功能开关，还负责把「界面」相关的两项同步给自研 GUI 库。
+ *
+ * <p>为什么界面开关放在这里、而不是界面自己持有：这两项是要写进 toml 的配置，
+ * 而 GUI 库必须在任何界面打开之前就知道动画开关与字号，所以由配置加载/重载事件统一推给库。
+ */
+@EventBusSubscriber(modid = SablestopNow.MOD_ID)
 public class SablestopNowConfig {
     public static final ModConfigSpec SPEC;
     public static final Config INSTANCE;
@@ -14,6 +24,44 @@ public class SablestopNowConfig {
                 .configure(Config::new);
         SPEC = specPair.getRight();
         INSTANCE = specPair.getLeft();
+    }
+
+    /**
+     * 配置加载/重载（含首次进游戏、游戏内改 toml 后 F3+T）之后，把界面相关项推给 GUI 库。
+     *
+     * <p>只认自己的那份 spec：本事件对每个模组、每种配置类型都会触发，不筛一下会把别的配置的加载
+     * 也算作自己的重载。
+     */
+    @SubscribeEvent
+    public static void onConfigLoaded(final ModConfigEvent event) {
+        if (event.getConfig().getSpec() == SPEC) {
+            syncUiSettings();
+        }
+    }
+
+    /**
+     * 把「界面动画总开关 / 界面字号缩放」写入 GUI 库。
+     *
+     * <p>服务端没有 GUI 库的渲染上下文，直接跳过；配置尚未加载时（启动早期）读值会抛异常，
+     * 此时保留库里的默认值即可 —— 反正界面要等玩家进游戏才可能打开。
+     */
+    public static void syncUiSettings() {
+        if (!net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) {
+            return;
+        }
+        boolean animations = true;
+        float fontScale = 1.0f;
+        try {
+            animations = INSTANCE.uiAnimations.get();
+            fontScale = INSTANCE.uiFontScale.get().floatValue();
+        } catch (final IllegalStateException ignored) {
+            // 配置未加载：用库的默认值
+        }
+        try {
+            com.ovo.sablestopnow.client.gui.lib.UiSettings.apply(animations, fontScale);
+        } catch (final Throwable ignored) {
+            // 客户端类不可用（理论上进不来）时不该拖垮配置加载
+        }
     }
 
     public static void save() {
@@ -212,6 +260,8 @@ public class SablestopNowConfig {
         public final ModConfigSpec.BooleanValue ghostReal;
         public final ModConfigSpec.BooleanValue speedLimitEnabled;
         public final ModConfigSpec.DoubleValue speedLimitThreshold;
+        public final ModConfigSpec.BooleanValue uiAnimations;
+        public final ModConfigSpec.DoubleValue uiFontScale;
         Config(ModConfigSpec.Builder builder) {
             builder.comment("Sable Force Limiter Configuration")
                     .push("force_limiter");
@@ -347,6 +397,21 @@ public class SablestopNowConfig {
             ghostReal = builder
                     .comment("EXPERIMENTAL: when true, the V no-collision marker really stops the marked body from colliding with OTHER Sable bodies (not terrain/players). Implemented with transient no-effect joints (contacts_enabled=false) to nearby bodies, removed when they move far away. Default false.")
                     .define("ghost_real", false);
+            builder.pop();
+
+            // ============ 界面（本模组自己的设置界面）============
+            builder.comment("Client-side settings GUI (Aeronautics: Tweaks & Toolkit).")
+                    .push("ui");
+            uiAnimations = builder
+                    .comment("Master switch for every animation in the settings GUI (panel reveal, easing, fades).",
+                            "界面动画总开关：关闭后所有缓动直接到位，适合低配机器或觉得动效晃眼的玩家。")
+                    .translation("config.sablestopnow.ui.ui_animations")
+                    .define("ui_animations", true);
+            uiFontScale = builder
+                    .comment("Text scale inside the settings GUI (0.5 ~ 1.0). Smaller values fit more rows on screen.",
+                            "设置界面的文字缩放（0.5~1.0）：调小可以一屏塞下更多设置项。")
+                    .translation("config.sablestopnow.ui.ui_font_scale")
+                    .defineInRange("ui_font_scale", 1.0, 0.5, 1.0);
             builder.pop();
         }
     }

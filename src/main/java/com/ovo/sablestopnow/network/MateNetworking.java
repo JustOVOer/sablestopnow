@@ -50,6 +50,8 @@ public final class MateNetworking {
                 (payload, context) -> payload.handle(context));
         MANAGER.registerServerbound(MateCommandPayload.TYPE, MateCommandPayload.CODEC,
                 (payload, context) -> payload.handle(context));
+        MANAGER.registerServerbound(ModelMovePayload.TYPE, ModelMovePayload.CODEC,
+                (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(SyncMatesPayload.TYPE, SyncMatesPayload.CODEC,
                 (payload, context) -> payload.handle(context));
         MANAGER.registerClientbound(MateFeedbackPayload.TYPE, MateFeedbackPayload.CODEC,
@@ -58,6 +60,59 @@ public final class MateNetworking {
 
     // ============ 基础 codec ============
 
+    /**
+     * C2S：模型模式左键拖动模型 —— 把结构「缓慢搬运」到目标世界位置。
+     *
+     * <p>发的是<b>绝对目标位置</b>而不是「这一帧移动了多少」：拖动是每帧连续发的，
+     * 绝对目标天然幂等（丢一两包也不会让结构跑偏），服务端也就能直接做限速插值。
+     * {@code stop = true} 表示松手，服务端立刻停止搬运。
+     */
+    public static final class ModelMovePayload implements CustomPacketPayload {
+        public static final Type<ModelMovePayload> TYPE =
+                new Type<>(ResourceLocation.fromNamespaceAndPath(SablestopNow.MOD_ID, "model_move"));
+
+        public static final StreamCodec<ByteBuf, ModelMovePayload> CODEC = StreamCodec.of(
+                (buf, payload) -> {
+                    UUID_CODEC.encode(buf, payload.body);
+                    buf.writeDouble(payload.x);
+                    buf.writeDouble(payload.y);
+                    buf.writeDouble(payload.z);
+                    buf.writeBoolean(payload.stop);
+                },
+                buf -> new ModelMovePayload(UUID_CODEC.decode(buf),
+                        buf.readDouble(), buf.readDouble(), buf.readDouble(), buf.readBoolean()));
+
+        private final UUID body;
+        private final double x;
+        private final double y;
+        private final double z;
+        private final boolean stop;
+
+        public ModelMovePayload(final UUID body, final double x, final double y, final double z,
+                                final boolean stop) {
+            this.body = body;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.stop = stop;
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+
+        public void handle(final PacketContext context) {
+            final Player player = context.player();
+            if (!PhysicsStaffItem.isHolding(player)) {
+                context.disconnect(net.minecraft.network.chat.Component.literal("Invalid packet"));
+                return;
+            }
+            final ServerLevel level = (ServerLevel) context.level();
+            com.ovo.sablestopnow.server.ModelMoveService.request(level, this.body,
+                    this.stop ? null : new org.joml.Vector3d(this.x, this.y, this.z));
+        }
+    }
     private static final StreamCodec<ByteBuf, UUID> UUID_CODEC = StreamCodec.of(
             (buf, uuid) -> {
                 buf.writeLong(uuid.getMostSignificantBits());
@@ -82,7 +137,8 @@ public final class MateNetworking {
             (buf, rl) -> STRING_CODEC.encode(buf, rl.toString()),
             buf -> ResourceLocation.parse(STRING_CODEC.decode(buf)));
 
-    private static final StreamCodec<ByteBuf, MateRef> MATE_REF_CODEC = StreamCodec.of(
+    /** 参考的编解码器（public：耦合类配合的包要复用同一套，避免两份格式各写各的）。 */
+    public static final StreamCodec<ByteBuf, MateRef> MATE_REF_CODEC = StreamCodec.of(
             (buf, ref) -> {
                 UUID_CODEC.encode(buf, ref.body());
                 buf.writeByte(ref.kind().ordinal());
@@ -96,6 +152,18 @@ public final class MateNetworking {
                 buf.writeByte(ref.face() == null ? -1 : ref.face().get3DDataValue());
                 buf.writeByte(ref.feature());
                 buf.writeByte(ref.axis());
+                // 碰撞盒子盒（整格写 false，省字节且与旧协议一致）
+                final net.minecraft.world.phys.AABB box = ref.box();
+                final boolean hasBox = box != null && !box.equals(MateRef.FULL_BOX);
+                buf.writeBoolean(hasBox);
+                if (hasBox) {
+                    buf.writeDouble(box.minX);
+                    buf.writeDouble(box.minY);
+                    buf.writeDouble(box.minZ);
+                    buf.writeDouble(box.maxX);
+                    buf.writeDouble(box.maxY);
+                    buf.writeDouble(box.maxZ);
+                }
             },
             buf -> {
                 final UUID body = UUID_CODEC.decode(buf);
@@ -108,7 +176,13 @@ public final class MateNetworking {
                 final Direction face = faceId < 0 ? null : Direction.from3DDataValue(faceId);
                 final int feature = buf.readByte();
                 final int axis = buf.readByte();
-                return new MateRef(body, kind, block, face, feature, axis);
+                net.minecraft.world.phys.AABB box = null;
+                if (buf.readBoolean()) {
+                    box = new net.minecraft.world.phys.AABB(
+                            buf.readDouble(), buf.readDouble(), buf.readDouble(),
+                            buf.readDouble(), buf.readDouble(), buf.readDouble());
+                }
+                return new MateRef(body, kind, block, face, feature, axis, box);
             });
 
     private static final StreamCodec<ByteBuf, Mate> MATE_CODEC = StreamCodec.of(
@@ -118,6 +192,7 @@ public final class MateNetworking {
                 MATE_REF_CODEC.encode(buf, mate.a());
                 MATE_REF_CODEC.encode(buf, mate.b());
                 buf.writeDouble(mate.value());
+                buf.writeDouble(mate.value2());
                 buf.writeBoolean(mate.flip());
                 buf.writeBoolean(mate.name() != null);
                 if (mate.name() != null) {
@@ -135,11 +210,13 @@ public final class MateNetworking {
                 final MateRef a = MATE_REF_CODEC.decode(buf);
                 final MateRef b = MATE_REF_CODEC.decode(buf);
                 final double value = buf.readDouble();
+                final double value2 = buf.readDouble();
                 final boolean flip = buf.readBoolean();
                 final String name = buf.readBoolean() ? STRING_CODEC.decode(buf) : null;
                 final UUID owner = UUID_CODEC.decode(buf);
                 final String ownerName = buf.readBoolean() ? STRING_CODEC.decode(buf) : null;
-                return new Mate(id, type == null ? MateType.COINCIDENT : type, a, b, value, flip, name, owner, ownerName);
+                return new Mate(id, type == null ? MateType.COINCIDENT : type, a, b,
+                        value, value2, flip, name, owner, ownerName);
             });
 
     private static final StreamCodec<ByteBuf, List<Mate>> MATE_LIST_CODEC = StreamCodec.of(
@@ -291,24 +368,11 @@ public final class MateNetworking {
                 return;
             }
 
-            // 点满两端 → 自动成配（对齐方向由 suggestFlip 按「最小转动」自动挑）
-            final MateRef refA = pending.get(0);
-            final MateRef refB = pending.get(1);
-            final MateType type = MateSelectionRegistry.inferType(refA, refB);
-            final MateRegistry.Result result = MateRegistry.createAuto(
-                    level, serverPlayer, type, refA, refB, type.defaultValue());
-
-            if (result.ok()) {
-                MateSelectionRegistry.clear(playerId);
-                broadcast(level);
-                feedback(serverPlayer, MateFeedbackPayload.Status.CREATED, "",
-                        result.mate() == null ? null : result.mate().id(), List.of(), true);
-            } else {
-                // 冲突：不清空待选，玩家可以 Shift+右键撤掉一端再试
-                feedback(serverPlayer, MateFeedbackPayload.Status.REJECTED,
-                        result.detail() == null ? "mate.error.internal" : result.detail(),
-                        null, pending, false);
-            }
+            // 点满两端：**不再自动成配**，而是把两个待选原样留着，让客户端弹出类型选项让玩家确认
+            // （玩家要求「选定好两个元素后应该自动弹出配合类型选项，让玩家确认配合类型」）。
+            // 客户端看到 pending 有两条就会在树里展开类型选项，选定后发 Action.CREATE。
+            feedback(serverPlayer, MateFeedbackPayload.Status.PENDING, "mate.prompt.confirm_type",
+                    null, pending, false);
         }
     }
 
@@ -322,14 +386,18 @@ public final class MateNetworking {
                     buf.writeByte(payload.action.ordinal());
                     UUID_CODEC.encode(buf, payload.mateId);
                     buf.writeDouble(payload.value);
+                    buf.writeDouble(payload.value2);
                     buf.writeBoolean(payload.flag);
-                    STRING_CODEC.encode(buf, payload.typeId == null ? "" : payload.typeId);
+                    STRING_CODEC.encode(buf, payload.text == null ? "" : payload.text);
+                    STRING_CODEC.encode(buf, payload.text2 == null ? "" : payload.text2);
                 },
                 buf -> new MateCommandPayload(
                         Action.values()[buf.readByte()],
                         UUID_CODEC.decode(buf),
                         buf.readDouble(),
+                        buf.readDouble(),
                         buf.readBoolean(),
+                        STRING_CODEC.decode(buf),
                         STRING_CODEC.decode(buf)));
 
         public enum Action {
@@ -340,39 +408,84 @@ public final class MateNetworking {
             /** 切换同向/反向对齐。 */
             SET_FLIP,
             /** 换配合类型（等价于删掉重建，会重新吸附）。 */
-            CHANGE_TYPE
+            CHANGE_TYPE,
+            /** 改名（空串 = 恢复自动名字）。 */
+            RENAME,
+            /** 用玩家在界面里确认的类型，把当前待选的两端成配。 */
+            CREATE
         }
 
         private final Action action;
         private final UUID mateId;
         private final double value;
+        /** 区间类型的第二个端点（上限）；非区间类型忽略。 */
+        private final double value2;
         private final boolean flag;
+        /** 随 {@link Action} 解释的文本：{@code CHANGE_TYPE} 是类型 id，{@code RENAME} 是新名字。 */
         @Nullable
-        private final String typeId;
+        private final String text;
+        /** 第二个文本：目前只有 {@code CREATE} 用（{@code text} 放类型 id，这里放自定义名）。 */
+        @Nullable
+        private final String text2;
 
         private MateCommandPayload(final Action action, final UUID mateId, final double value,
-                                   final boolean flag, @Nullable final String typeId) {
+                                   final double value2, final boolean flag, @Nullable final String text) {
+            this(action, mateId, value, value2, flag, text, null);
+        }
+
+        private MateCommandPayload(final Action action, final UUID mateId, final double value,
+                                   final double value2, final boolean flag, @Nullable final String text,
+                                   @Nullable final String text2) {
             this.action = action;
             this.mateId = mateId;
             this.value = value;
+            this.value2 = value2;
             this.flag = flag;
-            this.typeId = typeId == null || typeId.isEmpty() ? null : typeId;
+            this.text = text == null || text.isEmpty() ? null : text;
+            this.text2 = text2 == null || text2.isEmpty() ? null : text2;
         }
 
         public static MateCommandPayload remove(final UUID mateId) {
-            return new MateCommandPayload(Action.REMOVE, mateId, 0, false, null);
+            return new MateCommandPayload(Action.REMOVE, mateId, 0, 0, false, null);
         }
 
         public static MateCommandPayload setValue(final UUID mateId, final double value) {
-            return new MateCommandPayload(Action.SET_VALUE, mateId, value, false, null);
+            return new MateCommandPayload(Action.SET_VALUE, mateId, value, value, false, null);
+        }
+
+        /** 区间类型（限制）：一次改两个端点。 */
+        public static MateCommandPayload setRange(final UUID mateId, final double min, final double max) {
+            return new MateCommandPayload(Action.SET_VALUE, mateId,
+                    Math.min(min, max), Math.max(min, max), false, null);
         }
 
         public static MateCommandPayload setFlip(final UUID mateId, final boolean flip) {
-            return new MateCommandPayload(Action.SET_FLIP, mateId, 0, flip, null);
+            return new MateCommandPayload(Action.SET_FLIP, mateId, 0, 0, flip, null);
         }
 
         public static MateCommandPayload changeType(final UUID mateId, final String typeId) {
-            return new MateCommandPayload(Action.CHANGE_TYPE, mateId, 0, false, typeId);
+            return new MateCommandPayload(Action.CHANGE_TYPE, mateId, 0, 0, false, typeId);
+        }
+
+        /** 改名；{@code name} 为空 = 清掉自定义名，回到自动名字。 */
+        public static MateCommandPayload rename(final UUID mateId, @Nullable final String name) {
+            return new MateCommandPayload(Action.RENAME, mateId, 0, 0, false, name);
+        }
+
+        /** 用玩家确认的类型，把待选的两端成配（{@code mateId} 不用，占位）。 */
+        public static MateCommandPayload create(final String typeId) {
+            return new MateCommandPayload(Action.CREATE, new UUID(0L, 0L), 0, 0, false, typeId);
+        }
+
+        /**
+         * 用玩家在**创建页**里填好的整套草稿把待选两端成配。
+         *
+         * <p>「创建页就是编辑页」要求创建时填的数值/区间/翻转/名字都算数，
+         * 所以这里把它们一并带上（{@code text} 是类型 id，{@code text2} 是自定义名）。
+         */
+        public static MateCommandPayload create(final String typeId, final double value, final double value2,
+                                                final boolean flip, @Nullable final String name) {
+            return new MateCommandPayload(Action.CREATE, new UUID(0L, 0L), value, value2, flip, typeId, name);
         }
 
         @Override
@@ -391,6 +504,11 @@ public final class MateNetworking {
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
+            // CREATE 针对的是「还没建出来的配合」，必须先于所有权检查处理
+            if (this.action == Action.CREATE) {
+                createFromPending(level, serverPlayer);
+                return;
+            }
             final Mate existing = MateRegistry.byId(level, this.mateId);
             if (existing == null) {
                 return;
@@ -404,9 +522,11 @@ public final class MateNetworking {
 
             boolean changed = switch (this.action) {
                 case REMOVE -> MateRegistry.remove(level, this.mateId);
-                case SET_VALUE -> MateRegistry.updateValue(level, this.mateId, this.value);
+                case SET_VALUE -> MateRegistry.updateValue(level, this.mateId, this.value, this.value2);
                 case SET_FLIP -> MateRegistry.updateFlip(level, this.mateId, this.flag);
                 case CHANGE_TYPE -> changeType(level, serverPlayer);
+                case RENAME -> MateRegistry.rename(level, this.mateId, this.text);
+                case CREATE -> false;   // 上面已单独处理，不会走到这里
             };
             if (changed) {
                 broadcast(level);
@@ -417,13 +537,64 @@ public final class MateNetworking {
                     null, MateSelectionRegistry.pending(player.getUUID()), false);
         }
 
+        /**
+         * 用玩家在界面里确认的类型，把当前待选的两端成配。
+         *
+         * <p>这是「选满两端 → 弹出类型选项 → 玩家确认」这条流程的最后一步：服务端一直留着
+         * 那两条待选（{@link MateSelectionRegistry}），所以这里只要按类型建出来即可。
+         */
+        private void createFromPending(final ServerLevel level, final ServerPlayer player) {
+            final UUID playerId = player.getUUID();
+            if (!MateSelectionRegistry.inMode(playerId)) {
+                return;
+            }
+            final List<MateRef> pending = MateSelectionRegistry.pending(playerId);
+            if (pending.size() < 2 || this.text == null) {
+                return;
+            }
+            final MateType type = MateType.byId(this.text);
+            if (type == null) {
+                return;
+            }
+            final MateRef refA = pending.get(0);
+            final MateRef refB = pending.get(1);
+            // 创建页填的整套草稿都算数：数值按类型的取值范围夹一下，不需要数值的类型忽略它
+            final double wanted = type.needsValue()
+                    ? Math.clamp(this.value, type.minValue(), type.maxValue())
+                    : type.defaultValue();
+            final MateRegistry.Result result = MateRegistry.create(
+                    level, player, type, refA, refB, wanted, this.flag);
+            if (result.ok() && result.mate() != null) {
+                final UUID newId = result.mate().id();
+                // 区间类型：创建只带一个数值，第二个端点补一次
+                if (type.needsSecondValue()) {
+                    MateRegistry.updateValue(level, newId,
+                            Math.min(wanted, this.value2), Math.max(wanted, this.value2));
+                }
+                if (this.text2 != null) {
+                    MateRegistry.rename(level, newId, this.text2);
+                }
+            }
+            if (result.ok()) {
+                MateSelectionRegistry.clear(playerId);
+                broadcast(level);
+                feedback(player, MateFeedbackPayload.Status.CREATED, "",
+                        result.mate() == null ? null : result.mate().id(), List.of(), true);
+            } else {
+                // 冲突：不清空待选，玩家可以改选别的类型，或者 Shift+右键撤掉一端
+                feedback(player, MateFeedbackPayload.Status.REJECTED,
+                        result.detail() == null ? "mate.error.internal" : result.detail(),
+                        null, pending, false);
+            }
+        }
+
         /** 换类型：删掉旧的、按同样的两端重建（会用新类型的默认数值并重新吸附）。 */
         private boolean changeType(final ServerLevel level, final ServerPlayer player) {
             final Mate old = MateRegistry.byId(level, this.mateId);
-            if (old == null || this.typeId == null) {
+            if (old == null || this.text == null) {
                 return false;
             }
-            final MateType type = MateType.byId(this.typeId);
+            final MateType type = MateType.byId(this.text);
             if (type == null || type == old.type()) {
                 return false;
             }

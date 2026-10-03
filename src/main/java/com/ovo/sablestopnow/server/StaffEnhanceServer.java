@@ -430,6 +430,11 @@ public final class StaffEnhanceServer {
                     continue;
                 }
                 final UUID subUuid = sub.getUniqueId();
+                // ⚠ 刚被配合搬动过的体也要豁免：吸附是 teleport，会造成同样的“表观速度”爆表。
+                // 不豁免的话，玩家开着超速锁时会看到「配合一建立，结构立刻被钉死」。
+                if (com.ovo.sablestopnow.server.MateRegistry.isMateMoved(level, subUuid)) {
+                    continue;
+                }
                 final double speed = sub.latestLinearVelocity != null ? sub.latestLinearVelocity.length() : 0.0;
                 if (speed <= threshold) {
                     SPEED_LOCK_RETRY.remove(subUuid);

@@ -1,6 +1,6 @@
 package com.ovo.sablestopnow.client;
 
-import com.ovo.sablestopnow.client.gui.ModConfigScreen;
+import com.ovo.sablestopnow.client.gui.ModSettingsScreen;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 
@@ -17,6 +17,6 @@ public final class ClientConfigScreens {
 
     public static void register(final ModContainer container) {
         container.registerExtensionPoint(IConfigScreenFactory.class,
-                (IConfigScreenFactory) (mod, parent) -> new ModConfigScreen(parent));
+                (IConfigScreenFactory) (mod, parent) -> ModSettingsScreen.create(parent));
     }
 }

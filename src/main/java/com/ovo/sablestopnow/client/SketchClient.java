@@ -1,0 +1,368 @@
+package com.ovo.sablestopnow.client;
+
+import com.ovo.sablestopnow.client.model.ModelCamera;
+import com.ovo.sablestopnow.network.SketchNetworking;
+import com.ovo.sablestopnow.sketch.Sketch;
+import com.ovo.sablestopnow.sketch.SketchMode;
+
+import dev.ryanhcode.sable.api.sublevel.ClientSubLevelContainer;
+import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
+import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
+import dev.ryanhcode.sable.companion.math.Pose3dc;
+import dev.ryanhcode.sable.sublevel.ClientSubLevel;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
+
+import org.jetbrains.annotations.Nullable;
+import org.joml.Vector3d;
+
+import java.util.UUID;
+
+/**
+ * 把 {@link SketchMode} 接到 Minecraft 上：鼠标 → 射线 → 局部坐标 → 模式。
+ *
+ * <h2>为什么单独一层</h2>
+ * {@link SketchMode} 刻意只认 JOML 向量，好处是能脱离游戏整体验证；代价是总得有人
+ * 把「鼠标在哪」翻译成「plot 局部系里的一条射线」。那一层翻译就是这里 ——
+ * 全是 MC/Sable 的胶水，没有逻辑可测，所以薄薄一层。
+ *
+ * <h2>世界 → 局部：两个变换不一样</h2>
+ * 子结构的正向变换是 {@code world = position + R · S · (local − rotationPoint)}，所以：
+ * <ul>
+ *   <li><b>点</b>用 {@code pose.transformPositionInverse}（Sable 自己提供，含 rotationPoint）；</li>
+ *   <li><b>方向</b>不能用它 —— 方向没有平移，而且法线用的是逆转置（{@code S·R⁻¹}），
+ *       方向要的是 {@code S⁻¹·R⁻¹}。所以这里显式写 {@code R⁻¹·dir} 再逐轴除以 scale。
+ *       结构没被缩放时两者恰好相同，被缩放时用错就会"越缩放越偏"，
+ *       和描边那边踩过的 scale 坑是同一类问题。</li>
+ * </ul>
+ */
+public final class SketchClient {
+
+    private static final SketchMode MODE = new SketchMode();
+
+    private SketchClient() {
+    }
+
+    public static SketchMode mode() {
+        return MODE;
+    }
+
+    public static boolean active() {
+        return MODE.active();
+    }
+
+    /**
+     * 进入草图模式：用该结构的局部包围盒生成三个基准面。
+     *
+     * @return 是否成功进入（结构还没同步过来时返回 false）
+     */
+    public static boolean begin(final UUID bodyId) {
+        final ClientSubLevel sub = find(bodyId);
+        if (sub == null) {
+            return false;
+        }
+        final BoundingBox3dc bb = sub.boundingBox();
+        final Pose3dc pose = sub.renderPose();
+        // 求解器是原生库（EZPZ），第一次用到时加载；加载失败也要能进草图环境
+        // （只是"画了不求解"），不能因为一个 DLL 问题把整个功能堵死。
+        try {
+            MODE.setSolver(com.ovo.sablestopnow.sketch.SketchSolver.bundled());
+        } catch (final Throwable t) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.warn(
+                    "[sablestopnow] 草图求解器加载失败，草图将只画不求解", t);
+        }
+        // ⚠⚠ `boundingBox()` 是**世界系**，而草图平面与射线都在 **plot 局部系**。
+        //
+        // 判据：Sable 自己在 `ServerSubLevel.tick()` 里拿 `boundingBox().minY()` 去比
+        // `SableConfig.SUB_LEVEL_REMOVE_MIN/MAX`（那是世界的 Y 上下限，-64/320 量级），
+        // 而且实测打印结构位置得到 worldY≈-58.9 —— 正好贴着下限。所以它是世界系。
+        //
+        // 之前直接把世界系的 min/max 当成局部系喂给 SketchDatumPlanes，
+        // 结果是：① 基准板被 transformPosition 又按位姿搬了一次，画到结构外很远的地方
+        // （表现为"什么都看不到"）；② 射线换算到局部（≈2e7 量级）永远打不到那些板
+        // （表现为"点了没反应"）。两个症状是一回事。
+        final Vector3d localMin = pose.transformPositionInverse(
+                new Vector3d(bb.minX(), bb.minY(), bb.minZ()), new Vector3d());
+        final Vector3d localMax = pose.transformPositionInverse(
+                new Vector3d(bb.maxX(), bb.maxY(), bb.maxZ()), new Vector3d());
+        // 结构被旋转/缩放时，世界 AABB 的两个角逆变换后不再是局部的 min/max；
+        // 这里按逐轴取小/取大兜一下（等比缩放且无旋转时与原值完全一致）。
+        final Vector3d lo = localMin.min(localMax, new Vector3d());
+        final Vector3d hi = localMin.max(localMax, new Vector3d());
+        MODE.begin(bodyId, lo, hi);
+        SketchRenderer.setEditing(null);
+        diag(bodyId, sub, bb, pose, lo, hi);
+        return true;
+    }
+
+    /**
+     * 一次性诊断：把「包围盒中心（局部）」与「世界→局部的往返」并排打出来。
+     *
+     * <p>基准板画歪时，需要一眼分清是**三种可能里的哪一种**，否则只能在游戏里反复猜：
+     * <ol>
+     *   <li>{@code boundingBox()} 本身不是 plot 局部系（那 center 就是错的）；</li>
+     *   <li>位姿或 scale 不对；</li>
+     *   <li>我用的逆变换不对（{@code transformPositionInverse} 的语义与正变换不互逆）。</li>
+     * </ol>
+     *
+     * <p>第 3 条可以用**自校验**判掉：把 center 正变换到世界、再逆变换回局部，
+     * {@code roundTripErr} 应当≈0。它不为 0 就说明第 3 条成立，与前面的渲染无关 ——
+     * 这正是当初查施力点时最有效的手法（先把"哪一环错"用数字钉死，而不是继续猜）。
+     */
+    private static void diag(final UUID bodyId, final ClientSubLevel sub, final BoundingBox3dc bb,
+                             final Pose3dc pose, final Vector3d localMin, final Vector3d localMax) {
+        final Vector3d worldCenter = new Vector3d(
+                (bb.minX() + bb.maxX()) * 0.5,
+                (bb.minY() + bb.maxY()) * 0.5,
+                (bb.minZ() + bb.maxZ()) * 0.5);
+        final Vector3d localCenter = new Vector3d(
+                (localMin.x + localMax.x) * 0.5,
+                (localMin.y + localMax.y) * 0.5,
+                (localMin.z + localMax.z) * 0.5);
+        // 自校验：局部中心 → 世界 → 回局部，应当原地不动
+        final Vector3d world = pose.transformPosition(new Vector3d(localCenter), new Vector3d());
+        final Vector3d back = pose.transformPositionInverse(world, new Vector3d());
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch-diag] body={} bboxWorld=({},{},{})..({},{},{}) pose.pos={} scale={} "
+                        + "localBox=({},{},{})..({},{},{}) localCenter={} roundTripErr={}",
+                bodyId.toString().substring(0, 8),
+                bb.minX(), bb.minY(), bb.minZ(), bb.maxX(), bb.maxY(), bb.maxZ(),
+                pose.position(), pose.scale(),
+                localMin.x, localMin.y, localMin.z, localMax.x, localMax.y, localMax.z,
+                localCenter, localCenter.distance(back));
+    }
+
+    /** 鼠标移动：更新高亮 / 落点预览。 */
+    public static void hover(final Minecraft mc) {
+        if (!MODE.active()) {
+            return;
+        }
+        final UUID body = MODE.session().body();
+        final ClientSubLevel sub = body == null ? null : find(body);
+        if (sub == null) {
+            return;
+        }
+        final Vec3 from = ModelCamera.position();
+        final Vec3 dir = ModelCamera.rayDirection(mc);
+        final Pose3dc pose = sub.renderPose();
+        final Vector3d localFrom = toLocalPoint(pose, from);
+        final Vector3d localDir = toLocalDir(pose, dir);
+        // 拾取容差跟着相机距离走：屏幕上的可点范围恒定，拉远不会点不中、拉近不会误选一片。
+        final var posePos = pose.position();
+        final double distance = Math.sqrt(
+                Math.pow(from.x - posePos.x(), 2)
+                        + Math.pow(from.y - posePos.y(), 2)
+                        + Math.pow(from.z - posePos.z(), 2));
+        MODE.setPickTolerance(Math.max(0.12, distance * 0.02));
+        MODE.hover(localFrom, localDir);
+
+        // 编辑阶段顺便把鼠标落点交给渲染器画橡皮筋。
+        // ⚠ 用 MODE.previewUv() 而不是这里的原始 uv：预览要显示的是**真按下去会用的点**，
+        // 已经过关键点吸附与水平/竖直推理。喂原始 uv 的话，预览会落在光标处、
+        // 松手却吸到别处 —— 看起来就是"预览在骗人"。
+        final Vector3d uv = MODE.planePoint(localFrom, localDir);
+        final double[] preview = MODE.previewUv();
+        if (preview == null) {
+            SketchRenderer.clearPreviewPoint();
+        } else {
+            SketchRenderer.setPreviewPoint(preview[0], preview[1]);
+        }
+        diagUv(uv, localFrom, localDir);
+    }
+
+    private static long lastUvDiagMs;
+    private static double lastU;
+    private static double lastV;
+
+    /**
+     * 落点诊断（每秒最多一行，且 u/v 都几乎没变时不打）。
+     *
+     * <p>排查「直线/矩形塌成一条线」用：那组现象合起来只有一个解释 ——
+     * **平面坐标里有一个分量取不到变化**（v 恒定 → 所有线共线、矩形高度为 0），
+     * 而圆只依赖圆心与半径、所以看着正常。这行直接把 u/v 印出来，一看便知。
+     */
+    private static void diagUv(@Nullable final Vector3d uv, final Vector3d localFrom,
+                               final Vector3d localDir) {
+        if (uv == null) {
+            return;
+        }
+        final long now = System.currentTimeMillis();
+        if (now - lastUvDiagMs < 1000L) {
+            return;
+        }
+        if (Math.abs(uv.x - lastU) < 1.0e-6 && Math.abs(uv.y - lastV) < 1.0e-6) {
+            return;
+        }
+        lastUvDiagMs = now;
+        lastU = uv.x;
+        lastV = uv.y;
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch-diag] cursor uv=({}, {})  rayLocalFrom={} rayLocalDir={}",
+                String.format(java.util.Locale.ROOT, "%.4f", uv.x),
+                String.format(java.util.Locale.ROOT, "%.4f", uv.y),
+                localFrom, localDir);
+    }
+
+    /**
+     * 左键。
+     *
+     * @return true 表示这次点击被草图模式消费了（调用方不要再往下走拾取/拖拽）
+     */
+    public static boolean click(final Minecraft mc) {
+        if (!MODE.active()) {
+            return false;
+        }
+        final UUID body = MODE.session().body();
+        final ClientSubLevel sub = body == null ? null : find(body);
+        if (sub == null) {
+            return false;
+        }
+        final Vec3 from = ModelCamera.position();
+        final Vec3 dir = ModelCamera.rayDirection(mc);
+        final Pose3dc pose = sub.renderPose();
+        final Vector3d localFrom = toLocalPoint(pose, from);
+        final Vector3d localDir = toLocalDir(pose, dir);
+        // ⚠ 诊断必须**无条件**打，而且要记下点击**之前**的阶段。
+        // 之前我是"点击之后阶段仍是 CHOOSING_PLANE 才打"——于是成功的那次反而没有日志，
+        // 我因此白白查了好几轮。失败的日志能定位失败，成功的日志才能确认成功。
+        final var stageBefore = MODE.stage();
+        // Ctrl 按下 = 多选增删。读键盘只能在客户端这一层做（SketchMode 不依赖 Minecraft）。
+        final boolean additive = net.minecraft.client.gui.screens.Screen.hasControlDown();
+        final boolean consumed = MODE.click(localFrom, localDir, additive);
+        diagPlaneClick(stageBefore, consumed, MODE.stage(), MODE.planes().size());
+        if (!consumed) {
+            return false;
+        }
+        // 刚建好草图 / 正在编辑，把当前草图 id 同步给渲染器（高亮用）
+        SketchRenderer.setEditing(MODE.editingId());
+        diagEntity();
+        return true;
+    }
+
+    /** 点击诊断：记录点击**前后**的阶段与实际有没有被消费（无条件打）。 */
+    private static void diagPlaneClick(final Object stageBefore, final boolean consumed,
+                                       final Object stageAfter, final int plates) {
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch-diag] click: stage {} -> {} consumed={} plates={}",
+                stageBefore, stageAfter, consumed, plates);
+    }
+
+    /** 最近一次完成图元后的变量值（诊断「线/矩形塌成一条线」）。 */
+    private static void diagEntity() {
+        final com.ovo.sablestopnow.sketch.Sketch k = MODE.working();
+        if (k == null || k.entities().isEmpty()) {
+            return;
+        }
+        final var e = k.entities().get(k.entities().size() - 1);
+        final StringBuilder sb = new StringBuilder();
+        for (final int v : e.vars()) {
+            sb.append(String.format(java.util.Locale.ROOT, "%.4f ", k.variable(v)));
+        }
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch-diag] entity #{} kind={} vars=[{}]  solved={}",
+                k.entities().size(), e.kind(), sb.toString().trim(),
+                MODE.lastSolve() == null ? "n/a"
+                        : (MODE.lastSolve().ok() ? "ok" : "unsatisfied="
+                                + MODE.lastSolve().unsatisfied()));
+    }
+
+    /**
+     * 从设计树点进一张已有草图继续编辑。
+     *
+     * <p>客户端手上就是完整的一份（全量同步带回了变量/图元/约束），所以不必像施力点那样
+     * 先向服务端拉一次 —— 直接进编辑。改完点「完成草图」时整张发回去。
+     */
+    public static void edit(final Sketch sketch) {
+        MODE.edit(sketch);
+        SketchRenderer.setEditing(sketch.id());
+    }
+
+    /**
+     * 用鼠标下那个**方块面**作为草图平面。
+     *
+     * <p>⚠ 坐标已经是 plot 局部系 —— {@code MateTargeting.BoxHit} 的 {@code baseBlock}
+     * 实测就是局部坐标（日志里是 {@code BlockPos{x=20481032,...}}，2e7 量级），
+     * 不需要再做任何世界↔局部的换算。这一点很容易搞反：它看着像"世界里的方块坐标"，
+     * 其实是 plot 局部。换算两次就会得到一个偏移两千万格的平面。
+     *
+     * @return 是否真的建了草图
+     */
+    public static boolean chooseFace(final MateTargeting.BoxHit hit) {
+        final net.minecraft.core.BlockPos block = hit.baseBlock();
+        final net.minecraft.core.Direction face = hit.baseFace();
+        if (block == null || face == null) {
+            return false;
+        }
+        // 面的中心 = 方块中心 + 半个法线；法线直接用方块面的轴向量
+        final Vector3d center = new Vector3d(
+                block.getX() + 0.5 + face.getStepX() * 0.5,
+                block.getY() + 0.5 + face.getStepY() * 0.5,
+                block.getZ() + 0.5 + face.getStepZ() * 0.5);
+        final Vector3d normal = new Vector3d(face.getStepX(), face.getStepY(), face.getStepZ());
+        if (!MODE.chooseFace(center, normal)) {
+            return false;
+        }
+        SketchRenderer.setEditing(MODE.editingId());
+        return true;
+    }
+
+    /** 完成并提交给服务端；没在编辑就什么都不做。 */
+    public static void finish() {
+        final Sketch sketch = MODE.finish();
+        SketchRenderer.setEditing(null);
+        if (sketch != null) {
+            SketchNetworking.sendSave(sketch);
+        }
+    }
+
+    /** 放弃（不提交）。 */
+    public static void cancel() {
+        MODE.cancel();
+        SketchRenderer.setEditing(null);
+    }
+
+    // ------------------------------------------------------------------
+
+    @Nullable
+    private static ClientSubLevel find(final UUID bodyId) {
+        final Level level = Minecraft.getInstance().level;
+        if (level == null) {
+            return null;
+        }
+        if (!(SubLevelContainer.getContainer(level) instanceof final ClientSubLevelContainer container)) {
+            return null;
+        }
+        for (final ClientSubLevel sub : container.getAllSubLevels()) {
+            if (sub.getUniqueId().equals(bodyId)) {
+                return sub;
+            }
+        }
+        return null;
+    }
+
+    private static Vector3d toLocalPoint(final Pose3dc pose, final Vec3 world) {
+        return pose.transformPositionInverse(
+                new Vector3d(world.x, world.y, world.z), new Vector3d());
+    }
+
+    /**
+     * 世界方向 → 局部方向：{@code S⁻¹ · R⁻¹ · dir}。
+     *
+     * <p>⚠ 不要用 {@code transformNormalInverse}：那是给法线用的（含转置），
+     * 只在 scale 各轴相等时和这里等价。
+     */
+    private static Vector3d toLocalDir(final Pose3dc pose, final Vec3 world) {
+        // Quaterniondc 的 conjugate 需要传入目标对象（不是无参的）
+        final org.joml.Quaterniond inverse = pose.orientation()
+                .conjugate(new org.joml.Quaterniond());
+        final Vector3d out = inverse.transform(new Vector3d(world.x, world.y, world.z),
+                new Vector3d());
+        final var scale = pose.scale();
+        out.x /= scale.x();
+        out.y /= scale.y();
+        out.z /= scale.z();
+        return out;
+    }
+}

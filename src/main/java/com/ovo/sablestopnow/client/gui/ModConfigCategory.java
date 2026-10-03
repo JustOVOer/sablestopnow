@@ -6,7 +6,6 @@ import net.minecraft.client.gui.screens.options.controls.KeyBindsScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -17,21 +16,24 @@ import java.util.List;
  * <ul>
  *   <li>{@link #ASSEMBLER} 物理组装器 —— Sable 本体（力过滤 / 自动暂停 / 超速锁定 / 组装相关）；</li>
  *   <li>{@link #STAFF} 物理手杖 —— staff_enhance 段 + 按键设置入口；</li>
- *   <li>{@link #GOGGLES} 工程师护目镜 —— 显示 / 描边 / 坐标轴 / HUD。</li>
+ *   <li>{@link #GOGGLES} 工程师护目镜 —— 显示 / 描边 / 坐标轴 / HUD，以及界面自身的两项。</li>
  * </ul>
  */
 public enum ModConfigCategory {
 
     ASSEMBLER("assembler", "simulated:physics_assembler"),
     STAFF("staff", "simulated:creative_physics_staff"),
-    GOGGLES("goggles", "create:goggles");
+    GOGGLES("goggles", "create:goggles", "minecraft:spyglass");
+
+    /** 任何图标都取不到时的最后兜底（保证界面上一定有东西可看）。 */
+    private static final String FALLBACK_ITEM = "minecraft:redstone_torch";
 
     private final String id;
-    private final String iconItemId;
+    private final String[] iconItemIds;
 
-    ModConfigCategory(final String id, final String iconItemId) {
+    ModConfigCategory(final String id, final String... iconItemIds) {
         this.id = id;
-        this.iconItemId = iconItemId;
+        this.iconItemIds = iconItemIds;
     }
 
     public String id() {
@@ -46,20 +48,39 @@ public enum ModConfigCategory {
         return Component.translatable("gui.sablestopnow.category." + this.id + ".desc");
     }
 
-    /** 图标（渲染游戏内物品；取不到时返回空栈，由界面画占位方块）。 */
+    /**
+     * 图标（渲染游戏内物品）。
+     *
+     * <p>按注册名依次尝试：首选是 Sable / Simulated 的对应物品（本模组一定装了它们），
+     * 之后的候选是「同一意象的原版物品」—— 例如护目镜首选 {@code create:goggles}，
+     * 但 Create 不是本模组的依赖，没装时退到 {@code minecraft:spyglass}（同样是「看」的意象），
+     * 而不是直接跳到一个和分类毫无关系的物品。全都不存在才用红石火把兜底。
+     */
     public ItemStack icon() {
-        try {
-            final ResourceLocation location = ResourceLocation.tryParse(this.iconItemId);
-            if (location != null) {
-                final Item item = BuiltInRegistries.ITEM.get(location);
-                if (item != null && item != Items.AIR) {
-                    return new ItemStack(item);
-                }
+        for (final String candidateId : this.iconItemIds) {
+            final ItemStack stack = stackOf(candidateId);
+            if (!stack.isEmpty()) {
+                return stack;
             }
-        } catch (final Exception ignored) {
-            // 依赖模组缺失等情况：退化为占位图标
         }
-        return ItemStack.EMPTY;
+        return stackOf(FALLBACK_ITEM);
+    }
+
+    /** 按注册名取物品；取不到（依赖缺失、注册名拼错）时返回空栈，由调用方决定退到哪一个候选。 */
+    private static ItemStack stackOf(final String itemId) {
+        try {
+            final ResourceLocation location = ResourceLocation.tryParse(itemId);
+            if (location == null) {
+                return ItemStack.EMPTY;
+            }
+            return BuiltInRegistries.ITEM.getOptional(location)
+                    .filter(item -> item != Items.AIR)
+                    .map(ItemStack::new)
+                    .orElse(ItemStack.EMPTY);
+        } catch (final Exception ignored) {
+            // 依赖模组缺失等情况：交给下一个候选
+            return ItemStack.EMPTY;
+        }
     }
 
     /** 该大类下的设置项。 */
@@ -102,7 +123,12 @@ public enum ModConfigCategory {
                     ConfigOption.bool("outline_only_focused", config.outlineOnlyFocused),
                     ConfigOption.number("outline_thickness", config.outlineThickness, 0.005, 0.5, 0.005),
                     ConfigOption.bool("render_axis", config.renderAxis),
-                    ConfigOption.number("axis_angle_degrees", config.axisAngleDegrees, 1.0, 20.0, 0.5));
+                    ConfigOption.number("axis_angle_degrees", config.axisAngleDegrees, 1.0, 20.0, 0.5),
+                    // 界面自身的两项：改完立刻同步给 GUI 库，玩家不用退出界面就能看到效果
+                    ConfigOption.bool("ui_animations", config.uiAnimations)
+                            .withChange(SablestopNowConfig::syncUiSettings),
+                    ConfigOption.number("ui_font_scale", config.uiFontScale, 0.5, 1.0, 0.01)
+                            .withChange(SablestopNowConfig::syncUiSettings));
         };
     }
 }

@@ -20,9 +20,30 @@ public final class StaffEnhanceServerEvents {
 
     @SubscribeEvent
     public static void onServerTick(final ServerTickEvent.Post event) {
+        // MSPT 观测：**只在超阈值时记一条**（带限流），正常情况一条都不打。
+        // 这是我们判断"卡顿是不是物理造成的"的唯一客观依据 —— 以前只能靠用户报"十几万"。
+        com.ovo.sablestopnow.server.PhysicsDiag.tick(event.getServer(),
+                event.getServer().getAverageTickTimeNanos());
         StaffEnhanceServer.serverTick();
+        // Strategy-A watch: log both bodies' Y (see VoxelCollisionService.logABodies)
+        if (event.getServer().getTickCount() % 20 == 0) {
+            com.ovo.sablestopnow.server.VoxelCollisionService.logABodies(event.getServer().overworld());
+        }
         // 暂停步进 / 超速锁定 / 幽灵关节统一在每 tick 收尾维护
         StaffEnhanceServer.serverFeatures(event.getServer());
+        // 施力点的清理是「结构没了 → 记录也该没」：每秒扫一次就够（施力点是个位数级），
+        // 不必塞进每物理子步的热路径里。
+        if (event.getServer().getTickCount() % 20 == 0) {
+            for (final net.minecraft.server.level.ServerLevel level : event.getServer().getAllLevels()) {
+                if (com.ovo.sablestopnow.force.ForcePointData.get(level).all().isEmpty()) {
+                    continue;
+                }
+                final var container = dev.ryanhcode.sable.api.sublevel.SubLevelContainer.getContainer(level);
+                if (container instanceof final dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer server) {
+                    ForcePointService.prune(server, level);
+                }
+            }
+        }
     }
 
     @SubscribeEvent
@@ -38,6 +59,33 @@ public final class StaffEnhanceServerEvents {
             StaffEnhanceServer.sendGhostsTo(player);
             // 配合系统：补发所有维度的配合表（客户端据此画树形界面）
             com.ovo.sablestopnow.network.MateNetworking.sendAllTo(player);
+            // 可控施力点与耦合（比例/齿轮）同样是「服务端权威 + 全量同步」：
+            // 不补发的话，重启或重连之后客户端的树里会空着，直到玩家手动改一次才出现 ——
+            // 那会被当成「存档丢了」。
+            com.ovo.sablestopnow.network.ForceNetworking.sendAllTo(player);
+            com.ovo.sablestopnow.network.CouplingNetworking.sendAllTo(player);
+            // 草图同理：不补发的话，重连之后设计树里那一栏会空着，直到玩家手动改一次才出现。
+            com.ovo.sablestopnow.network.SketchNetworking.sendAllTo(player);
+            // 拉伸实体同理。实体**引用**草图，所以必须在草图之后发 ——
+            // 客户端要拿到草图才能把实体的盒子算出来。
+            com.ovo.sablestopnow.network.SolidNetworking.sendAllTo(player);
+        }
+    }
+
+    /**
+     * 换维度时补发该维度的施力点/耦合。
+     *
+     * <p>配合表是「一次补发所有维度」，而施力点与耦合按维度存，
+     * 玩家跨维度后如果不补发，客户端就还在显示上一个维度的东西。
+     */
+    @SubscribeEvent
+    public static void onPlayerChangedDimension(final PlayerEvent.PlayerChangedDimensionEvent event) {
+        if (event.getEntity() instanceof final net.minecraft.server.level.ServerPlayer player) {
+            com.ovo.sablestopnow.network.ForceNetworking.sendCurrentTo(player);
+            com.ovo.sablestopnow.network.CouplingNetworking.broadcast((net.minecraft.server.level.ServerLevel)
+                    player.level());
+            com.ovo.sablestopnow.network.SketchNetworking.sendCurrentTo(player);
+            com.ovo.sablestopnow.network.SolidNetworking.sendCurrentTo(player);
         }
     }
 
@@ -59,9 +107,19 @@ public final class StaffEnhanceServerEvents {
 
     @SubscribeEvent
     public static void onServerStopped(final ServerStoppedEvent event) {
+        com.ovo.sablestopnow.server.HullTrace.close();
         StaffEnhanceServer.clearAll();
         StaffSelectionRegistry.clearAll();
         StaffSnapshotRegistry.clearAll();
         MateRegistry.clearAll();
+        CouplingRegistry.clear();
+        ModelMoveService.clear();
+        // 实体碰撞的刚体：服务器停了就挨个维度拆掉。
+        // ⚠ 不拆的话静态表里会留下已经失效的 handle，重开一个存档时
+        // 下一次重建会拿着旧 handle 去 remove，后果不可预期。
+        for (final net.minecraft.server.level.ServerLevel level
+                : event.getServer().getAllLevels()) {
+            SolidCollisionService.clearDimension(level);
+        }
     }
 }

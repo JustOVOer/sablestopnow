@@ -54,6 +54,23 @@ public abstract class VanillaSingleSubLevelRenderScaleMixin {
     @Shadow
     private BlockPos singleBlockPos;
 
+    /**
+     * 模型模式里被标记为「隐藏」的结构：整块不渲染。
+     *
+     * <p>与区块路径同一条理由：Sable 的 {@code ClientSubLevel}/{@code SubLevelRenderData}
+     * 没有可见性开关（javap 确认过），只能在渲染入口掐掉。
+     * {@code require = 0}：这一条只是显示功能，宁可「隐藏失效」也不要因为 Sable 改方法名
+     * 让游戏在启动时因 Mixin 应用失败而崩。
+     */
+    @org.spongepowered.asm.mixin.injection.Inject(
+            method = "renderSingleBlock", at = @At("HEAD"), cancellable = true, require = 0, remap = false)
+    private void sablestopnow$skipHidden(
+            final org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
+        if (com.ovo.sablestopnow.client.model.ModelProperties.hidden(this.subLevel.getUniqueId())) {
+            ci.cancel();
+        }
+    }
+
     @Redirect(
             method = "renderSingleBlock",
             require = 1,

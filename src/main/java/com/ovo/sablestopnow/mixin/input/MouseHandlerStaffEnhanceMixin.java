@@ -24,6 +24,14 @@ public class MouseHandlerStaffEnhanceMixin {
     private void sablestopnow$staffEnhancePress(final long windowPointer, final int button, final int action,
                                                 final int modifiers, final CallbackInfo ci) {
         try {
+            if (com.ovo.sablestopnow.client.gui.lib.Ui.handleMouse(button, action, modifiers)) {
+                ci.cancel();
+                return;
+            }
+            if (com.ovo.sablestopnow.client.model.ModelInput.handleMouse(button, action, modifiers)) {
+                ci.cancel();
+                return;
+            }
             if (StaffEnhanceClientHandler.handleMouse(button, action, modifiers)) {
                 ci.cancel();
             }
@@ -38,6 +46,14 @@ public class MouseHandlerStaffEnhanceMixin {
     private void sablestopnow$staffEnhanceScroll(final long windowPointer, final double xOffset, final double yOffset,
                                                  final CallbackInfo ci) {
         try {
+            if (com.ovo.sablestopnow.client.gui.lib.Ui.handleScroll(yOffset)) {
+                ci.cancel();
+                return;
+            }
+            if (com.ovo.sablestopnow.client.model.ModelInput.handleScroll(yOffset)) {
+                ci.cancel();
+                return;
+            }
             if (StaffEnhanceClientHandler.handleScroll(yOffset)) {
                 ci.cancel();
             }

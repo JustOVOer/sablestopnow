@@ -25,16 +25,27 @@ public enum MateType {
     PARALLEL("parallel", ValueKind.NONE, true),
     /** 垂直：将所选项以 90° 角放置。 */
     PERPENDICULAR("perpendicular", ValueKind.NONE, true),
-    /** 相切：使所选项目相切（至少要有一侧是圆柱面/圆锥面/球面）。 */
-    TANGENT("tangent", ValueKind.DISTANCE, true),
-    /** 同心：使所选项共享同一中心线（轴线）。 */
-    CONCENTRIC("concentric", ValueKind.NONE, true),
     /** 锁定：保持两个零部件之间的当前相对位置和方向不变。 */
     LOCK("lock", ValueKind.NONE, false),
     /** 距离：使所选项之间保持指定的距离。 */
     DISTANCE("distance", ValueKind.DISTANCE, false),
-    /** 角度：使所选项之间保持指定的角度。 */
-    ANGLE("angle", ValueKind.ANGLE, true);
+    /**
+     * 角度：使所选项之间保持指定的角度。
+     *
+     * <p><b>没有「相切」与「同心」</b>：那两个在 SolidWorks 里靠圆柱面/圆锥面/球面才有意义，
+     * 而 Minecraft 的物理结构是方块拼的，没有真正的回转面 —— 摆出来只会得到一个永远对不上的
+     * 候选类型（选了也没法满足），所以直接不做。需要「两根轴对齐」时用<b>平行</b>代替。
+     */
+    ANGLE("angle", ValueKind.ANGLE, true),
+    /**
+     * 限制：允许在指定的<b>距离区间</b>内活动（cp/description.txt 的「限制」）。
+     *
+     * <p>与距离的区别只在数值模型：距离是「钉在 v 上」（数值做进关节几何，硬锁）；
+     * 限制是「钉在 [min, max] 上」——这条轴<b>不锁</b>，交给求解器的区间约束
+     * （{@code setLimit(axis, min, max)}，min &lt; max）。这是 limit 的正当用法：
+     * 同一条轴既锁又限才是自相矛盾（虚空动能），区间则不会。
+     */
+    LIMIT("limit", ValueKind.DISTANCE_RANGE, false);
 
     /** 数值类型。 */
     public enum ValueKind {
@@ -42,6 +53,8 @@ public enum MateType {
         NONE,
         /** 需要距离（方块，可负）。 */
         DISTANCE,
+        /** 需要距离<b>区间</b>（最小值 + 最大值，见 {@link #LIMIT}）。 */
+        DISTANCE_RANGE,
         /** 需要角度（度，0..180）。 */
         ANGLE
     }
@@ -74,9 +87,27 @@ public enum MateType {
         return this.valueKind != ValueKind.NONE;
     }
 
-    /** 默认数值（距离=0，角度=90°）。 */
+    /** 是否需要<b>第二个</b>数值（区间类型：最小值 + 最大值）。 */
+    public boolean needsSecondValue() {
+        return this.valueKind == ValueKind.DISTANCE_RANGE;
+    }
+
+    /** 默认数值（距离=0，角度=90°，限制下限=0）。 */
     public double defaultValue() {
-        return this.valueKind == ValueKind.ANGLE ? 90.0 : 0.0;
+        return switch (this.valueKind) {
+            case ANGLE -> 90.0;
+            case DISTANCE_RANGE -> 0.0;
+            default -> 0.0;
+        };
+    }
+
+    /** 默认的第二个数值（只有区间类型用得上：默认上限）。 */
+    public double defaultValue2() {
+        return switch (this.valueKind) {
+            case DISTANCE_RANGE -> 2.0;
+            case ANGLE -> 180.0;
+            default -> 0.0;
+        };
     }
 
     /** 数值下限。 */
@@ -84,6 +115,7 @@ public enum MateType {
         return switch (this.valueKind) {
             case NONE -> 0.0;
             case DISTANCE -> -64.0;
+            case DISTANCE_RANGE -> -64.0;
             case ANGLE -> 0.0;
         };
     }
@@ -93,31 +125,29 @@ public enum MateType {
         return switch (this.valueKind) {
             case NONE -> 0.0;
             case DISTANCE -> 64.0;
+            case DISTANCE_RANGE -> 64.0;
             case ANGLE -> 180.0;
         };
     }
 
     /**
-     * 「配合对齐」（cp/description.txt 末尾）：同向对齐 / 反向对齐。
+     * 「配合对齐 / 反转」（cp/description.txt 末尾 + 玩家要求）。
      *
-     * <p>只对<b>解算器真的会用 {@code flip}</b> 的类型返回 true —— 这个标志同时决定
-     * 「GUI 是否显示切换按钮」和「{@code updateFlip} 是否接受修改」，一旦与解算器不一致，
-     * 要么给出一个点了没反应的按钮（垂直），要么让玩家根本改不了（重合）。
+     * <p>勾上「反转」= 把 B 绕配合面内的轴转 180°（法线取反）—— 就是说，勾选框能让玩家把
+     * 其中一个结构「翻个面」再贴上去。这里列出<b>解算器真的会用到 {@code flip}</b> 的类型：
      *
      * <ul>
-     *   <li>{@link #COINCIDENT}/{@link #PARALLEL}/{@link #TANGENT}/{@link #CONCENTRIC}：方向有意义，支持；</li>
-     *   <li>{@link #PERPENDICULAR}：垂直是「两方向正交」，把 B 的方向取反不改变正交性 ⇒ <b>翻转没有意义</b>，
-     *       所以这里必须是 false（曾经错标成 true，界面上多了一个无效按钮）；</li>
+     *   <li>{@link #COINCIDENT}/{@link #PARALLEL}/{@link #DISTANCE}/{@link #PERPENDICULAR}：支持；</li>
      *   <li>{@link #ANGLE}：夹角由数值决定，翻转没有意义；</li>
-     *   <li>{@link #DISTANCE}/{@link #LOCK}：不约束方向朝向。</li>
+     *   <li>{@link #LOCK}：不约束方向朝向。</li>
      * </ul>
      *
-     * <p>注意这只是「类型层面」的资格；重合还要两侧参考都带方向才有意义，
+     * <p>注意这只是「类型层面」的资格；重合/距离还要两侧参考都带方向才有意义，
      * 所以调用方应该用 {@code Mate#supportsAlignment()}（它把参考也考虑进去）。
      */
     public boolean supportsAlignment() {
         return switch (this) {
-            case COINCIDENT, PARALLEL, TANGENT, CONCENTRIC -> true;
+            case COINCIDENT, PARALLEL, PERPENDICULAR, DISTANCE, LIMIT -> true;
             default -> false;
         };
     }

@@ -95,6 +95,7 @@ Write-Host "=== pass 2: compiling harness (no gradle) ==="
 if ($fullExit -ne 0) {
     $overrides = @(
         (Join-Path $root 'src\main\java\com\ovo\sablestopnow\mate\RefKind.java'),
+        (Join-Path $root 'src\main\java\com\ovo\sablestopnow\mate\MateRef.java'),
         (Join-Path $root 'src\main\java\com\ovo\sablestopnow\mate\MateType.java'),
         (Join-Path $root 'src\main\java\com\ovo\sablestopnow\mate\Mate.java'),
         (Join-Path $root 'src\main\java\com\ovo\sablestopnow\mate\MateFrames.java')
@@ -115,6 +116,42 @@ Write-Host "=== running harness ==="
 & (Join-Path $Jdk 'bin\java.exe') "-Dfile.encoding=UTF-8" -cp "$full;$out;$cp" com.ovo.sablestopnow.tools.MateFramesCheck 2>&1
 $code = $LASTEXITCODE
 Write-Host "HARNESS_EXIT=$code"
+
+# ---------------------------------------------------------------------------------------------
+# Pass 3: GUI self-check harness. The checker that guards the GUI needs a guard of its own:
+# a lint that always reports "no problems" is indistinguishable from a clean bill of health, so
+# the synthetic-defect test runs here rather than only at client startup.
+# ---------------------------------------------------------------------------------------------
+Write-Host "=== pass 3: GUI self-check harness ==="
+& $javac -encoding UTF-8 -nowarn -cp "$full;$out;$cp" -d $out `
+    (Join-Path $root 'tools\GuiLintCheck.java') 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "GUI_LINT=COMPILE_FAILED"
+    $code = 3
+} else {
+    & (Join-Path $Jdk 'bin\java.exe') "-Dfile.encoding=UTF-8" -cp "$full;$out;$cp" com.ovo.sablestopnow.tools.GuiLintCheck 2>&1
+    $lintExit = $LASTEXITCODE
+    Write-Host "GUI_LINT_HARNESS_EXIT=$lintExit"
+    if ($lintExit -ne 0 -and $code -eq 0) { $code = $lintExit }
+}
+
+# ---------------------------------------------------------------------------------------------
+# Pass 4: model-outline geometry assertions. The "which edges get drawn" rules failed silently
+# once (seam culling could never fire), so the predicate is pinned down offline as well.
+# ---------------------------------------------------------------------------------------------
+Write-Host "=== pass 4: outline geometry harness ==="
+& $javac -encoding UTF-8 -nowarn -cp "$full;$out;$cp" -d $out `
+    (Join-Path $root 'tools\OutlineCheck.java') 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "OUTLINE_CHECK=COMPILE_FAILED"
+    if ($code -eq 0) { $code = 4 }
+} else {
+    & (Join-Path $Jdk 'bin\java.exe') "-Dfile.encoding=UTF-8" -cp "$full;$out;$cp" com.ovo.sablestopnow.tools.OutlineCheck 2>&1
+    $outlineExit = $LASTEXITCODE
+    Write-Host "OUTLINE_CHECK_EXIT=$outlineExit"
+    if ($outlineExit -ne 0 -and $code -eq 0) { $code = $outlineExit }
+}
+
 # The geometry harness is the gate; the type check is reported but must also be surfaced.
 if ($fullExit -ne 0) {
     Write-Host "NOTE: full type check failed - see $fullLog"

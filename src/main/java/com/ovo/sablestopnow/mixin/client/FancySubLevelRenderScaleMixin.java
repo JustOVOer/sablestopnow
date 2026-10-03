@@ -31,6 +31,66 @@ import org.spongepowered.asm.mixin.injection.ModifyArg;
 @Mixin(value = FancySubLevelRenderDispatcher.class, remap = false)
 public class FancySubLevelRenderScaleMixin {
 
+    /**
+     * 「隐藏」在 fancy 路径上的实现。
+     *
+     * <p>这条路径的入口收的是<b>一批</b>物理结构（{@code Iterable<ClientSubLevel>}），
+     * 所以不能像另外两条单结构路径那样直接 cancel —— 那会把整层都画不出来。
+     * 正确做法是把这一批里被隐藏的过滤掉再交回去，三个入口都要过滤
+     * （方块层 / 附加层 / 方块实体层），否则隐藏会表现为「方块没了但方块实体还飘着」。
+     *
+     * <p>{@code require = 0} 与其它 mixin 同理：宁可隐藏失效，也不要让游戏因 Mixin 应用失败而崩。
+     */
+    @org.spongepowered.asm.mixin.injection.ModifyVariable(
+            method = "renderSectionLayer", at = @At("HEAD"), argsOnly = true, index = 0, require = 0, remap = false)
+    private Iterable<dev.ryanhcode.sable.sublevel.ClientSubLevel> sablestopnow$filterHiddenSections(
+            final Iterable<dev.ryanhcode.sable.sublevel.ClientSubLevel> subLevels) {
+        return filterHidden(subLevels);
+    }
+
+    @org.spongepowered.asm.mixin.injection.ModifyVariable(
+            method = "renderAfterSections", at = @At("HEAD"), argsOnly = true, index = 0, require = 0, remap = false)
+    private Iterable<dev.ryanhcode.sable.sublevel.ClientSubLevel> sablestopnow$filterHiddenAfterSections(
+            final Iterable<dev.ryanhcode.sable.sublevel.ClientSubLevel> subLevels) {
+        return filterHidden(subLevels);
+    }
+
+    @org.spongepowered.asm.mixin.injection.ModifyVariable(
+            method = "renderBlockEntities", at = @At("HEAD"), argsOnly = true, index = 0, require = 0, remap = false)
+    private Iterable<dev.ryanhcode.sable.sublevel.ClientSubLevel> sablestopnow$filterHiddenBlockEntities(
+            final Iterable<dev.ryanhcode.sable.sublevel.ClientSubLevel> subLevels) {
+        return filterHidden(subLevels);
+    }
+
+    /**
+     * 没有隐藏项时原样返回（常见路径零分配）。
+     *
+     * <p>发现第一个隐藏项时才建列表，并把「已经遍历过的那几个」补进去 ——
+     * 这里刻意不先物化整个 Iterable：热路径上（每帧、每层、每个结构）多一次 List 分配是能省则省的。
+     */
+    private static Iterable<dev.ryanhcode.sable.sublevel.ClientSubLevel> filterHidden(
+            final Iterable<dev.ryanhcode.sable.sublevel.ClientSubLevel> subLevels) {
+        java.util.List<dev.ryanhcode.sable.sublevel.ClientSubLevel> out = null;
+        for (final dev.ryanhcode.sable.sublevel.ClientSubLevel sub : subLevels) {
+            if (com.ovo.sablestopnow.client.model.ModelProperties.hidden(sub.getUniqueId())) {
+                if (out == null) {
+                    out = new java.util.ArrayList<>();
+                    for (final dev.ryanhcode.sable.sublevel.ClientSubLevel earlier : subLevels) {
+                        if (earlier == sub) {
+                            break;
+                        }
+                        out.add(earlier);
+                    }
+                }
+                continue;
+            }
+            if (out != null) {
+                out.add(sub);
+            }
+        }
+        return out == null ? subLevels : out;
+    }
+
     @ModifyArg(
             method = "renderSectionLayer",
             require = 1,

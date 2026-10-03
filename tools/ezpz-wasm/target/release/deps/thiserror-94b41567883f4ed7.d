@@ -1,0 +1,14 @@
+G:\javadev\sablestop\tools\ezpz-wasm\target\release\deps\thiserror-94b41567883f4ed7.d: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\aserror.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\display.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\var.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\private.rs G:\javadev\sablestop\tools\ezpz-wasm\target\release\build\thiserror-ab48523f27f13e15\out/private.rs
+
+G:\javadev\sablestop\tools\ezpz-wasm\target\release\deps\libthiserror-94b41567883f4ed7.rlib: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\aserror.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\display.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\var.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\private.rs G:\javadev\sablestop\tools\ezpz-wasm\target\release\build\thiserror-ab48523f27f13e15\out/private.rs
+
+G:\javadev\sablestop\tools\ezpz-wasm\target\release\deps\libthiserror-94b41567883f4ed7.rmeta: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\lib.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\aserror.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\display.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\var.rs C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\private.rs G:\javadev\sablestop\tools\ezpz-wasm\target\release\build\thiserror-ab48523f27f13e15\out/private.rs
+
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\aserror.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\display.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\var.rs:
+C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\thiserror-2.0.21\src\private.rs:
+G:\javadev\sablestop\tools\ezpz-wasm\target\release\build\thiserror-ab48523f27f13e15\out/private.rs:
+
+# env-dep:OUT_DIR=G:\\javadev\\sablestop\\tools\\ezpz-wasm\\target\\release\\build\\thiserror-ab48523f27f13e15\\out

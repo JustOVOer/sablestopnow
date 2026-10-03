@@ -1,12 +1,17 @@
 package com.ovo.sablestopnow.client;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 import com.ovo.sablestopnow.SablestopNow;
 import com.ovo.sablestopnow.SablestopNowConfig;
+import com.ovo.sablestopnow.client.gui.lib.Container;
+import com.ovo.sablestopnow.client.gui.lib.Layouts;
+import com.ovo.sablestopnow.client.gui.lib.Ui;
+import com.ovo.sablestopnow.client.gui.lib.UiDock;
+import com.ovo.sablestopnow.client.gui.lib.UiLayer;
+import com.ovo.sablestopnow.client.gui.lib.UiSettings;
+import com.ovo.sablestopnow.client.hud.HudLinesWidget;
 import dev.simulated_team.simulated.content.physics_staff.PhysicsStaffItem;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -17,14 +22,27 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 物理手杖增强 —— 屏幕左上角常驻 HUD：
- * 多选模式状态 / 穿透选择层数 / 已选中物理体数量 / 框选角点坐标。
+ * 物理手杖增强 —— 旧的左上角常驻 HUD（多选模式状态 / 穿透层数 / 已选数量 / 框选角点）。
+ *
+ * <h2>改造说明</h2>
+ * 这个 HUD 以前是「每帧直接往 {@code GuiGraphics} 上画一堆字符串」。现在改成 GUI 库里的一个
+ * {@link UiLayer}（纯展示层：不吃输入、不占位），内容由 {@link HudLinesWidget} 按帧现算。
+ *
+ * <p>这么做换来三件事：
+ * <ol>
+ *   <li>行高与配色跟其它界面统一（库里文本按 {@code theme.fontScale} 缩放，比原版 9px 矮）；</li>
+ *   <li>位置可以交给 {@link UiDock} 自动避让模型模式的左/上边栏，不再和别的界面叠在一起；</li>
+ *   <li>库的全局动画开关对它有统一语义（本 HUD 无动画，但不会出现「一个 HUD 不听开关」的例外）。</li>
+ * </ol>
+ *
+ * <p>显示条件与原实现完全一致：手杖增强开启 + 手持手杖 + <b>没有</b>启用新控制逻辑
+ * （启用时左上角交给 {@link StaffControlHud}），且「有事情正在做」时才出现。
  */
 @EventBusSubscriber(modid = SablestopNow.MOD_ID, value = Dist.CLIENT)
 public final class StaffEnhanceHud {
 
+    private static final String LAYER = "staff.enhance.hud";
     private static final int MARGIN = 6;
-    private static final int LINE_HEIGHT = 10;
 
     private StaffEnhanceHud() {
     }
@@ -33,132 +51,142 @@ public final class StaffEnhanceHud {
     public static void onRenderGui(final RenderGuiEvent.Post event) {
         final Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || !StaffEnhanceClientHandler.isEnabled()
-                || !PhysicsStaffItem.isHolding(mc.player)) {
+                || !PhysicsStaffItem.isHolding(mc.player) || SablestopNowConfig.isNewControlScheme()) {
+            Ui.close(LAYER);
             return;
         }
+        UiLayer layer = Ui.layer(LAYER);
+        if (layer == null) {
+            layer = Ui.open(UiLayer.of(LAYER));
+            // 纯展示：绝不能吞掉鼠标/键盘，也不占 HUD 避让位（它是被避让的那一方）
+            layer.hud = true;
+            layer.consumeInput = false;
+            layer.consumeKeys = false;
+            layer.reserveSpace = false;
+            layer.closeOnEscape = false;
+            layer.root.layout = Layouts.absolute();
+            layer.root.add(new HudLinesWidget(StaffEnhanceHud::lines));
+        }
+        place(layer);
+    }
+
+    /** 用库的避让工具找位置：被模型模式的面板压住时自动下移。 */
+    private static void place(final UiLayer layer) {
+        final Container root = layer.root;
+        int width = 0;
+        int height = 0;
+        for (final var child : root.children) {
+            width = Math.max(width, child.w);
+            height = Math.max(height, child.h);
+        }
+        // 首帧尺寸还是 0：UiDock 会退回边距位置，下一帧就正了
+        final int[] pos = UiDock.place(Math.max(width, 90), Math.max(height, 12),
+                UiDock.Corner.TOP_LEFT, MARGIN);
+        root.padding(pos[0], pos[1], 0, 0);
+    }
+
+    // ============ 内容 ============
+
+    private static List<HudLinesWidget.Line> lines() {
+        final List<HudLinesWidget.Line> out = new ArrayList<>();
         final boolean multi = StaffEnhanceClientHandler.isMultiSelect();
-        // 新控制逻辑开启时，左上角交给 StaffControlHud（模式 + 功能清单 + 描述）
-        if (SablestopNowConfig.isNewControlScheme()) {
-            return;
-        }
         final int regionStep = StaffEnhanceClientHandler.getRegionStep();
         final boolean armed = !multi && !StaffEnhanceClientHandler.getSelected().isEmpty();
         final boolean dragging = StaffEnhanceClientHandler.isGroupDragging();
         final boolean hovering = StaffEnhanceClientHandler.getHoverBody() != null;
         final boolean viewLock = StaffEnhanceClientHandler.isViewLockActive();
         final boolean scaling = StaffEnhanceClientHandler.isScaling();
-        // 只要手杖“有事情正在做”就显示（穿透层数、悬停目标、选中队列、区域选择、整组控制、视角锁定、缩放）
+
+        // 只要手杖「有事情正在做」就显示（与原实现的判断一致）
         if (!multi && regionStep == 0 && !armed && !dragging && !hovering && !viewLock && !scaling
                 && StaffEnhanceClientHandler.getPenetration() == 0) {
-            return;
+            return out;
         }
 
-        final GuiGraphics graphics = event.getGuiGraphics();
-        final PoseStack pose = graphics.pose();
-        pose.pushPose();
-
-        final List<Component> lines = new ArrayList<>();
-        final List<Integer> colors = new ArrayList<>();
-
         if (multi) {
-            lines.add(Component.translatable("sablestopnow.staff.hud.multiselect"));
-            colors.add(ChatFormatting.AQUA.getColor());
+            add(out, "sablestopnow.staff.hud.multiselect", ChatFormatting.AQUA);
         } else if (regionStep != 0) {
-            lines.add(Component.translatable(regionStep == 1
-                    ? "sablestopnow.staff.hud.region_first"
-                    : "sablestopnow.staff.hud.region_second"));
-            colors.add(ChatFormatting.GREEN.getColor());
+            add(out, regionStep == 1 ? "sablestopnow.staff.hud.region_first"
+                    : "sablestopnow.staff.hud.region_second", ChatFormatting.GREEN);
         } else if (dragging) {
-            lines.add(Component.translatable("sablestopnow.staff.hud.controlling"));
-            colors.add(ChatFormatting.LIGHT_PURPLE.getColor());
+            add(out, "sablestopnow.staff.hud.controlling", ChatFormatting.LIGHT_PURPLE);
         } else if (armed) {
-            lines.add(Component.translatable("sablestopnow.staff.hud.armed"));
-            colors.add(ChatFormatting.GOLD.getColor());
+            add(out, "sablestopnow.staff.hud.armed", ChatFormatting.GOLD);
         }
 
         if (multi || StaffEnhanceClientHandler.getPenetration() > 0) {
-            lines.add(Component.translatable("sablestopnow.staff.hud.penetration", StaffEnhanceClientHandler.getPenetration()));
-            colors.add(ChatFormatting.GOLD.getColor());
+            add(out, "sablestopnow.staff.hud.penetration", ChatFormatting.GOLD,
+                    StaffEnhanceClientHandler.getPenetration());
         }
-
         if (!StaffEnhanceClientHandler.getSelected().isEmpty()) {
-            lines.add(Component.translatable("sablestopnow.staff.hud.selected", StaffEnhanceClientHandler.getSelected().size()));
-            colors.add(ChatFormatting.GOLD.getColor());
+            add(out, "sablestopnow.staff.hud.selected", ChatFormatting.GOLD,
+                    StaffEnhanceClientHandler.getSelected().size());
         }
 
         if (hovering) {
             final String name = StaffEnhanceClientHandler.getHoverName();
-            lines.add(name != null
-                    ? Component.translatable("sablestopnow.staff.hud.aim_name", name)
-                    : Component.translatable("sablestopnow.staff.hud.aim"));
-            colors.add(ChatFormatting.WHITE.getColor());
+            if (name != null) {
+                add(out, "sablestopnow.staff.hud.aim_name", ChatFormatting.WHITE, name);
+            } else {
+                add(out, "sablestopnow.staff.hud.aim", ChatFormatting.WHITE);
+            }
             final var hoverId = StaffEnhanceClientHandler.getHoverBody();
-            // 瞄准的物理结构如果被缩放过，直接显示它的倍率（原来的几倍）
             if (hoverId != null) {
+                // 瞄准的物理结构被缩放过时直接显示倍率
                 final float aimedScale = StaffEnhanceClientHandler.scaleOf(hoverId);
                 if (Math.abs(aimedScale - 1.0f) > 1.0e-3f) {
-                    lines.add(Component.translatable("sablestopnow.staff.hud.aim_scale",
-                            String.format("%.2f", aimedScale)));
-                    colors.add(ChatFormatting.AQUA.getColor());
+                    add(out, "sablestopnow.staff.hud.aim_scale", ChatFormatting.AQUA,
+                            String.format("%.2f", aimedScale));
                 }
-            }
-            // 视线落在物理结构上时显示所有者（功能3）
-            final String owner = hoverId != null ? StaffEnhanceClientHandler.ownerNameOf(hoverId) : null;
-            if (owner != null) {
-                lines.add(Component.translatable("sablestopnow.staff.hud.owner", owner));
-                colors.add(ChatFormatting.LIGHT_PURPLE.getColor());
+                final String owner = StaffEnhanceClientHandler.ownerNameOf(hoverId);
+                if (owner != null) {
+                    add(out, "sablestopnow.staff.hud.owner", ChatFormatting.LIGHT_PURPLE, owner);
+                }
             }
         }
 
         if (scaling) {
-            lines.add(Component.translatable("sablestopnow.staff.hud.scale",
-                    String.format("%.2f", StaffEnhanceClientHandler.getScaleFactor())));
-            colors.add(ChatFormatting.AQUA.getColor());
-        } else if (scaling) {
-            // 缩放操作中由下面的“缩放：×N”行显示，这里不重复
+            add(out, "sablestopnow.staff.hud.scale", ChatFormatting.AQUA,
+                    String.format("%.2f", StaffEnhanceClientHandler.getScaleFactor()));
         }
-
         if (viewLock) {
             final String locked = StaffEnhanceClientHandler.getViewLockName();
-            lines.add(locked != null
-                    ? Component.translatable("sablestopnow.staff.hud.view_lock_name", locked)
-                    : Component.translatable("sablestopnow.staff.hud.view_lock"));
-            colors.add(ChatFormatting.AQUA.getColor());
+            if (locked != null) {
+                add(out, "sablestopnow.staff.hud.view_lock_name", ChatFormatting.AQUA, locked);
+            } else {
+                add(out, "sablestopnow.staff.hud.view_lock", ChatFormatting.AQUA);
+            }
         }
 
         if (regionStep != 0) {
-            lines.add(Component.translatable("sablestopnow.staff.hud.region_distance",
-                    String.format("%.1f", StaffEnhanceClientHandler.getRegionDistance())));
-            colors.add(ChatFormatting.GREEN.getColor());
+            add(out, "sablestopnow.staff.hud.region_distance", ChatFormatting.GREEN,
+                    String.format("%.1f", StaffEnhanceClientHandler.getRegionDistance()));
             final var first = StaffEnhanceClientHandler.getRegionFirst();
             if (first != null) {
-                lines.add(Component.translatable("sablestopnow.staff.hud.box_a", first.getX(), first.getY(), first.getZ()));
-                colors.add(ChatFormatting.GREEN.getColor());
+                add(out, "sablestopnow.staff.hud.box_a", ChatFormatting.GREEN,
+                        first.getX(), first.getY(), first.getZ());
             }
             final var cursor = StaffEnhanceClientHandler.getRegionCursor();
             if (cursor != null) {
-                lines.add(Component.translatable(regionStep == 1
-                                ? "sablestopnow.staff.hud.region_cursor"
-                                : "sablestopnow.staff.hud.box_b",
-                        cursor.getX(), cursor.getY(), cursor.getZ()));
-                colors.add(ChatFormatting.GREEN.getColor());
+                add(out, regionStep == 1 ? "sablestopnow.staff.hud.region_cursor"
+                        : "sablestopnow.staff.hud.box_b", ChatFormatting.GREEN,
+                        cursor.getX(), cursor.getY(), cursor.getZ());
             }
             if (regionStep == 2) {
-                lines.add(Component.translatable("sablestopnow.staff.hud.region_candidates",
-                        StaffEnhanceClientHandler.getRegionCandidates().size()));
-                colors.add(ChatFormatting.YELLOW.getColor());
+                add(out, "sablestopnow.staff.hud.region_candidates", ChatFormatting.YELLOW,
+                        StaffEnhanceClientHandler.getRegionCandidates().size());
             }
         }
+        return out;
+    }
 
-        int y = MARGIN;
-        for (int i = 0; i < lines.size(); i++) {
-            final Component line = lines.get(i);
-            final int textWidth = mc.font.width(line);
-            final int textColor = colors.get(i);
-            graphics.fill(MARGIN - 2, y - 1, MARGIN + textWidth + 3, y + LINE_HEIGHT - 1, 0x66000000);
-            graphics.drawString(mc.font, line, MARGIN, y, textColor, false);
-            y += LINE_HEIGHT;
-        }
-        pose.popPose();
+    private static void add(final List<HudLinesWidget.Line> out, final String key,
+                            final ChatFormatting format, final Object... args) {
+        out.add(new HudLinesWidget.Line(Component.translatable(key, args), format.getColor()));
+    }
+
+    /** 库的调试开关打开时把控件边界画出来（库自己处理，这里只是保留入口）。 */
+    public static boolean debugBounds() {
+        return UiSettings.debugBounds;
     }
 }

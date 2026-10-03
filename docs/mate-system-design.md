@@ -1,5 +1,11 @@
 # 配合系统（SolidWorks 式 Mates）设计说明
 
+> ⚠ **界面部分已过时**：文中提到的 `MateSidebarRenderer` / `gui/MateTreeScreen` / `MateModeInput`
+> **已于模型模式改造中删除**——Y 键现在是「模型模式」，配合只是模式内的一个功能，
+> 界面全部由自研 GUI 库搭建。现行架构见 [`gui-library-and-model-mode.md`](./gui-library-and-model-mode.md)
+> 与 [`advanced-mates-design.md`](./advanced-mates-design.md)（比例/齿轮）。
+> 本文保留的是**配合几何与求解**那部分推导，仍然有效。
+
 > 对应 `cp/description.txt`（配合类型清单）与 `cp/GUI.png`（「物理结构 → 配合」树形界面 + 用图标标识类型）。
 > 功能入口：手持物理手杖按 **Y** 进入配合模式；**M** 打开配合界面。
 

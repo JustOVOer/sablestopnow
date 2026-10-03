@@ -178,6 +178,33 @@ dependencies {
     // 从 run/mods/sable-neoforge-*.jar 里解出来放在 lib/ 下编译用；运行时由 Sable 自己（JarJar）提供，
     // 所以这里是 compileOnly —— 绝不把它打进我们的产物。
     compileOnly files('lib/sable-rapier.jar')
+
+    // ---- 草图约束求解器 ----
+    // 走「EZPZ 原生动态库 + JNA」，所以只需要一个纯 Java 依赖（JNA 自带各平台 natives）。
+    //
+    // 为什么不是 FFM（Panama）：本模组按 NeoForge 1.21.1 的基线编译成 **Java 21**
+    // （`java.toolchain.languageVersion = 21`），而 `java.lang.foreign` 在 Java 21 里
+    // 仍是**预览 API**，需要 `--enable-preview` 才能编译/运行；mod 没法要求玩家加这个参数。
+    // FFM 到 Java 22 才转正 —— 那是 1.21.1 之后的世代了。
+    //
+    // 为什么不是 WASM：faer 在 wasm 上有两套互相独立的 SIMD 实现（pulp 与 gemm），
+    // Chicory 的默认解释器执行不了 V128_*；换 SimdInterpreterMachine 又要
+    // --add-modules jdk.incubator.vector —— 同样是 mod 加不了的参数。
+    // 详见 docs/sketch-solver-wasm-findings.md。
+    //
+    // JNA 用 libffi 做运行期绑定，能直接调用我们那份 C ABI（sketch_*），
+    // 所以 Rust 侧一行都不用改。代价是调用比 FFM 慢，但草图求解是秒级频率，无所谓。
+    //
+    // 原生库放在 src/main/resources/sablestopnow/sketch/，按平台命名
+    // （ezpz_windows-x86_64.dll / ezpz_linux-x86_64.so / ezpz_macos-aarch64.dylib …），
+    // 运行期由 SketchSolver 解压到临时文件再加载。
+    // 源码在 tools/ezpz-wasm/（出货用 `cargo build --release`；迭代用 `cargo build` 快得多）。
+    //
+    // ⚠ 发布前 JNA 也要走 JarJar（`jarJar files('lib/jna-5.14.0.jar')`），
+    //   否则正式产物里没有它。第一阶段先保证 runClient 能跑通。
+    // 用 lib/ 下的 jar 而不是 Maven 坐标：与本项目其它第三方 jar 的做法一致，
+    // 也让 tools/verify-all.ps1 的离线门禁不需要 Gradle 就能拿到它。
+    implementation files('lib/jna-5.14.0.jar')
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.
@@ -207,6 +234,16 @@ sourceSets.main.resources.srcDir generateModMetadata
 // To avoid having to run "generateModMetadata" manually, make it run on every project reload
 neoForge.ideSyncTask generateModMetadata
 
+// 草图求解器走 FFM（Java 22+ 的 Panama）调用 EZPZ 原生库。JDK 24 起，调用 FFM 的
+// 受限方法会警告「restricted method called without native access」，JDK 的长期方向是
+// 直接拒绝。**正确做法是在 MANIFEST 里声明**，而不是要求玩家加 --enable-native-access ——
+// mod 没有权力要求别人改启动参数。加上这一行，产物在任何 JVM 参数下都能正常调用原生库。
+tasks.named('jar', Jar) {
+    manifest {
+        attributes('Enable-Native-Access': 'ALL-UNNAMED')
+    }
+}
+
 // Example configuration to allow publishing using the maven-publish plugin
 publishing {
     publications {
@@ -232,3 +269,40 @@ idea {
         downloadJavadoc = true
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 同步我们自建的 Sable 原生库（含凸包支持）到模组资源里。
+//
+// 背景：Sable 每次启动都会用自己的 jar 覆盖 <gamedir>/.sable/natives/ 里的 DLL ✗
+// （实测覆盖后 SHA256 与原始版完全相同）。所以我们的做法是**重定向**：
+// 把自建 DLL 打进本模组 jar，用 Rapier3DNativeOverrideMixin 取消 Sable 的加载。
+//
+// Rust 侧源码在 depends/sable-main/.../rust/，编出来的 DLL 在 target/release/。
+// 文件不存在时**不报错**（没编过 Rust 的人也能正常构建模组）。
+// ─────────────────────────────────────────────────────────────────────────────
+def nativeDll = layout.projectDirectory.file(
+        'depends/sable-main/sable_rapier/src/main/rust/target/release/sable_rapier.dll').asFile
+def nativeOutDir = layout.projectDirectory.dir('src/main/resources/sablestopnow/native')
+
+tasks.register('syncNativeLibrary') {
+    group = 'build'
+    description = '把我们自建的 Sable 原生库（含凸包）拷进模组资源；不存在则跳过。'
+    inputs.file(nativeDll).optional()
+    outputs.dir(nativeOutDir)
+    doLast {
+        if (!nativeDll.exists()) {
+            logger.lifecycle("[sablestopnow] 跳过原生库同步：{} 不存在（先在 Rust 侧 cargo build --release）",
+                    nativeDll)
+            return
+        }
+        nativeOutDir.asFile.mkdirs()
+        // ⚠ 用纯 java.nio 而不是 Gradle 的 copy{}：后者在 doLast 里会持有脚本对象，
+        //   与配置缓存不兼容（实测报 "invocation of 'copy' references a Gradle script object"）✗
+        java.nio.file.Files.copy(nativeDll.toPath(),
+                nativeOutDir.file('sable_rapier_x86_64_windows.dll').asFile.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        logger.lifecycle("[sablestopnow] 已同步自建原生库 → {}", nativeOutDir)
+    }
+}
+
+tasks.named('processResources').configure { dependsOn 'syncNativeLibrary' }

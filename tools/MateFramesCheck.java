@@ -146,8 +146,16 @@ public final class MateFramesCheck {
         final double[] comp = { local.x, local.y, local.z };
         for (final ConstraintJointAxis axis : ConstraintJointAxis.LINEAR) {
             if (axis == plan.limitAxis()) {
-                near(label + " limit " + axis + " == " + plan.limitValue(),
-                        comp[axis.ordinal()], plan.limitValue(), 1e-6);
+                if (plan.isRange()) {
+                    // 区间类型：偏移只要落在 [min, max] 里就算满足（这正是「限制」的语义）
+                    ok(label + " limit " + axis + " within [" + plan.limitValue() + ", "
+                                    + plan.limitMax() + "]",
+                            comp[axis.ordinal()] >= plan.limitValue() - 1e-6
+                                    && comp[axis.ordinal()] <= plan.limitMax() + 1e-6);
+                } else {
+                    near(label + " limit " + axis + " == " + plan.limitValue(),
+                            comp[axis.ordinal()], plan.limitValue(), 1e-6);
+                }
             } else if (plan.locked().contains(axis)) {
                 near(label + " locked " + axis + " == 0", comp[axis.ordinal()], 0.0, 1e-6);
             }
@@ -214,6 +222,7 @@ public final class MateFramesCheck {
             edgeDirectionGeometry();
             tangentFaces();
             concentricEdges();
+            flipTurnsBody180();
             pointOnPlane();
             mixedBodyAndFace();
             distanceNegative();
@@ -224,8 +233,13 @@ public final class MateFramesCheck {
             autoAlignment();
             alignmentSupportFlags();
             conflictBudget();
+            geometricConflict();
             persistenceRoundTrip();
             metadataConsistency();
+            noSelfConflictingJoints();
+            lineLineRod();
+            perpendicularLineOnPlane();
+            limitRange();
         } catch (final Throwable t) {
             System.out.println("HARNESS ERROR: " + t);
             t.printStackTrace(System.out);
@@ -357,6 +371,19 @@ public final class MateFramesCheck {
         final Vector3d uB = MateFrames.worldDirection(snapped(b, plan), MateFrames.resolveLocal(b.bounds(), fb));
         near("angle == 45 deg", Math.toDegrees(Math.acos(Math.clamp(uA.dot(uB), -1.0, 1.0))), 45.0, 1e-4);
         checkJoint("angle", a, b, plan);
+
+        // 重建路径（frames，不吸附位置）也必须**要求把朝向转回目标角度**：
+        // 否则关节会把当前（歪掉的）朝向当成目标锁住，改数值等于永久失效。
+        final MateFrames.Plan rebuild = MateFrames.frames(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.ANGLE, fa, fb, 45.0, false);
+        final org.joml.Quaterniond currentB = new org.joml.Quaterniond(b.pose().orientation());
+        ok("rebuild asks B to rotate to the target angle",
+                Math.abs(currentB.dot(rebuild.newOrientationB())) < 0.99999);
+        final Vector3d rebuiltDir = rebuild.newOrientationB()
+                .transform(new Vector3d(MateFrames.worldDirection(b.pose(),
+                        MateFrames.resolveLocal(b.bounds(), fb))));
+        near("the rotation it asks for lands exactly on 45 deg",
+                Math.toDegrees(Math.acos(Math.clamp(uA.dot(rebuiltDir), -1.0, 1.0))), 45.0, 1e-3);
     }
 
     /** 距离：两个 +Y 面之间保持 3 格。 */
@@ -376,15 +403,16 @@ public final class MateFramesCheck {
         final Vector3d qB = MateFrames.worldPoint(snapped(b, plan), MateFrames.resolveLocal(b.bounds(), fb));
         final Vector3d uA = MateFrames.worldDirection(a.pose(), MateFrames.resolveLocal(a.bounds(), fa));
         near("gap along normal == 3", new Vector3d(qB).sub(qA).dot(uA), 3.0, TOL);
-        ok("limit axis is LINEAR_Z", plan.limitAxis() == ConstraintJointAxis.LINEAR_Z);
-        ok("LINEAR_Z not locked (it is limited instead)",
-                !plan.locked().contains(ConstraintJointAxis.LINEAR_Z));
+        // 数值已经做进关节坐标系（= 一根长度 3 的虚拟硬杆），关节里不再有 limit：
+        // LZ 变成硬锁，两条 frame 重合即代表参考点相距 3。
+        ok("距离不再用 setLimit（数值做进几何）", plan.limitAxis() == null);
+        ok("LINEAR_Z 作为硬锁参与", plan.locked().contains(ConstraintJointAxis.LINEAR_Z));
         checkJoint("distance", a, b, plan);
     }
 
-    /** 同心：两条 Y 主轴共线；沿轴滑动与绕轴自转必须自由。 */
+    /** 平行（结构主轴）：两个方向主轴必须转成同向，位置不动。 */
     private static void concentricAxes() throws Exception {
-        System.out.println("[concentric]");
+        System.out.println("[parallel axes]");
         final UUID idA = UUID.randomUUID();
         final UUID idB = UUID.randomUUID();
         final Body a = body(0, 0, 0);
@@ -393,19 +421,17 @@ public final class MateFramesCheck {
         final MateRef axB = MateRef.axis(idB, 1);
 
         final MateFrames.Plan plan = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
-                MateType.CONCENTRIC, axA, axB, 0.0, false, true);
+                MateType.PARALLEL, axA, axB, 0.0, false, true);
 
-        final Vector3d cA = MateFrames.worldPoint(a.pose(), MateFrames.resolveLocal(a.bounds(), axA));
-        final Vector3d cB = MateFrames.worldPoint(snapped(b, plan), MateFrames.resolveLocal(b.bounds(), axB));
         final Vector3d uA = MateFrames.worldDirection(a.pose(), MateFrames.resolveLocal(a.bounds(), axA));
-        final Vector3d d = new Vector3d(cB).sub(cA);
-        final Vector3d perp = new Vector3d(d).fma(-d.dot(uA), uA);
-        near("perpendicular offset == 0", perp.length(), 0.0, TOL);
-        ok("free along axis (LINEAR_Z not locked)", !plan.locked().contains(ConstraintJointAxis.LINEAR_Z));
-        ok("free spin (ANGULAR_Z not locked)", !plan.locked().contains(ConstraintJointAxis.ANGULAR_Z));
+        final Vector3d uB = MateFrames.worldDirection(snapped(b, plan),
+                MateFrames.resolveLocal(b.bounds(), axB));
+        near("axes parallel after solve", Math.abs(uA.dot(uB)), 1.0, TOL);
+        ok("位置不动（纯方向约束）", plan.newPositionB().distance(b.pose().position()) < TOL);
         ok("ANGULAR_X,Y locked", plan.locked().contains(ConstraintJointAxis.ANGULAR_X)
                 && plan.locked().contains(ConstraintJointAxis.ANGULAR_Y));
-        checkJoint("concentric", a, b, plan);
+        ok("free spin (ANGULAR_Z not locked)", !plan.locked().contains(ConstraintJointAxis.ANGULAR_Z));
+        checkJoint("parallel-axes", a, b, plan);
     }
 
     /** 锁定：必须一动不动，且 6 轴全锁（否则会把两个参考点拉到一起）。 */
@@ -487,7 +513,29 @@ public final class MateFramesCheck {
         nearVec("edge1 dir", MateRef.faceEdgeDirection(up, 1), new Vector3d(0, 0, 1), TOL);
         nearVec("edge2 dir", MateRef.faceEdgeDirection(up, 2), new Vector3d(-1, 0, 0), TOL);
         nearVec("edge3 dir", MateRef.faceEdgeDirection(up, 3), new Vector3d(0, 0, -1), TOL);
+        // 棱中点必须落在「那条棱」上，且序号与 faceEdgeDirection / MateTargeting.classify 一致：
+        // edge0 在 v=-0.5 侧、edge1 在 u=+0.5 侧、edge2 在 v=+0.5 侧、edge3 在 u=-0.5 侧。
+        // 这条断言是「选到面中线」的回归保护：以前用 (i, i+1) 连角点，棱 1/2 取到对角线，
+        // 中点恰好等于面心 —— 玩家瞄准棱，锚点却跑到面中间。
         nearVec("edge0 midpoint", MateRef.faceEdgeMidpoint(block, up, 0), new Vector3d(0.5, 1.0, 0.0), TOL);
+        nearVec("edge1 midpoint", MateRef.faceEdgeMidpoint(block, up, 1), new Vector3d(1.0, 1.0, 0.5), TOL);
+        nearVec("edge2 midpoint", MateRef.faceEdgeMidpoint(block, up, 2), new Vector3d(0.5, 1.0, 1.0), TOL);
+        nearVec("edge3 midpoint", MateRef.faceEdgeMidpoint(block, up, 3), new Vector3d(0.0, 1.0, 0.5), TOL);
+
+        // 每个面：四条棱的中点都必须在面内、离面心 0.5、且**不等于面心**
+        for (final Direction dir : Direction.values()) {
+            final Vector3d fc = MateRef.faceCenter(block, dir);
+            final Vector3d n = new Vector3d(dir.getStepX(), dir.getStepY(), dir.getStepZ());
+            for (int i = 0; i < 4; i++) {
+                final Vector3d m = MateRef.faceEdgeMidpoint(block, dir, i);
+                ok("edge midpoint " + dir + "#" + i + " not collapsed to face center",
+                        m.distance(fc) > 0.4);
+                ok("edge midpoint " + dir + "#" + i + " on face plane",
+                        Math.abs(m.sub(fc, new Vector3d()).dot(n)) < TOL);
+                ok("edge midpoint " + dir + "#" + i + " at half extent from center",
+                        Math.abs(m.distance(fc) - 0.5) < TOL);
+            }
+        }
 
         // 每个面的四个角点都必须在包围盒角上（不越界、不塌陷）
         for (final Direction dir : Direction.values()) {
@@ -515,9 +563,9 @@ public final class MateFramesCheck {
 
     // ============ 追加覆盖（第 3 轮扩充） ============
 
-    /** 相切：方向对齐 + 沿法线钉在给定间距（与距离同机制，但类型/数值语义不同）。 */
+    /** 距离：方向对齐（勾反转时）+ 沿法线钉在给定间距。 */
     private static void tangentFaces() throws Exception {
-        System.out.println("[tangent 1.5]");
+        System.out.println("[distance 1.5]");
         final UUID idA = UUID.randomUUID();
         final UUID idB = UUID.randomUUID();
         final Body a = body(0, 0, 0);
@@ -526,21 +574,19 @@ public final class MateFramesCheck {
         final MateRef fb = face(idB, 0, 0, 1, Direction.UP);
 
         final MateFrames.Plan plan = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
-                MateType.TANGENT, fa, fb, 1.5, false, true);
+                MateType.DISTANCE, fa, fb, 1.5, false, true);
 
         final Vector3d uA = MateFrames.worldDirection(a.pose(), MateFrames.resolveLocal(a.bounds(), fa));
         final Vector3d qA = MateFrames.worldPoint(a.pose(), MateFrames.resolveLocal(a.bounds(), fa));
         final Vector3d qB = MateFrames.worldPoint(snapped(b, plan), MateFrames.resolveLocal(b.bounds(), fb));
-        near("tangent gap == 1.5", new Vector3d(qB).sub(qA).dot(uA), 1.5, TOL);
-        ok("tangent limit axis is LINEAR_Z", plan.limitAxis() == ConstraintJointAxis.LINEAR_Z);
-        ok("tangent angular X,Y locked", plan.locked().contains(ConstraintJointAxis.ANGULAR_X)
-                && plan.locked().contains(ConstraintJointAxis.ANGULAR_Y));
-        checkJoint("tangent", a, b, plan);
+        near("distance gap == 1.5", new Vector3d(qB).sub(qA).dot(uA), 1.5, TOL);
+        ok("distance gap is carried by the frame geometry (no setLimit)", plan.limitAxis() == null);
+        checkJoint("distance", a, b, plan);
     }
 
-    /** 同心用「棱」而不是结构主轴：棱自带方向，走的是同一条路径但参考是方块级的。 */
+    /** 平行用「棱」而不是结构主轴：棱自带方向，走的是同一条路径但参考是方块级的。 */
     private static void concentricEdges() throws Exception {
-        System.out.println("[concentric edge-edge]");
+        System.out.println("[parallel edge-edge]");
         final UUID idA = UUID.randomUUID();
         final UUID idB = UUID.randomUUID();
         final Body a = body(0, 0, 0);
@@ -550,16 +596,58 @@ public final class MateFramesCheck {
         final MateRef eb = edge(idB, 0, 0, 1, Direction.UP, 0);
 
         final MateFrames.Plan plan = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
-                MateType.CONCENTRIC, ea, eb, 0.0, false, true);
+                MateType.PARALLEL, ea, eb, 0.0, false, true);
 
-        final Vector3d axis = MateFrames.worldDirection(a.pose(), MateFrames.resolveLocal(a.bounds(), ea));
-        final Vector3d pA = MateFrames.worldPoint(a.pose(), MateFrames.resolveLocal(a.bounds(), ea));
-        final Vector3d pB = MateFrames.worldPoint(snapped(b, plan), MateFrames.resolveLocal(b.bounds(), eb));
-        final Vector3d rel = new Vector3d(pB).sub(pA);
-        final Vector3d perp = new Vector3d(rel).fma(-rel.dot(axis), axis);
-        near("edge axes collinear (perpendicular offset 0)", perp.length(), 0.0, TOL);
-        near("B slid along the axis only (x kept)", new Vector3d(pB).sub(pA).dot(axis), 10.0, TOL);
-        checkJoint("concentric-edge", a, b, plan);
+        final Vector3d uA = MateFrames.worldDirection(a.pose(), MateFrames.resolveLocal(a.bounds(), ea));
+        final Vector3d uB = MateFrames.worldDirection(snapped(b, plan),
+                MateFrames.resolveLocal(b.bounds(), eb));
+        near("edge directions parallel", Math.abs(uA.dot(uB)), 1.0, TOL);
+        ok("位置不动", plan.newPositionB().distance(b.pose().position()) < TOL);
+        checkJoint("parallel-edge", a, b, plan);
+    }
+
+    /** 反转（勾选框）：把 B 绕配合面内的轴翻 180° —— 垂直/距离也必须真的动起来。 */
+    private static void flipTurnsBody180() throws Exception {
+        System.out.println("[flip 180 deg]");
+        final UUID idA = UUID.randomUUID();
+        final UUID idB = UUID.randomUUID();
+        final Body a = body(0, 0, 0);
+        final Body b = body(10, 0, 0);
+        final MateRef fa = face(idA, 0, 0, 1, Direction.UP);
+        final MateRef fb = face(idB, 0, 0, 1, Direction.UP);
+
+        // 距离 + 反转：B 的法线（UP）应被翻成 DOWN
+        final MateFrames.Plan distFlip = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.DISTANCE, fa, fb, 2.0, true, true);
+        final Vector3d uB = MateFrames.worldDirection(snapped(b, distFlip),
+                MateFrames.resolveLocal(b.bounds(), fb));
+        ok("DISTANCE + 反转 → B 换成反向", uB.y() < -0.99);
+        final Vector3d uA = MateFrames.worldDirection(a.pose(), MateFrames.resolveLocal(a.bounds(), fa));
+        final Vector3d qA = MateFrames.worldPoint(a.pose(), MateFrames.resolveLocal(a.bounds(), fa));
+        final Vector3d qB = MateFrames.worldPoint(snapped(b, distFlip),
+                MateFrames.resolveLocal(b.bounds(), fb));
+        near("DISTANCE + 反转 → 间距仍是 2.0（沿反转后的法线量）",
+                new Vector3d(qB).sub(qA).dot(uA), 2.0, TOL);
+        // 距离不勾反转：B 的法线对齐到 +uA（间距沿一条稳定的轴量，不然约束拉不住）
+        final MateFrames.Plan distPlain = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.DISTANCE, fa, fb, 2.0, false, true);
+        final Vector3d uBPlain = MateFrames.worldDirection(snapped(b, distPlain),
+                MateFrames.resolveLocal(b.bounds(), fb));
+        ok("DISTANCE 不勾反转 → B 法线对齐 uA（保持平行，间距才稳）", uBPlain.y() > 0.99);
+
+        // 垂直 + 反转：B 的方向应改成最小转动目标的反向
+        final MateRef eb = edge(idB, 0, 0, 1, Direction.UP, 1);   // 棱 1：方向 +Z
+        final MateFrames.Plan perpPlain = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.PERPENDICULAR, fa, eb, 0.0, false, true);
+        final MateFrames.Plan perpFlip = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.PERPENDICULAR, fa, eb, 0.0, true, true);
+        final Vector3d pPlain = MateFrames.worldDirection(snapped(b, perpPlain),
+                MateFrames.resolveLocal(b.bounds(), eb));
+        final Vector3d pFlip = MateFrames.worldDirection(snapped(b, perpFlip),
+                MateFrames.resolveLocal(b.bounds(), eb));
+        near("垂直：反转前后方向正好相反", pPlain.dot(pFlip), -1.0, TOL);
+        // 面 ⟂ 棱：棱的方向要对齐面法线（这正是「垂直」的几何含义）
+        near("垂直 + 反转 → 棱仍对齐面法线（只是取了反）", Math.abs(pFlip.dot(uA)), 1.0, 1e-3);
     }
 
     /** 点落在面上：只该消掉法向间隙，面内两个方向保持自由。 */
@@ -704,6 +792,9 @@ public final class MateFramesCheck {
         // 有方向的参考：面
         final MateRef fcA = face(idA, 0, 0, 1, Direction.UP);
         final MateRef fcB = face(idB, 0, 0, 1, Direction.UP);
+        // 线参考：棱
+        final MateRef eaA = edge(idA, 0, 0, 1, Direction.UP, 0);
+        final MateRef eaB = edge(idB, 0, 0, 1, Direction.UP, 0);
 
         final EnumSet<ConstraintJointAxis> all = EnumSet.allOf(ConstraintJointAxis.class);
 
@@ -721,17 +812,21 @@ public final class MateFramesCheck {
                 EnumSet.of(ConstraintJointAxis.ANGULAR_X, ConstraintJointAxis.ANGULAR_Y));
         expectSet("ANGLE", MateType.ANGLE, fcA, fcB,
                 EnumSet.of(ConstraintJointAxis.ANGULAR_X, ConstraintJointAxis.ANGULAR_Y));
-        expectSet("TANGENT", MateType.TANGENT, fcA, fcB,
+        expectSet("TANGENT→DISTANCE face-face", MateType.DISTANCE, fcA, fcB,
                 EnumSet.of(ConstraintJointAxis.ANGULAR_X, ConstraintJointAxis.ANGULAR_Y));
-        expectSet("CONCENTRIC", MateType.CONCENTRIC, fcA, fcB,
-                EnumSet.of(ConstraintJointAxis.LINEAR_X, ConstraintJointAxis.LINEAR_Y,
-                        ConstraintJointAxis.ANGULAR_X, ConstraintJointAxis.ANGULAR_Y));
         expectSet("LOCK", MateType.LOCK, ptA, ptB, all);
         expectSet("DISTANCE point-point", MateType.DISTANCE, ptA, ptB,
-                EnumSet.of(ConstraintJointAxis.LINEAR_X, ConstraintJointAxis.LINEAR_Y,
-                        ConstraintJointAxis.LINEAR_Z));
-        expectSet("DISTANCE face-face (limited, not locked)", MateType.DISTANCE, fcA, fcB,
-                EnumSet.noneOf(ConstraintJointAxis.class));
+                EnumSet.of(ConstraintJointAxis.LINEAR_X, ConstraintJointAxis.LINEAR_Y));
+        expectSet("DISTANCE edge-edge (rod ⟂ to the edges, kept parallel, slide/spin free)",
+                MateType.DISTANCE, eaA, eaB,
+                EnumSet.of(ConstraintJointAxis.LINEAR_Y, ConstraintJointAxis.ANGULAR_Y,
+                        ConstraintJointAxis.ANGULAR_Z));
+        expectSet("COINCIDENT edge-edge (collinear rod: both ⟂ offsets locked, slide/spin free)",
+                MateType.COINCIDENT, eaA, eaB,
+                EnumSet.of(ConstraintJointAxis.LINEAR_Y, ConstraintJointAxis.LINEAR_Z,
+                        ConstraintJointAxis.ANGULAR_Y, ConstraintJointAxis.ANGULAR_Z));
+        expectSet("DISTANCE face-face (limited + kept parallel)", MateType.DISTANCE, fcA, fcB,
+                EnumSet.of(ConstraintJointAxis.ANGULAR_X, ConstraintJointAxis.ANGULAR_Y));
     }
 
     private static void expectSet(final String label, final MateType type,
@@ -792,12 +887,10 @@ public final class MateFramesCheck {
         System.out.println("[alignment support flags]");
         ok("COINCIDENT supports alignment (solver honours flip)", MateType.COINCIDENT.supportsAlignment());
         ok("PARALLEL supports alignment", MateType.PARALLEL.supportsAlignment());
-        ok("TANGENT supports alignment", MateType.TANGENT.supportsAlignment());
-        ok("CONCENTRIC supports alignment", MateType.CONCENTRIC.supportsAlignment());
-        ok("PERPENDICULAR does NOT (flipping cannot change perpendicularity)",
-                !MateType.PERPENDICULAR.supportsAlignment());
+        ok("DISTANCE supports alignment (勾反转能把 B 翻 180°)", MateType.DISTANCE.supportsAlignment());
+        ok("PERPENDICULAR supports alignment (翻转会取反最小转动目标)",
+                MateType.PERPENDICULAR.supportsAlignment());
         ok("ANGLE does NOT (the value fixes the direction)", !MateType.ANGLE.supportsAlignment());
-        ok("DISTANCE does NOT", !MateType.DISTANCE.supportsAlignment());
         ok("LOCK does NOT", !MateType.LOCK.supportsAlignment());
 
         // Mate 级：重合需要两侧都带方向才有朝向可谈
@@ -815,13 +908,18 @@ public final class MateFramesCheck {
                 mateOf(MateType.COINCIDENT, fcA, fcB, owner).supportsAlignment());
         ok("face-face parallel HAS an alignment toggle",
                 mateOf(MateType.PARALLEL, fcA, fcB, owner).supportsAlignment());
-        ok("face-face perpendicular has NO alignment toggle",
-                !mateOf(MateType.PERPENDICULAR, fcA, fcB, owner).supportsAlignment());
+        ok("face-face perpendicular HAS an alignment toggle now that flip negates the target",
+                mateOf(MateType.PERPENDICULAR, fcA, fcB, owner).supportsAlignment());
+        ok("face-face distance HAS an alignment toggle",
+                mateOf(MateType.DISTANCE, fcA, fcB, owner).supportsAlignment());
+        // 点参考没有朝向可谈 ⇒ 距离也拿不到反转勾选框
+        ok("point-point distance has NO alignment toggle",
+                !mateOf(MateType.DISTANCE, ptA, ptB, owner).supportsAlignment());
     }
 
     private static com.ovo.sablestopnow.mate.Mate mateOf(final MateType type, final MateRef a,
                                                         final MateRef b, final UUID owner) {
-        return new com.ovo.sablestopnow.mate.Mate(UUID.randomUUID(), type, a, b, 0.0, false, null, owner, "t");
+        return new com.ovo.sablestopnow.mate.Mate(UUID.randomUUID(), type, a, b, 0.0, 0.0, false, null, owner, "t");
     }
 
     /**
@@ -856,23 +954,96 @@ public final class MateFramesCheck {
         ok("coincident + parallel -> allowed (redundant but consistent)",
                 c.add(MateType.PARALLEL, fcA, fcB, 0.0));
 
-        // 4) 同心（LX,LY,AX,AY）+ 面—面重合（LZ,AX,AY）：一致，共占 5 条轴。
-        //    这也确认了「占用轴数超限」不可能是判据 —— 每种方向最多 3 条轴，去重后永远超不过 3。
+        // 4) 面—面重合 + 距离 0：都在 LZ 上、目标值都是 0 → 放行，且去重后只占 3 条轴
         MateFrames.Budget d = new MateFrames.Budget();
-        ok("concentric accepted", d.add(MateType.CONCENTRIC, fcA, fcB, 0.0));
-        ok("concentric + coincident allowed (concentric's AX,AY coincide at 0)",
-                d.add(MateType.COINCIDENT, fcA, fcB, 0.0));
-        ok("they occupy exactly 5 distinct axes", d.size() == 5);
+        ok("coincident accepted again (d)", d.add(MateType.COINCIDENT, fcA, fcB, 0.0));
+        ok("coincident + distance 0 allowed (same value on the same axis)",
+                d.add(MateType.DISTANCE, fcA, fcB, 0.0));
+        ok("they occupy exactly 3 distinct axes", d.size() == 3);
 
         // 5) 距离 3 之后再加距离 5 → 同轴不同值，冲突
         MateFrames.Budget e = new MateFrames.Budget();
         ok("distance 3 accepted", e.add(MateType.DISTANCE, fcA, fcB, 3.0));
         ok("distance 3 + distance 5 -> conflict", !e.add(MateType.DISTANCE, fcA, fcB, 5.0));
+    }
 
-        // 6) 距离 3 + 相切 3 → 同轴同值，放行（语义上冗余但一致）
-        MateFrames.Budget f = new MateFrames.Budget();
-        ok("distance 3 accepted again", f.add(MateType.DISTANCE, fcA, fcB, 3.0));
-        ok("distance 3 + tangent 3 -> allowed (same value)", f.add(MateType.TANGENT, fcA, fcB, 3.0));
+    /**
+     * 几何冲突判定：把 B 摆到新配合要求的位姿上，已有配合是否还成立。
+     *
+     * <p>这一条直接决定「冲突的配合要不要建出来」。自由度账本（{@link MateFrames.Budget}）只能发现
+     * 「同一条轴被钉到不同数值」，发现不了用户实测的那种矛盾：先建点点配合（锁死三个平移自由度），
+     * 再给「在这个约束下根本合不到一起」的两个面建面面重合 —— 账本认为两条都是一致的（都要求
+     * LINEAR_Z=0），两个关节却互相拉扯，模型持续抽搐。
+     */
+    private static void geometricConflict() throws Exception {
+        System.out.println("[geometric conflict: existing mates must survive the new snap]");
+        final UUID idA = UUID.randomUUID();
+        final UUID idB = UUID.randomUUID();
+        final Body a = body(0, 0, 0);
+        final Body b = body(4, 2, 1);
+
+        // 点点配合：两侧都用面心（无方向）⇒ 锁死 LINEAR_X/Y/Z
+        final MateRef pointA = point(idA, 0, 0, 1, Direction.UP);
+        final MateRef pointB = point(idB, 0, 0, 1, Direction.UP);
+
+        final MateFrames.Plan pointSnap = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.COINCIDENT, pointA, pointB, 0.0, 0.0, false, true);
+        final Pose3d afterPoints = snapped(b, pointSnap);
+        ok("point mate is satisfied at its own snap pose",
+                MateFrames.unsatisfiedReason(MateType.COINCIDENT, pointA, pointB, 0.0, 0.0,
+                        a.pose(), a.bounds(), afterPoints, b.bounds()) == null);
+        ok("point mate is NOT satisfied if B moves 0.5 away",
+                MateFrames.unsatisfiedReason(MateType.COINCIDENT, pointA, pointB, 0.0, 0.0,
+                        a.pose(), a.bounds(),
+                        new Pose3d(new Vector3d(afterPoints.position()).add(0, 0.5, 0),
+                                new Quaterniond(afterPoints.orientation()),
+                                new Vector3d(afterPoints.rotationPoint()),
+                                new Vector3d(afterPoints.scale())),
+                        b.bounds()) != null);
+
+        // 再给「隔着两个方块的另一对面」建面面重合：吸附会要求 B 到另一个位姿
+        final MateRef faceA = face(idA, 2, 0, 1, Direction.UP);
+        final MateRef faceB = face(idB, 0, 0, 0, Direction.DOWN);
+        final MateFrames.Plan faceSnap = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.COINCIDENT, faceA, faceB, 0.0, 0.0, false, true);
+        final Pose3d afterFaces = snapped(b, faceSnap);
+        ok("the two snaps really are different poses",
+                pointSnap.newPositionB().distance(faceSnap.newPositionB()) > 1.0e-6);
+        ok("point mate is violated by the face snap -> must be rejected",
+                MateFrames.unsatisfiedReason(MateType.COINCIDENT, pointA, pointB, 0.0, 0.0,
+                        a.pose(), a.bounds(), afterFaces, b.bounds()) != null);
+        // 而面面重合在自己的吸附位姿上当然是成立的
+        ok("face-face mate is satisfied at its own snap pose",
+                MateFrames.unsatisfiedReason(MateType.COINCIDENT, faceA, faceB, 0.0, 0.0,
+                        a.pose(), a.bounds(), afterFaces, b.bounds()) == null);
+
+        // 冗余但一致：同一对面上的「重合 + 平行」在吸附位姿下都成立 → 不能误判为冲突
+        final Body c = body(0, 0, 0);
+        final Body d = body(4, 2, 1);
+        final MateRef up = face(idA, 0, 0, 1, Direction.UP);
+        final MateRef down = face(idB, 0, 0, 1, Direction.DOWN);
+        final MateFrames.Plan snap = MateFrames.solve(c.pose(), c.bounds(), d.pose(), d.bounds(),
+                MateType.COINCIDENT, up, down, 0.0, 0.0, false, true);
+        final Pose3d afterSnap = snapped(d, snap);
+        ok("coincident faces satisfy coincident",
+                MateFrames.unsatisfiedReason(MateType.COINCIDENT, up, down, 0.0, 0.0,
+                        c.pose(), c.bounds(), afterSnap, d.bounds()) == null);
+        ok("coincident faces also satisfy parallel (redundant but consistent)",
+                MateFrames.unsatisfiedReason(MateType.PARALLEL, up, down, 0.0, 0.0,
+                        c.pose(), c.bounds(), afterSnap, d.bounds()) == null);
+        // 距离钉成 3 时，重合面上的法向间隙是 0 ⇒ 冲突
+        ok("coincident faces violate distance 3",
+                MateFrames.unsatisfiedReason(MateType.DISTANCE, up, down, 3.0, 3.0,
+                        c.pose(), c.bounds(), afterSnap, d.bounds()) != null);
+        // LOCK 由调用方按位姿判断，这里保持「不表态」
+        ok("LOCK leaves the verdict to the caller",
+                MateFrames.unsatisfiedReason(MateType.LOCK, up, down, 0.0, 0.0,
+                        c.pose(), c.bounds(), afterSnap, d.bounds()) == null);
+    }
+
+    private static MateRef point(final UUID body, final int bx, final int by, final int bz,
+                                 final Direction dir) {
+        return MateRef.block(body, RefKind.FACE_CENTER, new BlockPos(bx, by, bz), dir, -1);
     }
 
     /**
@@ -899,11 +1070,13 @@ public final class MateFramesCheck {
         final UUID idB = UUID.randomUUID();
         final UUID owner = UUID.randomUUID();
 
-        // 覆盖全部参考形态：三种方块级 + 三种结构级
+        // 覆盖全部参考形态：五种方块级 + 三种结构级
         final MateRef[] refs = {
                 face(idA, 3, -2, 7, Direction.NORTH),
                 edge(idA, -5, 1, 2, Direction.EAST, 2),
                 vertex(idA, 0, 0, 0, Direction.DOWN, 3),
+                MateRef.block(idA, RefKind.FACE_CENTER, new BlockPos(3, -2, 7), Direction.NORTH, -1),
+                MateRef.block(idA, RefKind.EDGE_CENTER, new BlockPos(-5, 1, 2), Direction.EAST, 2),
                 MateRef.center(idA),
                 MateRef.axis(idA, 2),
                 MateRef.plane(idA, 0),
@@ -920,9 +1093,11 @@ public final class MateFramesCheck {
                 final double value = switch (type.valueKind()) {
                     case ANGLE -> 45.0;
                     case DISTANCE -> -1.5;
+                    case DISTANCE_RANGE -> -1.5;
                     case NONE -> 0.0;
                 };
-                final Mate original = new Mate(UUID.randomUUID(), type, refA, refB, value,
+                final double value2 = type.needsSecondValue() ? 3.5 : value;
+                final Mate original = new Mate(UUID.randomUUID(), type, refA, refB, value, value2,
                         r % 3 == 0, r % 2 == 0 ? "自定义名" : null, owner, r % 2 == 0 ? "Dev" : null);
 
                 final net.minecraft.nbt.CompoundTag tag =
@@ -942,7 +1117,7 @@ public final class MateFramesCheck {
                 }
             }
         }
-        System.out.println("  (round-tripped " + cases + " mate shapes across all 8 types x 6 reference kinds)");
+        System.out.println("  (round-tripped " + cases + " mate shapes across all 7 types x 8 reference kinds)");
     }
 
     /**
@@ -964,6 +1139,8 @@ public final class MateFramesCheck {
         samples.put(RefKind.VERTEX, MateRef.block(idA, RefKind.VERTEX, block, Direction.UP, 0));
         samples.put(RefKind.EDGE, MateRef.block(idA, RefKind.EDGE, block, Direction.UP, 0));
         samples.put(RefKind.FACE, MateRef.block(idA, RefKind.FACE, block, Direction.UP, -1));
+        samples.put(RefKind.FACE_CENTER, MateRef.block(idA, RefKind.FACE_CENTER, block, Direction.UP, -1));
+        samples.put(RefKind.EDGE_CENTER, MateRef.block(idA, RefKind.EDGE_CENTER, block, Direction.UP, 0));
         samples.put(RefKind.BODY_CENTER, MateRef.center(idA));
         samples.put(RefKind.BODY_AXIS, MateRef.axis(idA, 1));
         samples.put(RefKind.BODY_PLANE, MateRef.plane(idA, 1));
@@ -987,12 +1164,31 @@ public final class MateFramesCheck {
         // 3) 自动推断类型（选满两端时的默认行为）
         final MateRef edge = samples.get(RefKind.EDGE);
         final MateRef axis = samples.get(RefKind.BODY_AXIS);
-        ok("edge+edge -> CONCENTRIC",
-                infer(edge, edge) == MateType.CONCENTRIC);
-        ok("axis+axis -> CONCENTRIC",
-                infer(axis, axis) == MateType.CONCENTRIC);
-        ok("edge+axis -> CONCENTRIC",
-                infer(edge, axis) == MateType.CONCENTRIC);
+
+        // 2b) 面心/棱心是「纯点」：位置类可用、方向类被拒，锚点必须与面/棱一致
+        final MateRef faceCenter = samples.get(RefKind.FACE_CENTER);
+        final MateRef edgeCenter = samples.get(RefKind.EDGE_CENTER);
+        for (final MateType t : MateType.values()) {
+            final String want = t.requiresDirection() ? "rejected" : "allowed";
+            ok("face centre " + want + " for " + t.id(), faceCenter.supports(t) == !t.requiresDirection());
+            ok("edge centre " + want + " for " + t.id(), edgeCenter.supports(t) == !t.requiresDirection());
+        }
+        ok("face centre anchor == face centre point",
+                MateFrames.resolveLocal(bounds, faceCenter).point()
+                        .equals(MateFrames.resolveLocal(bounds, faceRef).point(), 1.0e-12));
+        ok("edge centre anchor == edge midpoint",
+                MateFrames.resolveLocal(bounds, edgeCenter).point()
+                        .equals(MateFrames.resolveLocal(bounds, edge).point(), 1.0e-12));
+        ok("face centre + vertex -> COINCIDENT",
+                infer(faceCenter, vertex) == MateType.COINCIDENT);
+        ok("edge centre + edge centre -> COINCIDENT",
+                infer(edgeCenter, edgeCenter) == MateType.COINCIDENT);
+        ok("edge+edge -> PARALLEL",
+                infer(edge, edge) == MateType.PARALLEL);
+        ok("axis+axis -> PARALLEL",
+                infer(axis, axis) == MateType.PARALLEL);
+        ok("edge+axis -> PARALLEL",
+                infer(edge, axis) == MateType.PARALLEL);
         ok("face+face -> COINCIDENT",
                 infer(faceRef, faceRef) == MateType.COINCIDENT);
         ok("vertex+vertex -> COINCIDENT",
@@ -1013,13 +1209,524 @@ public final class MateFramesCheck {
             ok(t.id() + ": default within [min,max]",
                     t.defaultValue() >= t.minValue() && t.defaultValue() <= t.maxValue());
             ok(t.id() + ": byId round-trips", MateType.byId(t.id()) == t);
+            if (t.needsSecondValue()) {
+                ok(t.id() + ": needsSecondValue 只可能是区间类型（DISTANCE_RANGE）",
+                        t.valueKind() == MateType.ValueKind.DISTANCE_RANGE);
+                ok(t.id() + ": default2 within [min,max]",
+                        t.defaultValue2() >= t.minValue() && t.defaultValue2() <= t.maxValue());
+                ok(t.id() + ": 默认区间不是退化的点", t.defaultValue2() > t.defaultValue());
+            }
         }
 
         // 5) 方块级参考字段缺失时必须判为不合法（避免落到读 null 的路径上）
         ok("block-level without block is not well-formed",
-                !new MateRef(idA, RefKind.FACE, null, Direction.UP, -1, -1).isWellFormed());
+                !new MateRef(idA, RefKind.FACE, null, Direction.UP, -1, -1, null).isWellFormed());
         ok("block-level without face is not well-formed",
-                !new MateRef(idA, RefKind.VERTEX, block, null, 0, -1).isWellFormed());
+                !new MateRef(idA, RefKind.VERTEX, block, null, 0, -1, null).isWellFormed());
+
+        // 6) 碰撞盒子盒：点/棱/面必须按子盒取，而不是按整格
+        onSubBoxRefs();
+        // 7) 高级配合（比例 / 齿轮）的纯数学部分
+        onAdvancedMateRules();
+        // 8) 耦合存档的往返（这段代码在游戏里跑一次才看得出来，离线必须钉死）
+        onCouplingPersistence();
+    }
+
+    /**
+     * 比例组 / 齿轮耦合的 NBT 往返。
+     *
+     * <p>为什么值得单独测：存档是「写进去读不出来」这类 bug 的重灾区，而它在游戏里的表现是
+     * 「重启服务器后配合莫名消失」——玩家很难把它和存档序列化联系起来。
+     * 这里用真实的 {@code save/load} 路径（不是自己再造一份格式）跑一遍，
+     * 并特意带上<b>碰撞箱子盒</b>字段，确认子盒参考也能完整回来。
+     */
+    private static void onCouplingPersistence() {
+        System.out.println("[coupling persistence]");
+        final UUID owner = UUID.randomUUID();
+        final UUID bodyA = UUID.randomUUID();
+        final UUID bodyB = UUID.randomUUID();
+        final UUID driver = UUID.randomUUID();
+
+        // 台阶下半：带子盒的参考（确认 box 字段能过 NBT）
+        final net.minecraft.world.phys.AABB slab = new net.minecraft.world.phys.AABB(0, 0, 0, 1, 0.5, 1);
+        final MateRef driverRef = new MateRef(driver, RefKind.FACE, new BlockPos(1, 2, 3), Direction.UP, -1, -1,
+                null);
+        final MateRef memberRef = MateRef.block(bodyA, RefKind.FACE, new BlockPos(4, 5, 6), Direction.NORTH, -1,
+                slab);
+
+        final com.ovo.sablestopnow.server.CouplingData data = new com.ovo.sablestopnow.server.CouplingData();
+        final UUID ratioId = UUID.randomUUID();
+        data.putRatio(new com.ovo.sablestopnow.server.CouplingData.RatioGroup(ratioId, driverRef,
+                java.util.List.of(new com.ovo.sablestopnow.server.CouplingData.RatioMember(memberRef, 2.5)),
+                owner, "tester"));
+
+        final UUID gearId = UUID.randomUUID();
+        final MateRef fixedA = MateRef.block(bodyA, RefKind.EDGE, new BlockPos(0, 0, 0), Direction.UP, 1);
+        final MateRef gearA = MateRef.block(bodyA, RefKind.EDGE, new BlockPos(0, 0, 0), Direction.UP, 2);
+        final MateRef fixedB = MateRef.block(bodyB, RefKind.EDGE, new BlockPos(0, 0, 0), Direction.UP, 1);
+        final MateRef gearB = MateRef.block(bodyB, RefKind.EDGE, new BlockPos(0, 0, 0), Direction.UP, 2);
+        data.putGear(new com.ovo.sablestopnow.server.CouplingData.GearCoupling(gearId, fixedA, gearA, fixedB, gearB,
+                17, 43, true, owner, "tester"));
+
+        final net.minecraft.nbt.CompoundTag tag = data.save(new net.minecraft.nbt.CompoundTag(), null);
+        final com.ovo.sablestopnow.server.CouplingData back =
+                com.ovo.sablestopnow.server.CouplingData.load(tag, null);
+
+        ok("coupling: ratio group survives a save/load round trip", back.ratios().size() == 1);
+        final com.ovo.sablestopnow.server.CouplingData.RatioGroup group = back.ratios().get(ratioId);
+        ok("coupling: ratio id and owner survive", group != null && group.owner().equals(owner)
+                && "tester".equals(group.ownerName()));
+        ok("coupling: driver reference survives", group != null && group.driver().block() != null
+                && group.driver().block().getX() == 1 && group.driver().face() == Direction.UP);
+        ok("coupling: member k survives", group != null && group.members().size() == 1
+                && Math.abs(group.members().get(0).ratio() - 2.5) < 1e-9);
+        ok("coupling: collision sub-box survives the round trip", group != null
+                && group.members().get(0).ref().box() != null
+                && Math.abs(group.members().get(0).ref().box().maxY - 0.5) < 1e-9);
+
+        ok("coupling: gear coupling survives a save/load round trip", back.gears().size() == 1);
+        final com.ovo.sablestopnow.server.CouplingData.GearCoupling gear = back.gears().get(gearId);
+        ok("coupling: teeth and reverse survive", gear != null && gear.teethA() == 17 && gear.teethB() == 43
+                && gear.reversed());
+        ok("coupling: gear ratio recomputes after load", gear != null && gear.ratio() != null
+                && Math.abs(gear.ratio() + 17.0 / 43.0) < 1e-12);
+        ok("coupling: all four axes survive",
+                gear != null && gear.fixedA().feature() == 1 && gear.gearA().feature() == 2
+                        && gear.fixedB().feature() == 1 && gear.gearB().feature() == 2);
+    }
+
+    /**
+     * 比例与齿轮的数学规则。
+     *
+     * <p>这两类配合不能做成虚拟刚体夹具（比例是连续变化的相对位姿、齿轮约束的是角速度比），
+     * 所以它们的实现走「每个物理子步做一次运动学辅助」。这里钉死的是那次辅助里
+     * <b>可离线验证</b>的那一半：算什么。世界那一半（怎么施加到物理体上）由实现处的注释与实测负责。
+     */
+    private static void onAdvancedMateRules() {
+        System.out.println("[advanced mate rules]");
+
+        // ---- 比例 ----
+        final double[] k = com.ovo.sablestopnow.mate.RatioRule.ratios(new double[]{2.0, 4.0, 6.0});
+        ok("ratio: ratios are k_i = d_i/d_1", k != null
+                && Math.abs(k[0] - 1.0) < 1e-12 && Math.abs(k[1] - 2.0) < 1e-12 && Math.abs(k[2] - 3.0) < 1e-12);
+        final double[] targets = com.ovo.sablestopnow.mate.RatioRule.targets(k, 5.0);
+        ok("ratio: targets scale with the driver", Math.abs(targets[0] - 5.0) < 1e-12
+                && Math.abs(targets[1] - 10.0) < 1e-12 && Math.abs(targets[2] - 15.0) < 1e-12);
+        boolean invariant = true;
+        for (double driver = -7.5; driver <= 7.5; driver += 0.5) {
+            final double[] t = com.ovo.sablestopnow.mate.RatioRule.targets(k, driver);
+            for (int i = 0; i < t.length; i++) {
+                if (Math.abs(t[i] - k[i] * driver) > 1e-9 || !Double.isFinite(t[i])) {
+                    invariant = false;
+                }
+            }
+        }
+        ok("ratio: d_i = k_i * d_1 for every driver", invariant);
+        ok("ratio: zero initial driver is rejected (no inf/NaN)",
+                com.ovo.sablestopnow.mate.RatioRule.ratios(new double[]{0.0, 1.0}) == null
+                        && com.ovo.sablestopnow.mate.RatioRule.ratios(new double[]{0.0}) == null);
+        ok("ratio: hand-typed k is validated",
+                com.ovo.sablestopnow.mate.RatioRule.isValidRatio(-3.0)
+                        && !com.ovo.sablestopnow.mate.RatioRule.isValidRatio(Double.NaN)
+                        && !com.ovo.sablestopnow.mate.RatioRule.isValidRatio(Double.POSITIVE_INFINITY)
+                        && !com.ovo.sablestopnow.mate.RatioRule.isValidRatio(65.0));
+
+        // ---- 齿轮 ----
+        final Double half = com.ovo.sablestopnow.mate.GearRule.ratio(20, 40, false);
+        final Double halfRev = com.ovo.sablestopnow.mate.GearRule.ratio(20, 40, true);
+        ok("gear: ratio = z_A / z_B", half != null && Math.abs(half - 0.5) < 1e-12);
+        ok("gear: reverse negates the ratio", halfRev != null && Math.abs(halfRev + 0.5) < 1e-12);
+        ok("gear: illegal teeth are rejected (no NaN)",
+                com.ovo.sablestopnow.mate.GearRule.ratio(0, 10, false) == null
+                        && com.ovo.sablestopnow.mate.GearRule.ratio(10, -3, false) == null
+                        && com.ovo.sablestopnow.mate.GearRule.ratio(10, 999999, false) == null);
+        boolean gearIdentity = true;
+        for (double deltaA = -360.0; deltaA <= 360.0; deltaA += 15.0) {
+            final double deltaB = com.ovo.sablestopnow.mate.GearRule.followerAngle(12.0, deltaA, half) - 12.0;
+            if (Math.abs(deltaB + half * deltaA) > 1e-9) {
+                gearIdentity = false;
+            }
+        }
+        ok("gear: d_theta_B = -ratio * d_theta_A", gearIdentity);
+        ok("gear: shortest angular path", Math.abs(com.ovo.sablestopnow.mate.GearRule.shortestDelta(170.0, -170.0) - 20.0) < 1e-9
+                && Math.abs(com.ovo.sablestopnow.mate.GearRule.shortestDelta(-170.0, 170.0) + 20.0) < 1e-9
+                && Math.abs(com.ovo.sablestopnow.mate.GearRule.shortestDelta(0.0, 350.0) + 10.0) < 1e-9);
+        final Double spin = com.ovo.sablestopnow.mate.GearRule.spinAngle(
+                new double[]{0, 1, 0}, new double[]{1, 0, 0}, new double[]{0, 0, 1});
+        ok("gear: spin angle uses the signed quadrant", spin != null && Math.abs(spin + 90.0) < 1e-9);
+        ok("gear: parallel fixed axis is degenerate (null, not jitter)",
+                com.ovo.sablestopnow.mate.GearRule.spinAngle(
+                        new double[]{0, 1, 0}, new double[]{0, 1, 0}, new double[]{1, 0, 0}) == null);
+
+        // ---- 限速辅助：不得瞬移，角度必须走最短路径（两者都会直接变成能量注入） ----
+        ok("assist: linear step is rate limited",
+                Math.abs(com.ovo.sablestopnow.mate.AssistMath.approach(0.0, 10.0, 0.25) - 0.25) < 1e-12
+                        && Math.abs(com.ovo.sablestopnow.mate.AssistMath.approach(0.0, -10.0, 0.25) + 0.25) < 1e-12);
+        ok("assist: already-close target snaps exactly (no jitter)",
+                Math.abs(com.ovo.sablestopnow.mate.AssistMath.approach(4.9, 5.0, 0.25) - 5.0) < 1e-12);
+        ok("assist: maxStep never exceeds the requested distance",
+                Math.abs(com.ovo.sablestopnow.mate.AssistMath.approach(1.0, 1.1, 5.0) - 1.1) < 1e-12);
+        ok("assist: angle takes the short way around",
+                Math.abs(com.ovo.sablestopnow.mate.AssistMath.approachAngle(170.0, -170.0, 5.0) - 175.0) < 1e-9
+                        && Math.abs(com.ovo.sablestopnow.mate.AssistMath.approachAngle(-170.0, 170.0, 5.0) + 175.0) < 1e-9);
+        ok("assist: angle step is rate limited",
+                Math.abs(com.ovo.sablestopnow.mate.AssistMath.approachAngle(0.0, 100.0, 12.0) - 12.0) < 1e-9);
+        ok("assist: maxStep is speed * dt and dt is capped",
+                Math.abs(com.ovo.sablestopnow.mate.AssistMath.maxStep(6.0, 0.05) - 0.3) < 1e-12
+                        && Math.abs(com.ovo.sablestopnow.mate.AssistMath.maxStep(6.0, 5.0) - 0.3) < 1e-12
+                        && Math.abs(com.ovo.sablestopnow.mate.AssistMath.maxStep(-3.0, 0.05)) < 1e-12);
+        ok("assist: arrival tests use the short way for angles",
+                com.ovo.sablestopnow.mate.AssistMath.arrivedAngle(179.0, -179.0, 3.0)
+                        && !com.ovo.sablestopnow.mate.AssistMath.arrivedAngle(179.0, 100.0, 3.0));
+
+        // ---- 测量：比例/齿轮的驱动量必须与标准配合钉住的量在同一根轴上 ----
+        final UUID idA = UUID.randomUUID();
+        final UUID idB = UUID.randomUUID();
+        final Body ma = body(0, 0, 0);
+        final Body mb = body(3, 0, 0);
+        final MateRef faceEast = MateRef.block(idA, RefKind.FACE, new BlockPos(0, 0, 0), Direction.EAST, -1);
+        final MateRef faceWest = MateRef.block(idB, RefKind.FACE, new BlockPos(0, 0, 0), Direction.WEST, -1);
+        final double measured = MateFrames.measureDistance(ma.pose(), ma.bounds(), faceEast,
+                mb.pose(), mb.bounds(), faceWest);
+        ok("measure: face-to-face distance is off the two face planes",
+                Math.abs(measured - 2.0) < 1e-9);
+        final Vector3d measuredAxis = MateFrames.measureAxis(ma.pose(), ma.bounds(), faceEast,
+                mb.pose(), mb.bounds(), faceWest);
+        ok("measure: face axis is A's normal",
+                measuredAxis != null && Math.abs(measuredAxis.x - 1.0) < 1e-9
+                        && Math.abs(measuredAxis.y) < 1e-9 && Math.abs(measuredAxis.z) < 1e-9);
+
+        // 线—线：测量轴必须垂直于两条线（沿线量间距 = 让两条棱对滑，是错的）
+        final MateRef lineA = MateRef.block(idA, RefKind.EDGE, new BlockPos(0, 0, 0), Direction.UP, 0);
+        final MateRef lineB = MateRef.block(idB, RefKind.EDGE, new BlockPos(0, 0, 0), Direction.UP, 0);
+        final Body mbLine = body(0, 3, 0);
+        final Vector3d lineAxis = MateFrames.measureAxis(ma.pose(), ma.bounds(), lineA,
+                mbLine.pose(), mbLine.bounds(), lineB);
+        final Vector3d lineDir = MateFrames.worldDirection(ma.pose(),
+                MateFrames.resolveLocal(ma.bounds(), lineA));
+        ok("measure: line-line axis is perpendicular to the line",
+                lineAxis != null && lineDir != null && Math.abs(lineAxis.dot(lineDir)) < 1e-9);
+        ok("measure: line-line distance is the perpendicular one",
+                Math.abs(MateFrames.measureDistance(ma.pose(), ma.bounds(), lineA,
+                        mbLine.pose(), mbLine.bounds(), lineB) - 3.0) < 1e-9);
+
+        // ---- 可控施力点：力的大小必须夹紧、方向必须随结构朝向旋转 ----
+        ok("force: magnitude is clamped into 0..1000",
+                Math.abs(com.ovo.sablestopnow.force.ForcePoint.clampMagnitude(-5.0)) < 1e-12
+                        && Math.abs(com.ovo.sablestopnow.force.ForcePoint.clampMagnitude(5000.0) - 1000.0) < 1e-12
+                        && Math.abs(com.ovo.sablestopnow.force.ForcePoint.clampMagnitude(250.0) - 250.0) < 1e-12
+                        && Math.abs(com.ovo.sablestopnow.force.ForcePoint.clampMagnitude(Double.NaN)
+                        - com.ovo.sablestopnow.force.ForcePoint.DEFAULT_MAGNITUDE) < 1e-12);
+
+        final com.ovo.sablestopnow.force.ForcePoint fp = com.ovo.sablestopnow.force.ForcePoint.onFace(
+                idA, new BlockPos(4, 5, 6), Direction.EAST, new Vector3d(5.0, 5.5, 6.5), 120.0);
+        ok("force: face normal becomes the force axis",
+                Math.abs(fp.localNormal().x - 1.0) < 1e-12 && Math.abs(fp.localNormal().y) < 1e-12
+                        && Math.abs(fp.localNormal().z) < 1e-12);
+        ok("force: magnitude survives construction", Math.abs(fp.magnitude() - 120.0) < 1e-12);
+
+        // 未旋转：方向 = 局部法线；力矢量长度 = 牛顿数
+        final Pose3d identity = new Pose3d(new Vector3d(10, 20, 30), new Quaterniond(),
+                new Vector3d(), new Vector3d(1, 1, 1));
+        final Vector3d flatForce = fp.worldForce(identity);
+        ok("force: world force keeps the magnitude in newtons",
+                flatForce != null && Math.abs(flatForce.length() - 120.0) < 1e-9);
+        final Vector3d flatPoint = fp.worldPoint(identity);
+        ok("force: world point follows the pose translation",
+                Math.abs(flatPoint.x - 15.0) < 1e-9 && Math.abs(flatPoint.y - 25.5) < 1e-9
+                        && Math.abs(flatPoint.z - 36.5) < 1e-9);
+
+        // 绕 Y 轴 +90°：法线 (1,0,0) 必须跟着结构转到 (0,0,-1)，否则「力贴在表面上」就成了一句空话
+        final Pose3d turned = new Pose3d(new Vector3d(0, 0, 0), new Quaterniond().rotateY(Math.PI / 2.0),
+                new Vector3d(), new Vector3d(1, 1, 1));
+        final Vector3d turnedForce = fp.worldForce(turned);
+        ok("force: direction rotates with the structure",
+                turnedForce != null && Math.abs(turnedForce.x) < 1e-9
+                        && Math.abs(turnedForce.y) < 1e-9 && Math.abs(turnedForce.z + 120.0) < 1e-9);
+
+        // 频道：非法/空注册名必须判为「没配好」，不能默默当成空气物品
+        ok("force: empty channel is not configured",
+                !fp.withChannel(null, null, null).channelConfigured()
+                        && !fp.channelConfigured()
+                        && !fp.withChannel("", null, "x").channelConfigured()
+                        && !fp.withChannel("no such id!!", null, null).channelConfigured());
+
+        // 两个频率槽：第二槽留空时**保持为空**（服务端据此退回第一槽），两段注册名各存各的。
+        // ⚠ 这里只断言「存了什么」：解析成 ItemStack 要查物品注册表，而离线验证器没有引导注册表，
+        // 一旦调用就会 NPE 把整个检查器打断（曾经因此只剩 484 条断言）。
+        final com.ovo.sablestopnow.force.ForcePoint twoSlots =
+                fp.withChannel("minecraft:redstone", "create:brass_sheet", null);
+        ok("force: two-slot channel keeps both ids",
+                "minecraft:redstone".equals(twoSlots.channelItemId())
+                        && "create:brass_sheet".equals(twoSlots.channelItemId2()));
+        final com.ovo.sablestopnow.force.ForcePoint oneSlot =
+                fp.withChannel("minecraft:redstone", null, null);
+        ok("force: empty second slot stays empty (service falls back to slot 1)",
+                oneSlot.channelItemId2() == null);
+        ok("force: channel label shows the pair",
+                twoSlots.channelLabel().contains("minecraft:redstone")
+                        && twoSlots.channelLabel().contains("create:brass_sheet"));
+        ok("force: identical slots collapse in the label",
+                !fp.withChannel("minecraft:redstone", "", null).channelLabel().contains("+"));
+        // withChannel 是**原样写入**的 setter：null 就是清空。合并（只改名字时保住两个槽）
+        // 由 ForcePointRegistry.update 负责，那里会先用旧值填 null 再调它。
+        ok("force: withChannel writes raw values (registry merges)",
+                twoSlots.withChannel(null, null, "ch1").channelItemId2() == null
+                        && twoSlots.withChannel(twoSlots.channelItemId(), twoSlots.channelItemId2(), "ch1")
+                                .channelItemId2().equals("create:brass_sheet"));
+    }
+
+    /**
+     * 碰撞箱基准：一个方块（比如台阶）有两个碰撞盒时，参考必须落在<b>被命中的那个子盒</b>上。
+     *
+     * <p>这是「点/棱/面以方块碰撞箱为准」这条需求的回归防线：整格与子盒必须解出不同的点，
+     * 且子盒的面心必须落在子盒自己的面上。
+     */
+    private static void onSubBoxRefs() {
+        System.out.println("[collision-box refs]");
+        final UUID body = UUID.randomUUID();
+        final BlockPos pos = new BlockPos(10, 20, 30);
+        final BoundingBox3i bounds = new BoundingBox3i(-1, -1, -1, 1, 1, 1);
+        // 台阶下半：y ∈ [0, 0.5]，占满 x/z
+        final net.minecraft.world.phys.AABB lower = new net.minecraft.world.phys.AABB(0.0, 0.0, 0.0, 1.0, 0.5, 1.0);
+        final MateRef fullFace = MateRef.block(body, RefKind.FACE, pos, Direction.UP, -1);
+        final MateRef subFace = MateRef.block(body, RefKind.FACE, pos, Direction.UP, -1, lower);
+        final Vector3d fullPoint = MateFrames.resolveLocal(bounds, fullFace).point();
+        final Vector3d subPoint = MateFrames.resolveLocal(bounds, subFace).point();
+        ok("full-cube up-face stands on y=21", Math.abs(fullPoint.y - 21.0) < 1e-9);
+        ok("slab up-face stands on y=20.5", Math.abs(subPoint.y - 20.5) < 1e-9);
+        ok("sub-box face differs from full cube", Math.abs(fullPoint.y - subPoint.y) > 0.4);
+        ok("sub-box face center is centered in x/z",
+                Math.abs(subPoint.x - 10.5) < 1e-9 && Math.abs(subPoint.z - 30.5) < 1e-9);
+
+        final MateRef subCorner = MateRef.block(body, RefKind.VERTEX, pos, Direction.UP, 1, lower);
+        final Vector3d corner = MateFrames.resolveLocal(bounds, subCorner).point();
+        // index 1 = u 正、v 负；UP 面的 u=x、v=z，于是角点在 (11.0, 20.5, 30.0)
+        ok("sub-box corner keeps x/z on the box edge",
+                Math.abs(corner.x - 11.0) < 1e-9 && Math.abs(corner.z - 30.0) < 1e-9);
+
+        final MateRef subEdge = MateRef.block(body, RefKind.EDGE, pos, Direction.UP, 0, lower);
+        final MateFrames.Resolved edge = MateFrames.resolveLocal(bounds, subEdge);
+        ok("sub-box edge has a direction", edge.direction() != null);
+        ok("sub-box edge midpoint sits on the box face", Math.abs(edge.point().y - 20.5) < 1e-9);
+    }
+
+    /**
+     * 通用反「虚空动能」断言：遍历 <b>所有配合类型 × 所有参考类型组合</b>，检查关节本身不自相矛盾。
+     *
+     * <p>背景：玩家反馈「线线距离会让两个结构相互旋转、攒速度、最后甩飞」。根因就是关节自相矛盾 ——
+     * 解算器一边沿某条轴拉、一边把它锁死（或一边锁角向、一边又要求几何对齐），
+     * 能量只进不出。这类 bug 不会崩、只会在游戏里越转越快，所以必须用断言钉死：
+     * <ul>
+     *   <li>用 {@code setLimit} 钉住的轴<b>不能</b>同时出现在锁定轴里（直接对拉）；</li>
+     *   <li>锁定的轴数不能超过 6；</li>
+     *   <li>距离配合必须有测量轴：面用面法线、棱用「垂直于棱」的方向 —— 沿线量间距等于让两条棱对滑。</li>
+     * </ul>
+     */
+    private static void noSelfConflictingJoints() throws Exception {
+        System.out.println("[no self-conflicting joints]");
+        final UUID idA = UUID.randomUUID();
+        final UUID idB = UUID.randomUUID();
+        final Body a = body(0, 0, 0);
+        final Body b = body(7, 3, 2);
+        final Direction[] dirs = { Direction.UP, Direction.NORTH, Direction.EAST };
+
+        int combos = 0;
+        for (final MateType type : MateType.values()) {
+            for (final Direction da : dirs) {
+                for (final Direction db : dirs) {
+                    // 覆盖五类方块级参考（点/棱/棱心/面/面心）
+                    final MateRef[][] refPairs = {
+                            { face(idA, 0, 0, 0, da), face(idB, 0, 0, 0, db) },
+                            { edge(idA, 0, 0, 0, da, 0), edge(idB, 0, 0, 0, db, 1) },
+                            { face(idA, 0, 0, 0, da), edge(idB, 0, 0, 0, db, 0) },
+                            { edge(idA, 0, 0, 0, da, 0), face(idB, 0, 0, 0, db) },
+                            { vertex(idA, 0, 0, 0, da, 0), vertex(idB, 0, 0, 0, db, 3) },
+                            { MateRef.block(idA, RefKind.FACE_CENTER, new BlockPos(0, 0, 0), da, -1),
+                              MateRef.block(idB, RefKind.FACE_CENTER, new BlockPos(0, 0, 0), db, -1) },
+                            { MateRef.block(idA, RefKind.EDGE_CENTER, new BlockPos(0, 0, 0), da, 0),
+                              MateRef.block(idB, RefKind.EDGE_CENTER, new BlockPos(0, 0, 0), db, 0) },
+                            { face(idA, 0, 0, 0, da), vertex(idB, 0, 0, 0, db, 0) },
+                            { edge(idA, 0, 0, 0, da, 0), vertex(idB, 0, 0, 0, db, 0) },
+                    };
+                    for (final MateRef[] pair : refPairs) {
+                        final MateRef ra = pair[0];
+                        final MateRef rb = pair[1];
+                        combos++;
+                        final String label = type.id() + " " + ra.kind().id() + "+" + rb.kind().id()
+                                + " " + da + "/" + db;
+
+                        final java.util.Set<ConstraintJointAxis> locked = MateFrames.lockedAxes(type, ra, rb);
+                        final ConstraintJointAxis limit = MateFrames.limitAxisOf(type);
+                        ok(label + ": limit axis is not also locked",
+                                limit == null || !locked.contains(limit));
+                        ok(label + ": at most 6 locked axes", locked.size() <= 6);
+                        // 方向类的参考不足时必须直接判为「不适用」，而不是给一个拧巴的关节
+                        if (!ra.supports(type) || !rb.supports(type)) {
+                            continue;
+                        }
+                        final double v1 = type.needsValue()
+                                ? Math.max(0.5, type.defaultValue() + 1.0) : type.defaultValue();
+                        final double v2 = type.needsSecondValue() ? v1 + 2.0 : v1;
+                        final MateFrames.Plan plan = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                                type, ra, rb, v1, v2, false, true);
+                        checkJoint(label, a, b, plan);
+                        // 精确值类型的数值全部做进关节几何（硬锁），只有「限制」这种区间才交给 setLimit
+                        ok(label + ": setLimit 只允许出现在区间类型上",
+                                plan.limitAxis() == null || type.needsSecondValue());
+                        if (plan.limitAxis() != null) {
+                            ok(label + ": 区间不是退化的点（min < max）", plan.isRange());
+                            ok(label + ": 被区间占用的轴没有同时被锁",
+                                    !plan.locked().contains(plan.limitAxis()));
+                        }
+                        if (type == MateType.DISTANCE || type == MateType.LIMIT) {
+                            // 只有当「两侧都含线」（线—线 / 线—点）时，测量轴才必须垂直于线；
+                            // 面—线用的是面法线，本来就不必垂直于棱。
+                            final boolean lineA = ra.kind() == RefKind.EDGE || ra.kind() == RefKind.BODY_AXIS;
+                            final boolean lineB = rb.kind() == RefKind.EDGE || rb.kind() == RefKind.BODY_AXIS;
+                            final boolean linePair = lineA && lineB;
+                            final boolean lineWithPoint = (lineA && !rb.hasDirection())
+                                    || (lineB && !ra.hasDirection());
+                            if (linePair || lineWithPoint) {
+                                final Vector3d axis = plan.orientationA().transform(new Vector3d(0, 0, 1));
+                                final MateRef lineRef = lineA ? ra : rb;
+                                final BoundingBox3ic lineBounds = lineA ? a.bounds() : b.bounds();
+                                final Pose3dc linePose = lineA ? a.pose() : b.pose();
+                                final Vector3d dir = MateFrames.worldDirection(linePose,
+                                        MateFrames.resolveLocal(lineBounds, lineRef));
+                                if (dir != null) {
+                                    ok(label + ": distance axis ⟂ 线", Math.abs(axis.dot(dir)) < 0.05);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        System.out.println("  (" + combos + " 类型 × 参考类型组合全部检查过)");
+    }
+
+    /**
+     * 「线线 = 一根虚拟硬杆」的语义测试。
+     *
+     * <p>玩家反馈：线线重合会被「极易拉开」（沿另一条垂直方向）并抽动弹走。根因是
+     * 两条棱共线要**两条垂直方向**的偏移都为 0，只锁一条等于少了一个自由度；
+     * 而且吸附时只消了其中一条，关节一建好就带着误差 ⇒ 先抽一下、再被拉回去、几次之后弹飞。
+     * 这里就把「共线 / 硬杆长度」直接量出来钉死。
+     */
+    private static void lineLineRod() throws Exception {
+        System.out.println("[line-line rod]");
+        final UUID idA = UUID.randomUUID();
+        final UUID idB = UUID.randomUUID();
+        final Body a = body(0, 0, 0);
+        // B 故意放歪一点：沿两个垂直方向都有偏移，且棱方向不平行
+        final Body b = body(6, 2, -3, new Quaterniond()
+                .fromAxisAngleDeg(new Vector3d(0.3, 0.2, 0.9).normalize(), 35.0), new Vector3d(1, 1, 1));
+        final MateRef ea = edge(idA, 0, 0, 1, Direction.UP, 0);   // 方向 +X
+        final MateRef eb = edge(idB, 0, 0, 1, Direction.EAST, 0);
+
+        // ---- 重合：必须共线（两条垂直方向偏移都为 0）----
+        final MateFrames.Plan coincide = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.COINCIDENT, ea, eb, 0.0, false, true);
+        final Pose3d snappedB = snapped(b, coincide);
+        final Vector3d pA = MateFrames.worldPoint(a.pose(), MateFrames.resolveLocal(a.bounds(), ea));
+        final Vector3d pB = MateFrames.worldPoint(snappedB, MateFrames.resolveLocal(b.bounds(), eb));
+        final Vector3d dirA = MateFrames.worldDirection(a.pose(), MateFrames.resolveLocal(a.bounds(), ea));
+        final Vector3d dirB = MateFrames.worldDirection(snappedB, MateFrames.resolveLocal(b.bounds(), eb));
+        final Vector3d offset = new Vector3d(pB).sub(pA);
+        final Vector3d perp = new Vector3d(offset).fma(-offset.dot(dirA), dirA);
+        near("线线重合 → 两条棱共线（垂直偏移 0）", perp.length(), 0.0, TOL);
+        near("线线重合 → 方向平行", Math.abs(dirA.dot(dirB)), 1.0, TOL);
+        ok("线线重合 → 沿棱滑动自由", !coincide.locked().contains(ConstraintJointAxis.LINEAR_X));
+        ok("线线重合 → 绕棱自转自由", !coincide.locked().contains(ConstraintJointAxis.ANGULAR_X));
+        checkJoint("line-line coincident", a, b, coincide);
+
+        // ---- 距离：一根垂直于两条棱的硬杆，长度 = v；另一条垂直方向必须为 0 ----
+        final MateFrames.Plan distance = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.DISTANCE, ea, eb, 2.5, false, true);
+        final Pose3d snappedD = snapped(b, distance);
+        final Vector3d qB = MateFrames.worldPoint(snappedD, MateFrames.resolveLocal(b.bounds(), eb));
+        final Vector3d dirB2 = MateFrames.worldDirection(snappedD, MateFrames.resolveLocal(b.bounds(), eb));
+        final Vector3d off2 = new Vector3d(qB).sub(pA);
+        final Vector3d perp2 = new Vector3d(off2).fma(-off2.dot(dirA), dirA);
+        near("线线距离 → 垂直距离 == 2.5", perp2.length(), 2.5, TOL);
+        near("线线距离 → 保持平行", Math.abs(dirA.dot(dirB2)), 1.0, TOL);
+        ok("线线距离 → 另一条垂直方向也锁住（否则距离会漂）",
+                distance.locked().contains(ConstraintJointAxis.LINEAR_Y)
+                        && !distance.locked().contains(ConstraintJointAxis.LINEAR_X));
+        checkJoint("line-line distance", a, b, distance);
+
+        // ---- 线—面重合：A 的棱要落在 B 的面内（棱中点贴面 + 棱 ⟂ 面法线）----
+        final MateRef lineRef = edge(idA, 0, 0, 1, Direction.UP, 0);
+        final MateRef planeRef = face(idB, 0, 0, 1, Direction.UP);
+        final MateFrames.Plan lineOnPlane = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.COINCIDENT, lineRef, planeRef, 0.0, false, true);
+        final Pose3d snappedL = snapped(b, lineOnPlane);
+        final Vector3d qLineA = MateFrames.worldPoint(a.pose(), MateFrames.resolveLocal(a.bounds(), lineRef));
+        final Vector3d qPlane = MateFrames.worldPoint(snappedL, MateFrames.resolveLocal(b.bounds(), planeRef));
+        final Vector3d nPlane = MateFrames.worldDirection(snappedL, MateFrames.resolveLocal(b.bounds(), planeRef));
+        final Vector3d dirLine = MateFrames.worldDirection(a.pose(), MateFrames.resolveLocal(a.bounds(), lineRef));
+        near("线—面重合 → 棱中点落在面内", new Vector3d(qLineA).sub(qPlane).dot(nPlane), 0.0, TOL);
+        near("线—面重合 → 棱 ⟂ 面法线（棱躺在面里）", Math.abs(dirLine.dot(nPlane)), 0.0, TOL);
+        checkJoint("line-on-plane", a, b, lineOnPlane);
+    }
+
+    /** 线 ⟂ 面：线的方向必须对齐面法线（以前错算成「躺在面里」，那是重合的语义）。 */
+    private static void perpendicularLineOnPlane() throws Exception {
+        System.out.println("[perpendicular line vs plane]");
+        final UUID idA = UUID.randomUUID();
+        final UUID idB = UUID.randomUUID();
+        final Body a = body(0, 0, 0);
+        final Body b = body(6, 2, -3);
+        final MateRef planeRef = face(idA, 0, 0, 1, Direction.UP);
+        final MateRef lineRef = edge(idB, 0, 0, 1, Direction.NORTH, 0);   // 方向 +X
+
+        final MateFrames.Plan plan = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.PERPENDICULAR, planeRef, lineRef, 0.0, false, true);
+        final Pose3d snappedB = snapped(b, plan);
+        final Vector3d n = MateFrames.worldDirection(a.pose(), MateFrames.resolveLocal(a.bounds(), planeRef));
+        final Vector3d d = MateFrames.worldDirection(snappedB, MateFrames.resolveLocal(b.bounds(), lineRef));
+        near("线 ⟂ 面 → 线方向对齐面法线", Math.abs(n.dot(d)), 1.0, 1e-4);
+        checkJoint("perpendicular line-plane", a, b, plan);
+    }
+
+    /** 「限制」= 距离区间：轴不锁、区间传给求解器、初始吸附只把偏移夹进区间。 */
+    private static void limitRange() throws Exception {
+        System.out.println("[limit range]");
+        final UUID idA = UUID.randomUUID();
+        final UUID idB = UUID.randomUUID();
+        final Body a = body(0, 0, 0);
+        final Body b = body(6, 2, -3);
+        final MateRef fa = face(idA, 0, 0, 1, Direction.UP);
+        final MateRef fb = face(idB, 0, 0, 1, Direction.UP);
+
+        final MateFrames.Plan plan = MateFrames.frames(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.LIMIT, fa, fb, -1.0, 2.0, false);
+        ok("限制：limitAxis = LINEAR_Z", plan.limitAxis() == ConstraintJointAxis.LINEAR_Z);
+        near("限制：区间下限", plan.limitValue(), -1.0, 1e-9);
+        near("限制：区间上限", plan.limitMax(), 2.0, 1e-9);
+        ok("限制：这条轴不锁（否则和区间自相矛盾）",
+                !plan.locked().contains(ConstraintJointAxis.LINEAR_Z));
+        ok("限制：面—面仍然保持平行", plan.locked().contains(ConstraintJointAxis.ANGULAR_X)
+                && plan.locked().contains(ConstraintJointAxis.ANGULAR_Y));
+        checkJoint("limit", a, b, plan);
+
+        // 吸附：偏移在区间内 → 一动不动；超出 → 只夹到最近的端点
+        final Vector3d qA = MateFrames.worldPoint(a.pose(), MateFrames.resolveLocal(a.bounds(), fa));
+        final Vector3d qB = MateFrames.worldPoint(b.pose(), MateFrames.resolveLocal(b.bounds(), fb));
+        final Vector3d n = MateFrames.worldDirection(a.pose(), MateFrames.resolveLocal(a.bounds(), fa));
+        final double gap = new Vector3d(qB).sub(qA).dot(n);
+
+        final MateFrames.Plan inside = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.LIMIT, fa, fb, gap - 0.5, gap + 0.5, false, true);
+        ok("限制：偏移已在区间内 → 不平移", !inside.moveB()
+                || inside.newPositionB().distance(b.pose().position()) < 1e-9);
+
+        final MateFrames.Plan below = MateFrames.solve(a.pose(), a.bounds(), b.pose(), b.bounds(),
+                MateType.LIMIT, fa, fb, gap + 1.0, gap + 3.0, false, true);
+        final Pose3d moved = snapped(b, below);
+        final Vector3d qB2 = MateFrames.worldPoint(moved, MateFrames.resolveLocal(b.bounds(), fb));
+        near("限制：偏移低于区间 → 夹到下限", new Vector3d(qB2).sub(qA).dot(n), gap + 1.0, 1e-6);
     }
 
     /** 走生产代码的自动推断，而不是在测试里复刻规则。 */

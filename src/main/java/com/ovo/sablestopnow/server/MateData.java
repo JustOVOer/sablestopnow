@@ -107,6 +107,8 @@ public class MateData extends SavedData {
         out.put("id", NbtUtils.createUUID(mate.id()));
         out.putString("type", mate.type().id());
         out.putDouble("value", mate.value());
+        // 区间类型（限制）的第二个端点；老存档没有这个键 → 读出来是 0，非区间类型本来就不用它
+        out.putDouble("value2", mate.value2());
         out.putBoolean("flip", mate.flip());
         if (mate.name() != null) {
             out.putString("name", mate.name());
@@ -120,7 +122,8 @@ public class MateData extends SavedData {
         return out;
     }
 
-    private static CompoundTag writeRef(final MateRef ref) {
+    /** 参考的 NBT 写法（public：比例/齿轮耦合的存档要复用同一套，避免两份格式各写各的）。 */
+    public static CompoundTag writeRef(final MateRef ref) {
         final CompoundTag out = new CompoundTag();
         out.put("body", NbtUtils.createUUID(ref.body()));
         out.putString("kind", ref.kind().name());
@@ -134,6 +137,16 @@ public class MateData extends SavedData {
         }
         out.putInt("feature", ref.feature());
         out.putInt("axis", ref.axis());
+        // 碰撞盒子盒：整格不写（旧存档读出来就是整格）
+        final net.minecraft.world.phys.AABB box = ref.box();
+        if (box != null && !box.equals(MateRef.FULL_BOX)) {
+            out.putDouble("boxMinX", box.minX);
+            out.putDouble("boxMinY", box.minY);
+            out.putDouble("boxMinZ", box.minZ);
+            out.putDouble("boxMaxX", box.maxX);
+            out.putDouble("boxMaxY", box.maxY);
+            out.putDouble("boxMaxZ", box.maxZ);
+        }
         return out;
     }
 
@@ -153,6 +166,7 @@ public class MateData extends SavedData {
                     NbtUtils.loadUUID(tag.get("id")),
                     type, a, b,
                     tag.getDouble("value"),
+                    tag.getDouble("value2"),
                     tag.getBoolean("flip"),
                     tag.contains("name") ? tag.getString("name") : null,
                     NbtUtils.loadUUID(tag.get("owner")),
@@ -163,19 +177,25 @@ public class MateData extends SavedData {
         }
     }
 
+    /** 参考的 NBT 读法（public：与 {@link #writeRef} 配对，供耦合存档复用）。 */
     @Nullable
-    private static MateRef readRef(final CompoundTag tag) {
+    public static MateRef readRef(final CompoundTag tag) {
         try {
             final RefKind kind = RefKind.valueOf(tag.getString("kind"));
             final UUID body = NbtUtils.loadUUID(tag.get("body"));
             final int feature = tag.getInt("feature");
             final int axis = tag.getInt("axis");
             if (!kind.isBlockLevel()) {
-                return new MateRef(body, kind, null, null, -1, axis);
+                return new MateRef(body, kind, null, null, -1, axis, null);
             }
             final BlockPos block = new BlockPos(tag.getInt("bx"), tag.getInt("by"), tag.getInt("bz"));
             final Direction face = Direction.from3DDataValue(tag.getInt("face"));
-            return new MateRef(body, kind, block, face, feature, -1);
+            final net.minecraft.world.phys.AABB box = tag.contains("boxMinX")
+                    ? new net.minecraft.world.phys.AABB(tag.getDouble("boxMinX"), tag.getDouble("boxMinY"),
+                            tag.getDouble("boxMinZ"), tag.getDouble("boxMaxX"), tag.getDouble("boxMaxY"),
+                            tag.getDouble("boxMaxZ"))
+                    : null;
+            return new MateRef(body, kind, block, face, feature, -1, box);
         } catch (final Exception e) {
             return null;
         }

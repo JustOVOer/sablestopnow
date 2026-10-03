@@ -37,6 +37,15 @@ public class SablestopNow {
         StaffEnhanceNetworking.init();
         // SolidWorks 式「配合」系统：独立通道 + 独立物理子步钩子
         com.ovo.sablestopnow.network.MateNetworking.init();
+        // 可控施力点：独立通道（服务端权威、全量同步）
+        com.ovo.sablestopnow.network.ForceNetworking.init();
+        // 比例 / 齿轮耦合
+        com.ovo.sablestopnow.network.CouplingNetworking.init();
+        // 2D 草图（SolidWorks 式建模的第一层）：服务端权威、按维度全量同步
+        com.ovo.sablestopnow.network.SketchNetworking.init();
+        com.ovo.sablestopnow.network.SolidNetworking.init();
+        // 体素碰撞体实验的触发包（验证类功能，挂在 debug 标签页下）
+        com.ovo.sablestopnow.network.VoxelColliderTestNetworking.init();
         // 模组列表里的“配置”按钮 → 本模组的自定义设置界面（仅客户端）
         if (net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) {
             com.ovo.sablestopnow.client.ClientConfigScreens.register(container);

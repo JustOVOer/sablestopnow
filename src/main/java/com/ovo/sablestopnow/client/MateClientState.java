@@ -43,10 +43,6 @@ public final class MateClientState {
     @Nullable
     private static UUID focusMate;
 
-    /** 常驻边栏实例；null = 未显示。刻意不放进 screen 栈（见 {@link #syncPanel}）。 */
-    @Nullable
-    private static com.ovo.sablestopnow.client.gui.MateTreeScreen sidebar;
-
     /** 结构级参考的滚轮循环序号（0=中心，1..3=主轴 X/Y/Z，4..6=基准面 X/Y/Z）。 */
     private static int bodyRefCycle;
 
@@ -81,6 +77,9 @@ public final class MateClientState {
             pending = List.of();
             clearPreview();
             cursorLocked = true;
+            // 退出配合模式时把手里的「选中配合」也放掉：边栏会整个丢掉，
+            // 但高亮是存在 MateClientState 里的，不清就会留在世界里一直亮着。
+            highlightedMateId = null;
         }
         syncPanel();
     }
@@ -99,31 +98,28 @@ public final class MateClientState {
      * —— 与本模组既有的 NORMAL / MULTI / DRAG 三个模式完全一致。
      */
     private static void syncPanel() {
-        if (inMode) {
-            if (sidebar == null) {
-                sidebar = new com.ovo.sablestopnow.client.gui.MateTreeScreen(null, consumeFocusMate());
-            }
-        } else {
-            sidebar = null;
+        // 旧的「配合边栏」已被模型模式的树状图取代（见 client/model/ModelUi）：
+        // 这里不再创建任何界面实例，只保留 inMode 这个「玩家正在配合模式里」的语义
+        // —— 服务端要靠它判断是否接受 picking 包。
+        if (!inMode) {
             cursorLocked = true;
         }
     }
 
-    /** 当前常驻边栏实例；null = 未显示。由 HUD 渲染事件读取。 */
-    @Nullable
-    public static com.ovo.sablestopnow.client.gui.MateTreeScreen sidebar() {
-        return sidebar;
-    }
-
     /**
-     * 配合边栏当前占用的屏幕宽度（像素）；不在配合模式、或边栏还没测过尺寸时返回 0。
+     * 模型模式右侧树状图当前占用的屏幕宽度（像素）；没在模型模式、或树被收起时返回 0。
      *
-     * <p>给别的 HUD 用：右上角的「物理结构详情」面板默认贴右边缘，配合模式一开就会压在常驻边栏上。
-     * 让它按这个值整体左移，两套界面才不打架。
+     * <p>给别的 HUD 用：右上角的「物理结构详情」面板默认贴右边缘，模型模式一开就会压在树状图上。
+     * 让它按这个值整体左移，两套界面才不打架（库里也有 {@code UiDock} 做同样的事）。
      */
     public static int sidebarWidth() {
-        final com.ovo.sablestopnow.client.gui.MateTreeScreen panel = sidebar;
-        return panel == null ? 0 : panel.overlayWidth();
+        if (!com.ovo.sablestopnow.client.model.ModelMode.isOn()) {
+            return 0;
+        }
+        final com.ovo.sablestopnow.client.gui.lib.UiLayer layer =
+                com.ovo.sablestopnow.client.gui.lib.Ui.layer(
+                        com.ovo.sablestopnow.client.model.ModelUi.LAYER_TREE);
+        return layer != null && layer.visible ? 142 : 0;
     }
 
     // ============ 鼠标锁定 ============
@@ -201,14 +197,58 @@ public final class MateClientState {
         return out;
     }
 
+    // ============ 树里选中那条配合 → 世界里高亮它的两端 ============
+
+    /**
+     * 当前在树里被选中的配合 <b>id</b>；世界渲染据此高亮它的两个参考。
+     *
+     * <p>存 id 而不是 {@link Mate} 实例，有两个原因：
+     * <ul>
+     *   <li>配合表是服务端广播的，每次同步都会换一批新实例 —— 存实例会让高亮显示旧数值，
+     *       配合被删掉之后更会一直高亮一个「已经不存在的配合」，怎么点都消不掉；</li>
+     *   <li>取的时候现查一次，查不到就自动失效（见 {@link #highlightedMate()}）。</li>
+     * </ul>
+     */
+    @Nullable
+    private static UUID highlightedMateId;
+
+    /** 世界渲染用：要高亮的配合（现查当前维度的配合表），没有则 null。 */
+    @Nullable
+    public static Mate highlightedMate() {
+        if (highlightedMateId == null) {
+            return null;
+        }
+        for (final Mate mate : currentMates()) {
+            if (mate.id().equals(highlightedMateId)) {
+                return mate;
+            }
+        }
+        // 配合被删 / 换了维度：高亮自动失效，免得留一个永远消不掉的指示
+        highlightedMateId = null;
+        return null;
+    }
+
+    /** 由树界面调用：选中/取消选中一条配合（传 null 取消）。 */
+    public static void setHighlightedMate(@Nullable final Mate mate) {
+        highlightedMateId = mate == null ? null : mate.id();
+    }
+
+    /** 由树界面调用：按 id 设置高亮（传 null 取消）。 */
+    public static void setHighlightedMateId(@Nullable final UUID mateId) {
+        highlightedMateId = mateId;
+    }
+
     /** 清空（断开连接/切维度时）。 */
     public static void clearAll() {
         MATES.clear();
         pending = List.of();
         inMode = false;
         focusMate = null;
-        sidebar = null;
         clearPreview();
+        // 模型模式是「客户端会话」级的：断线/切维度时必须一起复位，
+        // 否则会留下一个只存在于客户端的相机覆盖与玩家冻结状态。
+        com.ovo.sablestopnow.client.model.ModelMode.reset();
+        com.ovo.sablestopnow.client.model.ModelProperties.clear();
     }
 
     // ============ 待选 ============
@@ -336,10 +376,8 @@ public final class MateClientState {
      * 被别的界面顶掉的问题。
      */
     private static void focusSidebar(@Nullable final UUID mateId) {
-        final com.ovo.sablestopnow.client.gui.MateTreeScreen panel = sidebar;
-        if (panel != null && mateId != null) {
-            panel.focusOn(mateId);
-        }
+        // 树状图现在由模型模式持有，这里只能让它自己刷新一次（新配合会在树上出现）
+        com.ovo.sablestopnow.client.model.ModelUi.refreshTreeNow();
     }
 
     public static int lastFeedbackTick() {

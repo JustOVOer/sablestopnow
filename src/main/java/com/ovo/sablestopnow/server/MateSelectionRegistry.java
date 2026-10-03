@@ -91,15 +91,16 @@ public final class MateSelectionRegistry {
     /**
      * 从两端参考的几何自动推断配合类型 —— 对应「选够两个自动开始配合」。
      *
-     * <p>规则刻意保守（推断错了玩家可以在界面里改）：
+     * <p>规则刻意保守（推断错了玩家可以在界面里改，而且现在选满两端还会先让玩家确认）：
      * <ul>
-     *   <li>两端都是「轴线类」（棱 / 结构主轴）→ <b>同心</b>：这是唯一一个两者都像轴时更合理的默认；</li>
+     *   <li>两端都是「轴线类」（棱 / 结构主轴）→ <b>平行</b>：两个方向对齐是最合理的默认
+     *       （原来是同心，但方块世界里没有回转面，同心已被移除）；</li>
      *   <li>其余情况 → <b>重合</b>：点—点重合、点落在面上、面—面共面，都是 SolidWorks 里选两个几何后的默认动作。</li>
      * </ul>
      */
     public static MateType inferType(final MateRef a, final MateRef b) {
         if (isAxisLike(a) && isAxisLike(b)) {
-            return MateType.CONCENTRIC;
+            return MateType.PARALLEL;
         }
         return MateType.COINCIDENT;
     }

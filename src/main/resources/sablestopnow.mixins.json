@@ -16,10 +16,13 @@
     "scale.Rapier3DAccessor",
     "scale.RapierPhysicsPipelineMixin",
     "scale.SableBufferUtilsMixin",
-    "scale.SableNBTUtilsMixin"
+    "scale.SableNBTUtilsMixin",
+    "rapier.Rapier3DNativeOverrideMixin"
   ],
   "client": [
     "input.MouseHandlerStaffEnhanceMixin",
+    "input.KeyboardHandlerStaffEnhanceMixin",
+    "ModelCameraMixin",
     "client.VanillaChunkedSubLevelRenderScaleMixin",
     "client.VanillaSingleSubLevelRenderScaleMixin",
     "client.FancySubLevelRenderScaleMixin",

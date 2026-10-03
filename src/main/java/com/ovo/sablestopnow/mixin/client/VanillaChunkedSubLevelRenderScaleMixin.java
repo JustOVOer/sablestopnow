@@ -9,7 +9,9 @@ import org.joml.Matrix4fc;
 import org.joml.Vector3dc;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * 让物理结构的缩放真正“看得见”（vanilla 区块渲染路径）。
@@ -29,6 +31,23 @@ import org.spongepowered.asm.mixin.injection.ModifyArg;
  */
 @Mixin(value = VanillaChunkedSubLevelRenderData.class, remap = false)
 public class VanillaChunkedSubLevelRenderScaleMixin {
+
+    /**
+     * 模型模式里被标记为「隐藏」的结构：整块不渲染。
+     *
+     * <p>Sable 的 {@code ClientSubLevel}/{@code SubLevelRenderData} 没有可见性开关（javap 确认过），
+     * 所以只能在渲染入口把它掐掉。
+     *
+     * <p>{@code require = 0}：万一以后 Sable 改了方法名，宁可「隐藏失效」也不要让游戏在启动时
+     * 因为 Mixin 应用失败而崩 —— 隐藏只是个显示功能，不值得拿启动当赌注。
+     */
+    @Inject(method = "renderChunkedSubLevel", at = @At("HEAD"), cancellable = true, require = 0, remap = false)
+    private void sablestopnow$skipHidden(final CallbackInfo ci) {
+        final SubLevelRenderData data = (SubLevelRenderData) (Object) this;
+        if (com.ovo.sablestopnow.client.model.ModelProperties.hidden(data.getSubLevel().getUniqueId())) {
+            ci.cancel();
+        }
+    }
 
     @ModifyArg(
             method = "renderChunkedSubLevel",

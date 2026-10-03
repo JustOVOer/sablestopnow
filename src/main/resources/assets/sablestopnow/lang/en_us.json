@@ -1,4 +1,4 @@
-{
+﻿{
   "itemGroup.sablestopnow": "Example Mod Tab",
   "block.sablestopnow.example_block": "Example Block",
   "item.sablestopnow.example_item": "Example Item",
@@ -408,6 +408,12 @@
   "model.debug.voxel_sent": "Voxel collider test requested",
   "model.debug.voxel": "Voxel collider test",
   "model.debug.voxel.hint": "Attach a block-sized voxel collider to the selected structure (experiment)",
+  "model.debug.mark_cylinder": "Mark test cylinder",
+  "model.debug.mark_cylinder.short": "Mark cyl",
+  "model.debug.mark_cylinder.hint": "Mark the selected solid as the test cylinder (click again to unmark). Logged and shown in the top bar.",
+  "model.debug.mark_structure": "Mark test structure",
+  "model.debug.mark_structure.short": "Mark struct",
+  "model.debug.mark_structure.hint": "Mark the selected object as the test physics structure (click again to unmark).",
   "model.debug.no_region": "Sketch region not closed",
   "model.debug.no_mesh": "Revolved mesh is empty",
   "model.tab.debug.short": "Debug",

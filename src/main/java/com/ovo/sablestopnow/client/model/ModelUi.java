@@ -274,6 +274,15 @@ public final class ModelUi {
                 row.add(shortButton("model.debug.voxel", "model.debug.voxel.short",
                         ModelUi::runVoxelColliderTest)
                         .tooltipKey("model.debug.voxel.hint"));
+                // Test-object markers. The traced CSV otherwise mixes every hull body in the
+                // scene, which makes it impossible to tell which row belongs to the cylinder
+                // under investigation. Marking pins the two objects the player cares about.
+                row.add(shortButton("model.debug.mark_cylinder", "model.debug.mark_cylinder.short",
+                        ModelUi::markTestCylinder)
+                        .tooltipKey("model.debug.mark_cylinder.hint"));
+                row.add(shortButton("model.debug.mark_structure", "model.debug.mark_structure.short",
+                        ModelUi::markTestStructure)
+                        .tooltipKey("model.debug.mark_structure.hint"));
             }
             default -> {
                 row.add(shortButton("model.view.front", "model.view.front.short",
@@ -814,6 +823,39 @@ public final class ModelUi {
     }
 
     /** 只把选中的模型摆到视野正中，**不动距离**（与「适配」的区别就在这儿）。 */
+    /**
+     * debug tab: mark / unmark the currently selected model as the TEST CYLINDER.
+     *
+     * Clicking the same object twice unmarks it (the button acts as a toggle), and the
+     * current mark is printed to the log and returned by TestMarks.hudLine() so the top bar
+     * can show it - the player can then confirm at a glance that the right object is marked.
+     */
+    public static void markTestCylinder() {
+        final java.util.UUID id = ModelMode.selectedModel();
+        if (id == null) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.warn("[test-mark] 没有选中任何实体 —— 先选中要测试的圆柱实体");
+            return;
+        }
+        final boolean on = com.ovo.sablestopnow.client.model.TestMarks.markCylinder(id, -1);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.warn("[test-mark] 测试圆柱 {} : {}", on ? "已标记" : "已取消", id);
+    }
+
+    /**
+     * debug tab: mark / unmark the currently selected model as the TEST PHYSICS STRUCTURE.
+     *
+     * Same toggle semantics as markTestCylinder. The structure is what gets placed on or
+     * under the cylinder, so both ends of the contact are pinned and the trace can be read
+     * without guessing which row is which.
+     */
+    public static void markTestStructure() {
+        final java.util.UUID id = ModelMode.selectedModel();
+        if (id == null) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.warn("[test-mark] 没有选中任何对象 —— 先选中要测试的物理结构");
+            return;
+        }
+        final boolean on = com.ovo.sablestopnow.client.model.TestMarks.markStructure(id, -1);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.warn("[test-mark] 测试物理结构 {} : {}", on ? "已标记" : "已取消", id);
+    }
     public static void centerSelectedModel() {
         final UUID id = ModelMode.selectedModel();
         if (id == null) {

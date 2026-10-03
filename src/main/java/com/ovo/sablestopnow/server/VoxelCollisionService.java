@@ -254,6 +254,31 @@ public final class VoxelCollisionService {
     private static final double CONVEX_BORDER_RADIUS = 1.0 / 32.0;
 
     /**
+     * **凸包内缩量（方块）** —— 把每个顶点沿"从局部中心向外的方向"往里收这么多 ✓。
+     *
+     * <h2>为什么要有它</h2>
+     *
+     * 实测（逐物理步轨迹 ✓ 可复现 ✓）：把 1 格结构放到圆柱上底面后，
+     *   圆柱刚体 y = 64.4974，结构刚体 y = 67.4782
+     *   按凸包 cap 在局部 +1.5 推算，结构中心应在 66.4974 ⇒ **偏高 0.98 ≈ 1 格** ✓
+     * 而且**每个面都偏同样的量** ⇒ 表现就是"一圈均匀空隙" ✓
+     *
+     * <p>排查过程：`[frame]` 实测证明**凸包与 mesh 尺寸完全一致**（x 11.377 / y 2.000 ✓），
+     * 所以空隙不来自我们的几何复制 ✗；追到 Sable 的 `dispatcher.rs`
+     * `static_world_vs_collider`（把体素方块变成长方体去和外来凸包算接触的那条路 ✓），
+     * 尝试补上 `collider.rs` 里那个 `max + 1.0` 的含端约定 ✗ ——
+     * **实测回归**（空隙没修好 ✓ 反而出现陷地弹跳 ✗）⇒ 已回退 ✓。
+     *
+     * <p>于是改走**补偿**路线 ✓：既然接触面系统性地落在外面 ✓，
+     * 就把我们的凸包【往里收】同样的量 ✓ —— 视觉与碰撞对齐 ✓ 而不去动 Sable 的物理 ✓。
+     *
+     * <h2>取值</h2>
+     * 0.5 = 每个面往里收半格（总尺寸减 1 格 ✓）—— 正对上面测到的 0.98 ✓
+     * 想关掉就设 0.0 ✓（不影响其它逻辑 ✓）
+     */
+    private static final double HULL_INSET = 0.5;
+
+    /**
      * 实体碰撞体的**密度**（质量 = 体积 × 密度）。
      *
      * <p>取 1.0 = **和盒子路同一个约定** ✓（SolidCollisionService 里就是 olume × 1.0 ✓）
@@ -555,11 +580,43 @@ public final class VoxelCollisionService {
             return 0; // 凸包至少要 4 个顶点
         }
         final double[] points = new double[unique.size() * 3];
-        int i = 0;
-        for (final double[] p : unique.values()) {
-            points[i++] = p[0];
-            points[i++] = p[1];
-            points[i++] = p[2];
+        // HULL_INSET: shrink the hull toward its own local centre. Compensation for the
+        // systematic contact offset measured above; 0.0 disables it entirely.
+        if (HULL_INSET > 0.0) {
+            double ccx = 0.0, ccy = 0.0, ccz = 0.0;
+            for (final double[] p : unique.values()) { ccx += p[0]; ccy += p[1]; ccz += p[2]; }
+            final int n = Math.max(1, unique.size());
+            ccx /= n; ccy /= n; ccz /= n;
+            int w = 0;
+            for (final double[] p : unique.values()) {
+                final double dx = p[0] - ccx, dy = p[1] - ccy, dz = p[2] - ccz;
+                // PER-AXIS inset, not a radial one.
+                //
+                // A radial inset (centre + d * (1 - INSET/|d|)) is dominated by the radius on
+                // a cylinder: for a rim vertex at radius 6 with height +-1, |d| = 6.08 so the
+                // radius shrinks by 0.5 while the height shrinks by only 0.08. That was
+                // measured in game: the sides visibly came in, the top and bottom faces did
+                // not move at all.
+                //
+                // Shrinking each axis independently by the same amount moves EVERY face by
+                // exactly HULL_INSET, which is what a uniform gap needs.
+                final double kx = Math.abs(dx) > 1.0e-9
+                        ? Math.max(0.0, 1.0 - HULL_INSET / Math.abs(dx)) : 1.0;
+                final double ky = Math.abs(dy) > 1.0e-9
+                        ? Math.max(0.0, 1.0 - HULL_INSET / Math.abs(dy)) : 1.0;
+                final double kz = Math.abs(dz) > 1.0e-9
+                        ? Math.max(0.0, 1.0 - HULL_INSET / Math.abs(dz)) : 1.0;
+                points[w++] = ccx + dx * kx;
+                points[w++] = ccy + dy * ky;
+                points[w++] = ccz + dz * kz;
+            }
+        } else {
+            int i = 0;
+            for (final double[] p : unique.values()) {
+                points[i++] = p[0];
+                points[i++] = p[1];
+                points[i++] = p[2];
+            }
         }
 
         // ⚠⚠ **顺序很重要**：先把跟踪器的质量写回去，**再**挂凸包 ✓

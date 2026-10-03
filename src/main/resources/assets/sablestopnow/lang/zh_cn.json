@@ -1,4 +1,4 @@
-{
+﻿{
   "itemGroup.sablestopnow": "Example Mod Tab",
   "block.sablestopnow.example_block": "Example Block",
   "item.sablestopnow.example_item": "Example Item",
@@ -411,6 +411,12 @@
   "model.debug.voxel_sent": "已发送体素碰撞体实验请求",
   "model.debug.voxel": "体素碰撞体实验",
   "model.debug.voxel.hint": "在选中的结构上挂一个方块大小的体素碰撞体（实验）",
+  "model.debug.mark_cylinder": "标记测试圆柱",
+  "model.debug.mark_cylinder.short": "标圆柱",
+  "model.debug.mark_cylinder.hint": "把当前选中的实体标记为本次测试的圆柱（再点一次取消）。标记后会写日志并在顶栏显示",
+  "model.debug.mark_structure": "标记测试结构",
+  "model.debug.mark_structure.short": "标结构",
+  "model.debug.mark_structure.hint": "把当前选中的对象标记为本次测试的物理结构（再点一次取消）",
   "model.debug.no_region": "草图没接成闭环，转换不出几何",
   "model.debug.no_mesh": "旋转出来的网格是空的",
   "model.tab.debug.short": "调试",

@@ -124,13 +124,16 @@ public final class HullTrace {
             final long tick = ++physStep;
             final StringBuilder sb = new StringBuilder(160);
             for (final Map.Entry<Integer, Long> e : TRACED.entrySet()) {
-                // NOTE: an earlier version swept ids 0..23 to auto-capture a second structure.
-                // A real run proved that WRONG: ids 3..23 each reported exactly 9551 samples,
-                // i.e. bodyState returns non-null even for ids that do not exist. The sweep
-                // therefore produced fake rows and has been removed. Only bodies we actually
-                // attached a hull to are traced; to watch another body, register it explicitly
-                // with trace(id, scene).
-                appendBody(sb, e.getValue(), e.getKey(), "S", tick);
+                // Sweep a range of body ids as well. Measured caveat: bodyState returns non-null
+                // even for ids that do not exist, and those fake rows show a CONSTANT position
+                // (ids 3..23 all reported exactly the same sample count). So the sweep is still
+                // the cheapest way to capture "the structure placed on the cylinder", but any
+                // analysis MUST ignore rows whose y never changes - that is the fingerprint of
+                // a non-existent id. Real structures move by at least a few 1e-4 during settling.
+                // kind: S = a body we attached a hull to, O = any other id in the scene.
+                for (int id = 0; id <= TRACE_ID_MAX; id++) {
+                    appendBody(sb, e.getValue(), id, id == e.getKey() ? "S" : "O", tick);
+                }
             }
             if (sb.length() > 0) {
                 writer.write(sb.toString());

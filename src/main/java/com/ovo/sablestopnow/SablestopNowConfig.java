@@ -54,6 +54,8 @@ public class SablestopNowConfig {
         try {
             animations = INSTANCE.uiAnimations.get();
             fontScale = INSTANCE.uiFontScale.get().floatValue();
+            com.ovo.sablestopnow.client.gui.lib.UiSettings.textShrinkMin = INSTANCE.uiTextShrinkMin.get().floatValue();
+
         } catch (final IllegalStateException ignored) {
             // 配置未加载：用库的默认值
         }
@@ -210,6 +212,37 @@ public class SablestopNowConfig {
         }
     }
 
+    /**
+     * 凸包每个面往里收的格数（配置 {@code collision.hull_inset} ✓ 默认 0.90 ✓ 0.0 = 关掉 ✓）。
+     *
+     * <p>读不到配置（游戏启动早期、配置尚未加载）时用默认值 ✓ —— 这样凸包在任何时候都是同一套几何 ✓，
+     * 不会因为"配置还没读完"而挂出一个尺寸不一样的碰撞体 ✗。
+     */
+    public static double hullInset() {
+        try {
+            return INSTANCE.hullInset.get();
+        } catch (IllegalStateException e) {
+            return 0.5;
+        }
+    }
+
+    /**
+     * 凸分解的**块数上限**（配置 {@code collision.hull_max_pieces} ✓ 默认 24 ✓）。
+     *
+     * <p>每个凸块在物理侧就是**一个碰撞体** ✗ ⇒ 块数直接进求解器 ✓。
+     * 分解器会在这个预算内**自动降低曲面采样**来压块数 ✓（见 {@code ConvexDecomposition} ✓）；
+     * 压不进预算就退回"单个凸包" ✓（= 本功能之前的行为 ✓）。
+     *
+     * <p>⚠ 设成 **1** 等价于**关掉凸分解** ✓ —— 排查"是不是分解引起的"时最省事 ✓。
+     */
+    public static int hullMaxPieces() {
+        try {
+            return INSTANCE.hullMaxPieces.get();
+        } catch (IllegalStateException e) {
+            return 24;
+        }
+    }
+
     public static boolean isSpeedLimitEnabled() {
         try {
             return INSTANCE.speedLimitEnabled.get();
@@ -260,8 +293,13 @@ public class SablestopNowConfig {
         public final ModConfigSpec.BooleanValue ghostReal;
         public final ModConfigSpec.BooleanValue speedLimitEnabled;
         public final ModConfigSpec.DoubleValue speedLimitThreshold;
+        public final ModConfigSpec.DoubleValue hullInset;
+        public final ModConfigSpec.IntValue hullMaxPieces;
         public final ModConfigSpec.BooleanValue uiAnimations;
         public final ModConfigSpec.DoubleValue uiFontScale;
+    /** 文字自动缩字号的下限（0.6~1.0，默认 0.80）—— 见 UiSettings#textShrinkMin。 */
+    public final ModConfigSpec.DoubleValue uiTextShrinkMin;
+
         Config(ModConfigSpec.Builder builder) {
             builder.comment("Sable Force Limiter Configuration")
                     .push("force_limiter");
@@ -333,6 +371,54 @@ public class SablestopNowConfig {
             speedLimitThreshold = builder
                     .comment("Speed limit in blocks/second for speed_limit_enabled.")
                     .defineInRange("speed_limit_threshold", 15.0, 0.1, 1000.0);
+            builder.pop();
+
+            // ============ 凸包碰撞（曲面实体）============
+            //
+            // 曲面实体走体素路时挂的是【凸包】碰撞体（原生库提供）。Sable 那侧的体素接触面
+            // 会系统性地落在真实表面之外约 1 格（逐物理步实测 0.98 ✓ 而且每个面都一样 ✓），
+            // 于是把凸包往里收同样的量来对齐"碰撞"与"画面"。
+            //
+            // 做成配置项：这个量对着的是实机上的视觉重合度，只能一边看一边调 ——
+            // 以前写死在 Java 里，试一个数就要重编一遍原生库（约 5 分钟 ✗），现在是改 toml ✓。
+            builder.comment("Convex-hull collision for curved (voxel-path) solids.",
+                            "曲面实体的凸包碰撞：每个面往里收多少格。")
+                    .push("collision");
+            hullInset = builder
+                    .comment("Inset applied to EVERY face of the convex hull, in BLOCKS.",
+                            "Why: Sable's terrain contacts land systematically OUTSIDE the real surface",
+                            "(measured 0.98 block, same on every face), so the hull is shrunk by the",
+                            "same amount to make the collision line up with what is drawn.",
+                            "The inset is applied per AXIS, so every face moves by this exact distance.",
+                            "A radial inset was tried first and only pulled the sides of a cylinder in,",
+                            "leaving its top and bottom caps untouched (measured in game).",
+                            "0.0 disables the compensation entirely.",
+                            "At least 5% of each half-extent always survives, so no value can collapse",
+                            "the hull into a degenerate shape.",
+                            "",
+                            "凸包每个面往里收的格数（单位=格）",
+                            "为什么：Sable 的地形接触面系统性地落在真实表面之外（实测 0.98 格、每个面都一样），",
+                            "把凸包往里收同样的量，碰撞就与画面重合了。",
+                            "按【轴】收而不是按半径收：半径收法只让圆柱侧面内缩、上下底面几乎不动（实机验证）。",
+                            "0.0 = 完全不收。每轴至少保留 5% 的半宽，避免任何取值把凸包收成退化形状。")
+                    .translation("config.sablestopnow.collision.hull_inset")
+                    .defineInRange("hull_inset", 0.5, 0.0, 4.0);
+            hullMaxPieces = builder
+                    .comment("Maximum number of convex pieces a NON-CONVEX solid may be split into.",
+                            "Why: collision shapes must be convex, so a shape with a hole (a washer, a",
+                            "window frame) or a concave shape (an L) is split into several convex",
+                            "pieces. Each piece is one collider on the body, so this number is a",
+                            "physics cost; the decomposer automatically coarsens the curve sampling to",
+                            "stay inside this budget and falls back to a single hull if it cannot.",
+                            "1 disables convex decomposition entirely (the old behaviour: holes get",
+                            "filled in).",
+                            "",
+                            "非凸实体最多拆成几个凸块（每个凸块 = 一个碰撞体，所以这个数是物理开销）。",
+                            "带孔（垫圈 / 窗框）或凹形（L 形）的形状会被拆成若干凸块；分解器会自动降低",
+                            "曲面采样以压进这个预算，压不进就退回单个凸包。",
+                            "设为 1 = 完全关闭凸分解（回到旧行为，孔会被填掉）。")
+                    .translation("config.sablestopnow.collision.hull_max_pieces")
+                    .defineInRange("hull_max_pieces", 24, 1, 64);
             builder.pop();
 
             // ============ Physics Staff Enhance ============
@@ -412,6 +498,12 @@ public class SablestopNowConfig {
                             "设置界面的文字缩放（0.5~1.0）：调小可以一屏塞下更多设置项。")
                     .translation("config.sablestopnow.ui.ui_font_scale")
                     .defineInRange("ui_font_scale", 1.0, 0.5, 1.0);
+        uiTextShrinkMin = builder
+            .comment("Lower bound for automatic text shrinking (0.6 ~ 1.0, default 0.80).",
+                "文字自动缩字号的下限（0.6~1.0，默认 0.80）。")
+            .translation("config.sablestopnow.ui.ui_text_shrink_min")
+            .defineInRange("ui_text_shrink_min", 0.80, 0.6, 1.0);
+
             builder.pop();
         }
     }

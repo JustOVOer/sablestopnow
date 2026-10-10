@@ -61,9 +61,25 @@ public final class NativeLibrary {
     public static synchronized Path load() {
         // 已经抽过的路径直接复用（抽文件只做一次）
         if (loaded == null) {
-            try (InputStream in = NativeLibrary.class.getResourceAsStream(RESOURCE)) {
+            // ★ 「手动放入才启用碰撞」（用户要求 ✓ / native/README.md 同步 ✓）
+            //   顺序：① <gamedir>/sablestopnow-natives/sable_rapier_x86_64_windows.dll（手动放 ✓）
+            //         ② 退回 jar 内资源（构建时用 syncNativeLibrary 打进 jar 的路径 ✓）
+            //   都没有 ⇒ 返回 null ⇒ Rapier3DNativeOverrideMixin 不覆盖 ⇒ 本模组碰撞特性关闭 ✓
+            //   （Sable 自身物理不受影响 ✓ 模型无碰撞 ✓）
+            try {
+                final Path manualDir = net.neoforged.fml.loading.FMLPaths.GAMEDIR.get().resolve(OUT_DIR);
+                final Path manual = manualDir.resolve("sable_rapier_x86_64_windows.dll");
+                if (Files.isRegularFile(manual)) {
+                    loaded = manual;
+                    SablestopNow.LOGGER.info("[sablestopnow] native: using manually placed DLL at {}", manual);
+                }
+            } catch (final Throwable ignoredManual) {
+                // 手动目录不可用 ⇒ 不致命 ✓ 继续走 jar 内资源 ✓
+            }
+            if (loaded == null) {
+                try (InputStream in = NativeLibrary.class.getResourceAsStream(RESOURCE)) {
                 if (in == null) {
-                    SablestopNow.LOGGER.error("[sablestopnow] 模组 jar 里找不到原生库资源 {}"
+                    SablestopNow.LOGGER.info("[sablestopnow] 模组 jar 里找不到原生库资源 {}"
                             + " —— 构建时没有把编出来的 DLL 放进去？", RESOURCE);
                     return null;
                 }
@@ -76,6 +92,7 @@ public final class NativeLibrary {
                 SablestopNow.LOGGER.error("[sablestopnow] 抽出原生库失败", t);
                 return null;
             }
+        }
         }
         try {
             // ⚠ 每次调用都执行：让**当前这个类的加载器**也登记这份库

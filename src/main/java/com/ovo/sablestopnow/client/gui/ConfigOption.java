@@ -41,6 +41,19 @@ public final class ConfigOption {
      * 让选项自己带一个回调，界面就不需要为个别配置项写 if。
      */
     private Runnable onChange;
+    /**
+     * 这个选项属于哪个分组（lang 键，例如 {@code gui.sablestopnow.section.hull}）✓。
+     *
+     * <p><b>为什么放在选项自己身上（P1 / docs/gui-统一.md）：</b>
+     * 以前"分组归属"写在 {@code ModSettingsCategoryScreen.SECTION_PLAN} 里 ✗ ——
+     * 那是**手写的第二份清单**，只用**字符串名**和选项对应 ✓ ⇒
+     * 漏写一个名字**不会编译报错** ✗，那个选项就被兜底塞进 {@code SECTION_OTHER} ✗
+     * ⇒ 左栏凭空多出一个常驻「其它」分组 ✓（真实发生过的 bug ✓）。
+     *
+     * <p>把归属写在选项旁边 ⇒ 两者**不可能不同步** ✓（同一个表达式里 ✓）；
+     * 将来若把 {@code name} 从字符串改成常量/枚举 ✓，就能做到**编译期**不可能漂移 ✓。
+     */
+    private String section;
 
     private ConfigOption(final Kind kind, final String name, final String labelKey, final String descKey,
                          final Supplier<Object> getter, final Consumer<Object> setter,
@@ -67,6 +80,20 @@ public final class ConfigOption {
 
     public Runnable onChange() {
         return this.onChange;
+    }
+
+    /**
+     * 声明这个选项属于哪个分组（lang 键）✓ —— 见 {@link #section} 字段上的说明 ✓。
+     * 返回自身便于链式书写，和 {@link #withChange} 一致 ✓。
+     */
+    public ConfigOption section(final String sectionKey) {
+        this.section = sectionKey;
+        return this;
+    }
+
+    /** 所属分组的 lang 键；{@code null} = 还没声明（门禁会报 ✗）。 */
+    public String section() {
+        return this.section;
     }
 
     public static ConfigOption bool(final String name, final ModConfigSpec.BooleanValue value) {

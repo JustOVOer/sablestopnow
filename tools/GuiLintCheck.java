@@ -1,5 +1,7 @@
 package com.ovo.sablestopnow.tools;
 
+import com.ovo.sablestopnow.client.gui.lib.OverlapCheck;
+import com.ovo.sablestopnow.client.gui.lib.TextFit;
 import com.ovo.sablestopnow.client.gui.lib.UiLint;
 
 /**
@@ -32,7 +34,34 @@ public final class GuiLintCheck {
                 }
                 exit = 1;
             }
-        } catch (final Throwable t) {
+            // P3c：文本可用性检查器**自身**的测试 ✓（字体无关 ⇒ 离线可跑 ✓）。
+            //   真正量字宽那次在客户端启动时跑（那里才有 Font ✓ 见 TextFit 的类注释 ✓）。
+            // P3c / 遮盖：控件重叠检测器**自身**的测试 ✓（纯几何 ⇒ 离线可跑 ✓）。
+            //   真正扫活控件树那次在客户端启动时跑（那里才有真实布局后的矩形 ✓ 见 OverlapCheck 的类注释 ✓）。
+            final OverlapCheck.Result overlap = OverlapCheck.selfTest();
+            if (overlap.pass()) {
+                System.out.println("GUI_LINT_OVERLAP=OK checks=" + overlap.checks());
+            } else {
+                System.out.println("GUI_LINT_OVERLAP=FAILED checks=" + overlap.checks()
+                        + " failures=" + overlap.issues().size());
+                for (final UiLint.Issue issue : overlap.issues()) {
+                    System.out.println("  " + issue.severity() + " " + issue.area() + " "
+                            + issue.widget() + ": " + issue.detail());
+                }
+                exit = 1;
+            }
+            final TextFit.Result textFit = TextFit.selfTest();
+            if (textFit.pass()) {
+                System.out.println("GUI_LINT_TEXTFIT=OK checks=" + textFit.checks());
+            } else {
+                System.out.println("GUI_LINT_TEXTFIT=FAILED checks=" + textFit.checks()
+                        + " failures=" + textFit.issues().size());
+                for (final UiLint.Issue issue : textFit.issues()) {
+                    System.out.println("  " + issue.severity() + " " + issue.area() + " "
+                            + issue.widget() + ": " + issue.detail());
+                }
+                exit = 1;
+            }        } catch (final Throwable t) {
             System.out.println("GUI_LINT=ERROR " + t);
             t.printStackTrace(System.out);
             exit = 1;

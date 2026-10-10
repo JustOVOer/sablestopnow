@@ -1,6 +1,8 @@
 package com.ovo.sablestopnow.client;
 
 import com.ovo.sablestopnow.SablestopNow;
+import com.ovo.sablestopnow.client.gui.ConfigTextFit;
+import com.ovo.sablestopnow.client.gui.lib.TextFit;
 import com.ovo.sablestopnow.client.gui.lib.UiLint;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -69,6 +71,29 @@ public final class StaffEnhanceClientEvents {
                 SablestopNow.LOGGER.info("[ui-lint] 自检通过（{} 项检查）", result.checks());
             } else {
                 SablestopNow.LOGGER.error("[ui-lint] 自检失败：{}", result.failures());
+            }
+
+            // ---- P3c：文本可用性（**必须**有真实字宽 ⇒ 只能在这里跑 ✓）------------------
+            // 离线 lint 是 font-free 的 ✗（tools/GuiLintCheck.java 的注释写明了原因 ✓），
+            // 所以"从 640x480 起文字不能放不下"这条**只能**在客户端量 ✓。
+            // 判据由 TextFit 给 ✓：放不下 且 未声明溢出策略（WRAP/ELLIPSIZE）⇒ 报错 ✗。
+            // ⚠ 这里按"窗口像素 = GUI 像素"的**最保守**假设跑矩阵 ✓（GUI 实际只会更宽 ✓）。
+            final var mc = net.minecraft.client.Minecraft.getInstance();
+            if (mc != null && mc.font != null) {
+                int reported = 0;
+                for (final int[] dim : new int[][]{
+                        {640, 480}, {854, 480}, {1280, 720}, {1920, 1080}, {2560, 1440}}) {
+                    final int gs = Math.max(1, Math.min(4, dim[0] / 320));
+                    for (final UiLint.Issue issue : TextFit.check(
+                            s -> mc.font.width(s), ConfigTextFit.entriesFor(dim[0], dim[1], gs))) {
+                        SablestopNow.LOGGER.error("[text-fit] {} / {} ：{}",
+                                issue.widget(), issue.area(), issue.detail());
+                        reported++;
+                    }
+                }
+                if (reported == 0) {
+                    SablestopNow.LOGGER.info("[text-fit] 文本可用性通过（5 档分辨率 x 4 档缩放 x 当前语言）");
+                }
             }
         } catch (final Throwable t) {
             SablestopNow.LOGGER.error("[ui-lint] 自检本身抛异常", t);

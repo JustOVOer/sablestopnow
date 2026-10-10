@@ -1,7 +1,9 @@
 package com.ovo.sablestopnow.server;
 
 import com.ovo.sablestopnow.SablestopNow;
+import com.ovo.sablestopnow.SablestopNowConfig;
 import com.ovo.sablestopnow.mixin.scale.Rapier3DAccessor;
+import com.ovo.sablestopnow.sketch.ConvexDecomposition;
 import com.ovo.sablestopnow.sketch.Sketch;
 import com.ovo.sablestopnow.sketch.Solid;
 import com.ovo.sablestopnow.sketch.SolidCollision;
@@ -251,10 +253,11 @@ public final class VoxelCollisionService {
      * "曲面 vs 平面"✓，从输入侧绕开这个公认的病态情形 ✓ —— 这比移植 Rapier 的
      * {@code contact_skin} / Block Solver 便宜得多 ✓（后者我们已确认在 fork 里全部缺失 ✗）。
      */
-    private static final double CONVEX_BORDER_RADIUS = 1.0 / 32.0;
+    private static final double CONVEX_BORDER_RADIUS = 1.0 / 8.0;
 
-    /**
+    /*
      * **凸包内缩量（方块）** —— 把每个顶点沿"从局部中心向外的方向"往里收这么多 ✓。
+     * 具体数值现在由配置项 `collision.hull_inset` 控制 ✓（默认 0.90 ✓ 见 SablestopNowConfig.hullInset ✓）。
      *
      * <h2>为什么要有它</h2>
      *
@@ -273,10 +276,12 @@ public final class VoxelCollisionService {
      * 就把我们的凸包【往里收】同样的量 ✓ —— 视觉与碰撞对齐 ✓ 而不去动 Sable 的物理 ✓。
      *
      * <h2>取值</h2>
-     * 0.5 = 每个面往里收半格（总尺寸减 1 格 ✓）—— 正对上面测到的 0.98 ✓
-     * 想关掉就设 0.0 ✓（不影响其它逻辑 ✓）
+     *
+     * **已经改成配置项** ✓：{@code collision.hull_inset}（默认 0.5 ✓ 单位=格 ✓ 0.0 = 关掉 ✓）。
+     * 做成配置项的理由：这个量正对的是 Sable 接触面那个系统性的外偏 ✓，
+     * 到底该取多少只能靠实机看"碰撞与画面是否重合"来调 ✓ ——
+     * 做成配置就不用为了试一个数把原生库重编一遍 ✓✓。
      */
-    private static final double HULL_INSET = 0.5;
 
     /**
      * 实体碰撞体的**密度**（质量 = 体积 × 密度）。
@@ -294,16 +299,18 @@ public final class VoxelCollisionService {
     private record Attached(int contraptionId, List<Integer> voxelIndices) {
     }
 
-    /** 某个实体是否走体素路（曲面）。平面实体仍走盒子路：那更省、而且没有阶梯误差。 */
+    /**
+     * 某个实体是否走【凸包 + 凸分解】那条路 ✓。
+     *
+     * <p><b>2026-10-03 用户要求：所有通过草图创建的复杂实体都走这条路 ✓</b>
+     * —— 以前只有"回转体 ✓ 或带曲率的拉伸 ✓"才走 ✗，直边的非凸形状被留在盒子扫描线路上 ✗。
+     *
+     * <p>为什么可以整体放开 ✓：直边的【凸】形状分解后恰好得到 1 块凸棱柱 ✓ 几何精确 ✓
+     * （盒子路唯一的优势是"没有阶梯误差"✗ —— 而凸包对凸形状本来就没有误差 ✓）；
+     * 直边的【非凸】形状正是分解存在的意义 ✓（孔 / 凹口 / 分离区域都保持空 ✓）。
+     */
     public static boolean usesVoxelPath(final Solid solid, final Sketch sketch) {
-        if (solid == null || sketch == null) {
-            return false;
-        }
-        if (solid.isRevolution()) {
-            return true; // 回转体一定是曲面
-        }
-        return solid.extrusion() != null
-                && com.ovo.sablestopnow.sketch.Extrude.hasCurvature(sketch);
+        return solid != null && sketch != null;
     }
 
     /**
@@ -563,26 +570,95 @@ public final class VoxelCollisionService {
                     fmt(rawXLo), fmt(rawXHi), fmt(rawYLo), fmt(rawYHi),
                     fmt(cx), fmt(cy), fmt(cz),
                     fmt(rawYLo - cy), fmt(rawYHi - cy), fmt((rawYLo + rawYHi) * 0.5 - cy));
-        }        // 顶点去重：网格的顶点重复率很高 ✗，而且 convex_hull 的构造成本随点数上升 ✓
+        }
+
+        // ★★★ 根因修正（2026-10-03）✓✓ —— 凸包的局部点必须相对【合成后】质心，而不是 tracker 的质心 ✗
+        //
+        // 依据（两条都已读过源码 ✓）：
+        //  1. Rapier 的约定：collider 坐标 = local − center_of_mass ⇒ **刚体原点就是质心** ✓
+        //     （见 SolidMassComposition L170-172 / convex.rs 的注释 ✓）
+        //  2. Sable 在质心变化后会**重锚 rotation point 并把刚体传送过去** ✓（见本文件 L204-206 注释 ✓）
+        // 而我们的质量是"tracker（按方块 ✓，放在局部 0,0,0 ✓）+ 本实体（放在它自己的包围盒中心 ✓）"
+        // 加权合成的 ✓ ⇒ 合成质心会被本实体拉走 ✓。
+        //
+        // 实测（三次 [frame] ✓）：tracker 质心与网格中心相差 −0.500 / −1.533 / **+2.500** ✗
+        // ⇒ 以前用 tracker 质心算局部点 ⇒ 凸包相对刚体原点【正好偏了那个量】✗✓
+        // ⇒ 这就是"陷入 / 横着被推成斜的 / ~1 格缝"的共同来源 ✓（且它随形状变化 ✓ 与观察吻合 ✓）
+        //
+        // 验收判据（可量化 ✓）：改完 [frame] 那行的 `centre` 应当 → ≈ 0 ✓；若仍非 0 ✗ ⇒ 我这个推断错了，
+        // 立刻回到"三数并列日志"继续查 ✓ 不硬推 ✓。
+        double comX = cx;
+        double comY = cy;
+        double comZ = cz;
+        try {
+            double bLoX = Double.MAX_VALUE, bLoY = Double.MAX_VALUE, bLoZ = Double.MAX_VALUE;
+            double bHiX = -Double.MAX_VALUE, bHiY = -Double.MAX_VALUE, bHiZ = -Double.MAX_VALUE;
+            for (final SolidMesh.Vertex v : mesh.vertices()) {
+                final org.joml.Vector3d q = v.position();
+                bLoX = Math.min(bLoX, q.x);
+                bHiX = Math.max(bHiX, q.x);
+                bLoY = Math.min(bLoY, q.y);
+                bHiY = Math.max(bHiY, q.y);
+                bLoZ = Math.min(bLoZ, q.z);
+                bHiZ = Math.max(bHiZ, q.z);
+            }
+            final double oX = (bLoX + bHiX) * 0.5 - cx; // 本实体中心（刚体局部 ✓）
+            final double oY = (bLoY + bHiY) * 0.5 - cy;
+            final double oZ = (bLoZ + bHiZ) * 0.5 - cz;
+            final double vol = Math.max(1.0e-6, solid.volume(sketch));
+            final org.joml.Matrix3dc ti = tracker == null ? null : tracker.getInertiaTensor();
+            final java.util.List<SolidMassComposition.Part> all =
+                    new java.util.ArrayList<>(partsForBody(mountId));
+            all.add(new SolidMassComposition.Part(
+                    tracker == null ? 0.0 : tracker.getMass(), 0.0, 0.0, 0.0,
+                    ti == null ? 0.0 : ti.m00(), ti == null ? 0.0 : ti.m11(),
+                    ti == null ? 0.0 : ti.m22(), ti == null ? 0.0 : ti.m01(),
+                    ti == null ? 0.0 : ti.m02(), ti == null ? 0.0 : ti.m12()));
+            all.add(SolidMassComposition.box(
+                    vol * SOLID_DENSITY, oX, oY, oZ,
+                    Math.max(1.0e-3, bHiX - bLoX), Math.max(1.0e-3, bHiY - bLoY),
+                    Math.max(1.0e-3, bHiZ - bLoZ)));
+            final SolidMassComposition.Result comp =
+                    SolidMassComposition.combine(all);
+            if (comp != null) {
+                comX = cx + comp.cx();
+                comY = cy + comp.cy();
+                comZ = cz + comp.cz();
+                SablestopNow.LOGGER.warn("[sablestopnow][frame2] tracker质量={} 合成质心偏移=({},{},{})"
+                                + "  本实体中心=({},{},{})  ⇒ 凸包改用【合成质心】✓（以前用 tracker ✗）",
+                        fmt(tracker == null ? 0.0 : tracker.getMass()),
+                        fmt(comp.cx()), fmt(comp.cy()), fmt(comp.cz()),
+                        fmt(oX), fmt(oY), fmt(oZ));
+            }
+        } catch (final Throwable t) {
+            SablestopNow.LOGGER.warn("[sablestopnow][frame2] 合成质心计算失败 ⇒ 回退用 tracker 质心 ✗", t);
+        }
+
+        // 顶点去重：网格的顶点重复率很高 ✗，而且 convex_hull 的构造成本随点数上升 ✓
         // 用"量化到 1e-4"当去重键（同一位置的重复顶点合成一个 ✓）
-        final java.util.LinkedHashMap<Long, double[]> unique = new java.util.LinkedHashMap<>();
+        // ⚠ 去重键必须**精确**：以前是"三个乘积做 XOR"✗ —— 那种键**会碰撞** ✗，
+        //   一旦碰上就把两个不同的顶点当成同一个 ✗（凸包凭空少一个顶点 ✗）。
+        //   同一类错误在 ConvexDecomposition 里真的发生过 ✓（圆被拆成 11 块重叠多边形 ✗✓）。
+        //   这里改成"量化后的坐标本身"当键 ✓ 不可能碰撞 ✓ —— 只在重建时建一次 ✓。
+        final java.util.LinkedHashMap<String, double[]> unique = new java.util.LinkedHashMap<>();
         for (final SolidMesh.Vertex v : mesh.vertices()) {
             final org.joml.Vector3d p = v.position();
-            final double lx = p.x - cx;
-            final double ly = p.y - cy;
-            final double lz = p.z - cz;
-            final long key = (Math.round(lx * 1.0e4) * 73856093L)
-                    ^ (Math.round(ly * 1.0e4) * 19349663L)
-                    ^ (Math.round(lz * 1.0e4) * 83492791L);
+            final double lx = p.x - comX;
+            final double ly = p.y - comY;
+            final double lz = p.z - comZ;
+            final String key = Math.round(lx * 1.0e4) + "," + Math.round(ly * 1.0e4)
+                    + "," + Math.round(lz * 1.0e4);
             unique.putIfAbsent(key, new double[]{lx, ly, lz});
         }
         if (unique.size() < 4) {
             return 0; // 凸包至少要 4 个顶点
         }
         final double[] points = new double[unique.size() * 3];
-        // HULL_INSET: shrink the hull toward its own local centre. Compensation for the
-        // systematic contact offset measured above; 0.0 disables it entirely.
-        if (HULL_INSET > 0.0) {
+        // hullInset (config `collision.hull_inset`): shrink the hull toward its own local
+        // centre. Compensation for the systematic contact offset measured above;
+        // 0.0 disables it entirely.
+        final double hullInset = SablestopNowConfig.hullInset();
+        if (hullInset > 0.0) {
             double ccx = 0.0, ccy = 0.0, ccz = 0.0;
             for (final double[] p : unique.values()) { ccx += p[0]; ccy += p[1]; ccz += p[2]; }
             final int n = Math.max(1, unique.size());
@@ -599,13 +675,19 @@ public final class VoxelCollisionService {
                 // not move at all.
                 //
                 // Shrinking each axis independently by the same amount moves EVERY face by
-                // exactly HULL_INSET, which is what a uniform gap needs.
+                // exactly hullInset, which is what a uniform gap needs.
+                //
+                // FLOOR = 5%: an axis whose half-extent equals the inset would otherwise
+                // collapse onto its own mid-plane (k = 0), i.e. a degenerate hull - which is
+                // exactly how the earlier "no collision at all" regression happened. The floor
+                // keeps a real face alive for ANY configured value, and it never bites at sane
+                // settings (0.90 against a 1.0 half-extent still gives k = 0.10).
                 final double kx = Math.abs(dx) > 1.0e-9
-                        ? Math.max(0.0, 1.0 - HULL_INSET / Math.abs(dx)) : 1.0;
+                        ? Math.max(0.05, 1.0 - hullInset / Math.abs(dx)) : 1.0;
                 final double ky = Math.abs(dy) > 1.0e-9
-                        ? Math.max(0.0, 1.0 - HULL_INSET / Math.abs(dy)) : 1.0;
+                        ? Math.max(0.05, 1.0 - hullInset / Math.abs(dy)) : 1.0;
                 final double kz = Math.abs(dz) > 1.0e-9
-                        ? Math.max(0.0, 1.0 - HULL_INSET / Math.abs(dz)) : 1.0;
+                        ? Math.max(0.05, 1.0 - hullInset / Math.abs(dz)) : 1.0;
                 points[w++] = ccx + dx * kx;
                 points[w++] = ccy + dy * ky;
                 points[w++] = ccz + dz * kz;
@@ -617,6 +699,47 @@ public final class VoxelCollisionService {
                 points[i++] = p[1];
                 points[i++] = p[2];
             }
+        }
+
+        // ===== 凸分解：非凸 / 带孔的形状挂【多块】凸包 ✓✓ =====
+        //
+        // 为什么必须分：碰撞体只认**凸**体 ✗。给带孔的形状挂一个凸包 ⇒ 孔被填掉 ✗
+        //（垫圈 / 窗框穿不过去 ✓ 明明看着是空的却撞墙 ✓）；L 形的凹口也被填平 ✗。
+        //
+        // 做法与实测数字：见 ConvexDecomposition 的类注释 ✓ 与 tools/ConvexDecompCheck.java ✓。
+        // 一句话：在**参数空间**里分解（拉伸=轮廓拆凸多边形再拉伸 ✓；
+        // 回转=子午线凸块 × 角度扇区 ✓）⇒ 对这两种发生器是**精确**的 ✓，而且是纯逻辑可离线断言 ✓。
+        //
+        // ⚠ 分不出来（块数超预算且降采样到底 ✓）就**退回上面那块单凸包** ✓ ——
+        //   宁可退化成旧行为 ✓，也不要为了一个畸形轮廓挂出几十个碰撞体 ✗（块数 = 碰撞体数 ✓）。
+        final List<double[]> hullSets;
+        final int maxPieces = SablestopNowConfig.hullMaxPieces();
+        final ConvexDecomposition.Result decomposition = ConvexDecomposition.decompose(
+                solid, sketch, maxPieces);
+        if (decomposition.pieces().isEmpty()) {
+            hullSets = List.of(points);
+            // ⚠ 回退**必须留日志** ✓ —— 否则"孔还被填着 ✗"在日志里没有任何线索 ✗，
+            //   只能靠猜"是不是分解没生效" ✗（这个项目已经为"静默失败"付过代价 ✓）。
+            SablestopNow.LOGGER.warn("[sablestopnow] 凸分解不可用 ⇒ 退回单个凸包"
+                            + "（非凸形状的孔 / 凹口会被填掉 ✗）solid={} 超预算={} 上限={}"
+                            + " —— 想让它分出来就把 collision.hull_max_pieces 调大 ✓",
+                    solid.id(), decomposition.overBudget(), maxPieces);
+        } else {
+            // 内凹映射用**所有块共用的中心** ✓ ⇒ 相邻两块重合的那个面**仍然重合** ✓
+            // （各块按自己的中心收，会在块与块之间裂出一圈缝 ✗）
+            final double[] centre = commonCentre(decomposition.pieces());
+            final List<double[]> perPiece = new ArrayList<>(decomposition.pieces().size());
+            for (final double[] set : decomposition.pieces()) {
+                final double[] pts = toBodyLocal(set, cx, cy, cz, centre, hullInset);
+                if (pts.length >= 12) { // 至少 4 个点才配得上"凸包" ✓
+                    perPiece.add(pts);
+                }
+            }
+            hullSets = perPiece.isEmpty() ? List.of(points) : perPiece;
+            SablestopNow.LOGGER.info("[sablestopnow] 凸分解: solid={} 块数={} 采样={}段"
+                            + " 降采样={} 内凹={}格",
+                    solid.id(), hullSets.size(), decomposition.segments(),
+                    decomposition.coarsened(), fmt(hullInset));
         }
 
         // ⚠⚠ **顺序很重要**：先把跟踪器的质量写回去，**再**挂凸包 ✓
@@ -699,23 +822,49 @@ public final class VoxelCollisionService {
 // ============================================================================
         }
         final long handle;
+        final long[] handles;
         strategyBlock: {
         if (Boolean.parseBoolean(System.getProperty("sablestopnow.useA", "false"))) {
             SablestopNow.LOGGER.warn("[sablestopnow] strategy A requested via -Dsablestopnow.useA=true");
         } else {
-            final long h = SablePhysicsExt.attachConvex(scene, mountId, points, FRICTION,
-                    CONVEX_BORDER_RADIUS, SOLID_DENSITY);
+            // 每块挂一个碰撞体 ✓ —— 它们都在**同一个刚体**上 ✓，
+            // 所以彼此之间不会有接触（Sable 自己的约定：同刚体上的碰撞体互不碰撞 ✓ 见下面 A 的注释 ✓）。
+            final long[] hs = new long[hullSets.size()];
+            int attached = 0;
+            for (final double[] pts : hullSets) {
+                final long h = SablePhysicsExt.attachConvex(scene, mountId, pts, FRICTION,
+                        CONVEX_BORDER_RADIUS, SOLID_DENSITY);
+                if (h >= 0) {
+                    hs[attached++] = h;
+                }
+            }
             // Start the per-PHYSICS-STEP trace (20Hz) of this body into its own CSV.
             // Rationale: one line per second is far too coarse - a sink-then-eject event can
             // span 2-3 physics steps, so per-second sampling misses it entirely. The trace
             // writes to <gamedir>/sablestopnow-hull-trace.csv and costs nothing when unused.
-            if (h >= 0) {
+            // ⚠ 排查期临时打开 ✓（2026-10-03 ✓）：要量"落在平地上的静止高度"就必须有每步 y ✓。
+            //   它**只**影响排查期间的性能 ✗（实测一个长会话能写到 93 MB ✗ ⇒ 平时必须关 ✓），
+            //   而本次只需要几十秒 ✓ 且有行数上限 ✓ ⇒ 安全 ✓。
+            //   ⚠ 量完立刻改回 { "false" } ✓（否则就是那个"一直巨量卡顿"✗）。
+            if (attached > 0
+                    && Boolean.parseBoolean(System.getProperty("sablestopnow.hullTrace", "false"))) {
                 HullTrace.trace(mountId, scene);
             }
-            if (h < 0) {
+            if (attached == 0) {
                 return 0;
             }
-            handle = h;
+            handles = java.util.Arrays.copyOf(hs, attached);
+            // ★ 挂完**立刻读一次刚体状态** ✓ —— 这是唯一能证明"没有泄漏 / 块数没有累积"的读数 ✓✓
+            //
+            //   实机验证过（2026-10-03 ✓）：同一个实体重建两次时，句柄的**槽位下标完全相同** ✓
+            //   而**世代 +1** ✓ ⇒ 旧的 24 个碰撞体确实被**释放并复用**了 ✓ **没有泄漏** ✓。
+            //   （如果泄漏，第二次会拿到**全新的下标** ✗ 而这里的碰撞体数也会一路涨 ✗）
+            final double[] state = SablePhysicsExt.bodyState(scene, mountId);
+            if (state != null && state.length >= 11) {
+                SablestopNow.LOGGER.info("[sablestopnow] 刚体状态: solid={} 质量={}"
+                                + " 该刚体上的碰撞体数={}（本次挂 {} 块 ✓）",
+                        solid.id(), fmt(state[0]), (int) state[10], attached);
+            }
             // skip the A implementation but STILL run the mass/bookkeeping tail below
             break strategyBlock;
         }        final double[] bodyPose = new double[7];
@@ -729,6 +878,8 @@ public final class VoxelCollisionService {
                     solid.id(), mountId, unique.size(), handle);
             return 0;
         }
+        // 策略 A 只有一个**自有刚体** ✓ 所以只有一块（分解出来的多块在这个实验路径里不适用 ✓）
+        handles = new long[] {handle};
         // ⚠⚠ **必须声明 bounds** —— 少了这步 `Rapier3D.step` 会 panic ✗
         //
         //   崩溃报告原文（实机 ✓）：
@@ -848,7 +999,12 @@ public final class VoxelCollisionService {
             final double mass = vol * SOLID_DENSITY;
             PARTS_BY_BODY.computeIfAbsent(mountId, k -> new HashMap<>())
                     .put(solid.id(), SolidMassComposition.box(
-                            mass, (lox + hix) * 0.5, (loy + hiy) * 0.5, (loz + hiz) * 0.5,
+                            // ⚠ 偏移必须回到【tracker 相对】系 ✓（combine 把 tracker 放在 (0,0,0) ✓）
+                            //   而 points 现在是【合成质心相对】的 ✓ ⇒ 加回差值 ✓✓（不改则角响应被冻住 ⇒ 转都不转 ✗）
+                            mass,
+                            (lox + hix) * 0.5 + (comX - cx),
+                            (loy + hiy) * 0.5 + (comY - cy),
+                            (loz + hiz) * 0.5 + (comZ - cz),
                             Math.max(1.0e-3, hix - lox), Math.max(1.0e-3, hiy - loy),
                             Math.max(1.0e-3, hiz - loz)));
         }        // ★★ Compose mass/inertia NOW and upload it ourselves.
@@ -886,16 +1042,112 @@ public final class VoxelCollisionService {
                 all.addAll(parts);
                 final SolidMassComposition.Result res = SolidMassComposition.combine(all);
                 if (res != null) {
-                    ScaledMass.upload(scene, mountId, new SolidMassComposition.Composed(res),
-                            sub.logicalPose().scale());
-                    SablestopNow.LOGGER.warn("[sablestopnow] mass composed: tracker={} + solids={} -> total={}",
+                    // ⚠⚠ **不能直写质量** ✗✓（2026-10-03 定位 ✓）
+                    //
+                    //   以前这里是 `ScaledMass.upload(...)`：它只写 质量/惯量/质心 ✓，
+                    //   但**不会重锚定旋转基准点** ✗ —— 而 Sable 自己的 `onStatsChanged` 前后会
+                    //   "re-anchor the rotation point and teleport the body" ✓（mixin 注释原文 ✓）。
+                    //   ⇒ 结果：质量和质心是新算的 ✓，可**转轴还停在老地方**（≈ 所粘的那个方块 ✓）
+                    //   ⇒ 手感就是用户报的「**质心好像大都集中在所粘的方块附近**」✗✓。
+                    //
+                    //   ⇒ 改成**触发 Sable 自己的上传** ✓：那条路我们 mixin（`RapierPhysicsPipelineMixin`
+                    //   ✓）拦着 ✓，它会用 `partsForBody(bodyId)` 把 `tracker + 我们的实体` **一起**合成 ✓
+                    //   并按缩放变换后上传 ✓，重锚定与传送也一并完成 ✓✓。
+                    //   （这个调用方式与模组自己的缩放命令 `StaffScaleData.syncPhysics` 完全一致 ✓）
+                    final dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem system =
+                            dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem.get(level);
+                    if (system != null) {
+                        system.getPipeline().onStatsChanged(sub);
+                    }
+                    SablestopNow.LOGGER.warn("[sablestopnow] mass composed: tracker={} + solids={} -> total={}"
+                                    + "（已交给 Sable 正规流程上传 ✓ 含重锚定 ✓）",
                             fmt(tr.getMass()), parts.size(), fmt(res.mass()));
                 }
             }
-        }        CONVEX_BY_SOLID.put(solid.id(), new long[]{handle});
-        SablestopNow.LOGGER.info("[sablestopnow] 凸包碰撞: solid={} 挂载刚体={} 顶点={} 句柄={}",
-                solid.id(), mountId, unique.size(), Long.toHexString(handle));
+        }        CONVEX_BY_SOLID.put(solid.id(), handles);
+        // ★ **合成之后**再读一次刚体质量 ✓ —— 上面那次读的是"Sable 自己的值"（还没算进我们的实体 ✗），
+        //   所以它**不能**用来判断"质量够不够" ✗（实测过：那里读到 4.241，而合成后应是 ~105 ✓）。
+        //   这一条才是排查「质量不足 / 陷入地下」时该看的那一行 ✓✓。
+        {
+            final double[] after = SablePhysicsExt.bodyState(scene, mountId);
+            if (after != null && after.length >= 11) {
+                SablestopNow.LOGGER.info("[sablestopnow] 合成后刚体状态: solid={} 质量={}"
+                                + " 该刚体碰撞体数={}（实体自身体积={}）",
+                        solid.id(), fmt(after[0]), (int) after[10], fmt(solid.volume(sketch)));
+            }
+        }
+        SablestopNow.LOGGER.info("[sablestopnow] 凸包碰撞: solid={} 挂载刚体={} 顶点={} 内凹={}格"
+                        + " 凸块={} 句柄={}",
+                solid.id(), mountId, unique.size(), fmt(hullInset), handles.length,
+                java.util.Arrays.toString(handles));
         return unique.size();
+    }
+
+    /**
+     * 一组块的**公共内凹中心**（plot 局部坐标 ✓）。
+     *
+     * <p>为什么必须是公共的：内凹映射是"每个坐标轴朝中心收 inset 格" ✓。
+     * 若每块按**自己的**中心收，两块相邻的那个面会各自往自己那侧退 ⇒ 中间裂出一圈缝 ✗
+     *（缝宽 2·inset ✗ 而且是**能穿过**的空隙 ✗）。
+     * 用公共中心 ⇒ 那个面**仍然重合** ✓✓（映射是单调的 ✓ 重合的坐标映射后仍然重合 ✓）。
+     *
+     * <p>单块时它等于"这块自己的中心" ✓ ⇒ 与加凸分解之前的行为**完全一致** ✓（无回归 ✓）。
+     */
+    private static double[] commonCentre(final List<double[]> sets) {
+        double sx = 0.0;
+        double sy = 0.0;
+        double sz = 0.0;
+        long n = 0;
+        for (final double[] set : sets) {
+            for (int i = 0; i + 2 < set.length; i += 3) {
+                sx += set[i];
+                sy += set[i + 1];
+                sz += set[i + 2];
+                n++;
+            }
+        }
+        if (n == 0) {
+            return new double[] {0.0, 0.0, 0.0};
+        }
+        return new double[] {sx / n, sy / n, sz / n};
+    }
+
+    /**
+     * 把一块（plot 局部 xyz ✓）转成**刚体局部 + 按配置内凹**的点集（扁平 xyz ✓）。
+     *
+     * @param cx     质心 x（plot 绝对 ✓）—— 减掉它才是刚体局部 ✓
+     * @param centre 所有块**共用**的内凹中心（刚体局部 ✓）
+     * @param inset  每面往里收多少格（配置 {@code collision.hull_inset} ✓）
+     */
+    private static double[] toBodyLocal(final double[] set, final double cx, final double cy,
+                                        final double cz, final double[] centre,
+                                        final double inset) {
+        // ⚠ 去重键用"量化后的坐标本身" ✓ 不用乘积 XOR ✗（那种键会碰撞 ⇒ 顶点凭空消失 ✗）
+        final java.util.LinkedHashMap<String, double[]> unique = new java.util.LinkedHashMap<>();
+        // 内凹映射本身在**纯逻辑**那边 ✓（ConvexDecomposition.insetPerAxis ✓）——
+        // 这样"插值/上下限"这件事只有一份实现 ✓，而且能被离线断言直接测到 ✓✓。
+        final double[] local = new double[set.length];
+        for (int i = 0; i + 2 < set.length; i += 3) {
+            local[i] = set[i] - cx;
+            local[i + 1] = set[i + 1] - cy;
+            local[i + 2] = set[i + 2] - cz;
+        }
+        final double[] insetPoints = ConvexDecomposition.insetPerAxis(local, centre, inset);
+        for (int i = 0; i + 2 < insetPoints.length; i += 3) {
+            final double ox = insetPoints[i];
+            final double oy = insetPoints[i + 1];
+            final double oz = insetPoints[i + 2];
+            unique.putIfAbsent(Math.round(ox * 1.0e4) + "," + Math.round(oy * 1.0e4)
+                    + "," + Math.round(oz * 1.0e4), new double[] {ox, oy, oz});
+        }
+        final double[] out = new double[unique.size() * 3];
+        int w = 0;
+        for (final double[] p : unique.values()) {
+            out[w++] = p[0];
+            out[w++] = p[1];
+            out[w++] = p[2];
+        }
+        return out;
     }
 
     /** 拆掉某个实体的装置（含体素碰撞体本身）。 */

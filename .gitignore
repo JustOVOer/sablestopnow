@@ -63,3 +63,33 @@ AGENTS.md
 # 若真的采用了其中某段代码，必须先把对应许可与声明写进 THIRD-PARTY-NOTICES.md。
 /UnityNonConvexMeshColliders-main.zip
 /UnityNonConvexMeshColliders-main/
+
+### ==== 本项目的上传范围（2026-10-06 定）====
+### 原则：**只上传"别人 clone 后能构建"所需的东西** ✓
+### 设计/参考/产物/日志一律不上传 ✓（branding 等设计文件用户明确要求排除 ✓）
+/branding/
+/newGUI/
+/newConfigGUI/
+/newControl/
+/cp/
+/assets/
+/data/
+/dev/
+/logs/
+/META-INF/
+/.dshwolf/
+/*.zip
+/sablestopnow-for-multimod-test.jar
+### depends/ 与 lib/ 已在上面忽略 ✓（参考代码 + 本地依赖 jar ✓）
+### native：源码将放到 native/（见 待办）✓；编译产物 DLL 不入库 ✓
+/native/target/
+/native/**/target/
+
+### ezpz-wasm：第三方 WASM 工具包（参考用 ✓ 与 Java 构建无关 ✗ 不上传 ✓）
+/tools/ezpz-wasm/
+### native 编译产物：不入库 ✓ ⇒ 使用者"手动放入"才启用碰撞 ✓（见 native/README）
+/src/main/resources/sablestopnow/native/*.dll
+
+### native/：只保留我们自己的说明 ✓ 第三方源码与二进制一律不入库 ✗（版权 ✓）
+/native/**
+!/native/README.md

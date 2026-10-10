@@ -33,6 +33,8 @@ public class SablestopNow {
                 SablestopNowConfig.SPEC,
                 MOD_ID + "-common.toml"
         );
+        // ★ 启动标志：把自建原生库的构建号打进日志 ✓（必须在构造期调用，否则标志永远不出现 ✗）
+        com.ovo.sablestopnow.physics.SablePhysicsExt.initNative();
         LOGGER.info("Sable Force Limiter initialized.");
         StaffEnhanceNetworking.init();
         // SolidWorks 式「配合」系统：独立通道 + 独立物理子步钩子

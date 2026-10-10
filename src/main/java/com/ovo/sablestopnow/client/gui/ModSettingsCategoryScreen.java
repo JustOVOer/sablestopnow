@@ -79,7 +79,8 @@ public class ModSettingsCategoryScreen extends UiScreen {
                             "lock_new_sub_levels", "disable_placement_collision_check",
                             "require_confirmation_before_split")),
                     new Section("gui.sablestopnow.section.speed", List.of(
-                            "speed_limit_enabled", "speed_limit_threshold"))),
+                            "speed_limit_enabled", "speed_limit_threshold")),
+                    new Section("gui.sablestopnow.section.hull", List.of("hull_inset", "hull_max_pieces"))),
             ModConfigCategory.STAFF, List.of(
                     new Section("gui.sablestopnow.section.staff_core", List.of(
                             "enable_staff_enhance", "new_control_scheme", "show_body_info")),
@@ -114,10 +115,24 @@ public class ModSettingsCategoryScreen extends UiScreen {
     private final List<FormRow> rows = new ArrayList<>();
     private final List<SectionPane> sections = new ArrayList<>();
 
-    private boolean closing;
+    /**
+     * 界面状态机 ✓（P4 / docs/gui-统一.md 原则 #4：不要用一堆 boolean 判断"当前在干什么"✗）。
+     *
+     * <p>与 {@code ModSettingsScreen} 用**同一套**状态语义 ✓ ⇒ 两个屏幕读起来一致 ✓
+     * （以前各有各的 boolean ✗）。
+     */
+    private enum State {
+        /** 正常显示/交互中 ✓。 */
+        IDLE,
+        /** 正在播反向动画 ✓ 播完才允许切屏 ✓。 */
+        LEAVING,
+        /** 动画播完 ✓ 下一帧切屏 ✓（不能在渲染中途换屏 ✗）。 */
+        SWITCH_PENDING
+    }
+
+    private State state = State.IDLE;
     @Nullable
     private Screen next;
-    private boolean switchPending;
     /** 有配置项被改动、但还没写盘。 */
     private boolean pendingSave;
     private long lastNanos;
@@ -139,9 +154,8 @@ public class ModSettingsCategoryScreen extends UiScreen {
     protected void build() {
         root.closePopup();
         root.clear();
-        closing = false;
+        state = State.IDLE;
         next = null;
-        switchPending = false;
         pendingSave = false;
         rows.clear();
         sections.clear();
@@ -182,40 +196,28 @@ public class ModSettingsCategoryScreen extends UiScreen {
         band.add(scroll);
     }
 
-    /** 按 {@link #SECTION_PLAN} 把配置项分组，建好 {@link SectionPane} 并挂进滚动容器；返回分组标题键。 */
+        /**
+     * 把界面**规格**（{@link UiSpec}）变成控件 ✓。
+     *
+     * <p><b>P2（docs/gui-统一.md）：</b>屏幕只负责"规格 → 控件"这一件事 ✗✓ ——
+     * "选项属于哪个组、组的先后"全在 {@link UiSpec#groups} 里 ✓（数据在选项自身 ✓、顺序是偏好 ✓）。
+     * ⇒ 这里不再有任何"名字清单"✗，也就不可能再出现"加了选项、左栏多出一个常驻分组"✗。
+     *
+     * @return 分组标题键（页脚用 ✓）
+     */
     private List<String> buildSections() {
-        final Map<String, ConfigOption> byName = new LinkedHashMap<>();
-        for (final ConfigOption option : options) {
-            byName.put(option.name(), option);
+        final List<String> orderKeys = new ArrayList<>();
+        for (final Section section : SECTION_PLAN.getOrDefault(category, List.of())) {
+            orderKeys.add(section.titleKey());
         }
 
         final List<String> keys = new ArrayList<>();
-        final Map<String, List<ConfigOption>> grouped = new LinkedHashMap<>();
-        for (final Section section : SECTION_PLAN.getOrDefault(category, List.of())) {
-            final List<ConfigOption> list = new ArrayList<>();
-            for (final String name : section.optionNames()) {
-                final ConfigOption option = byName.remove(name);
-                if (option != null) {
-                    list.add(option);
-                }
-            }
-            if (!list.isEmpty()) {
-                keys.add(section.titleKey());
-                grouped.put(section.titleKey(), list);
-            }
-        }
-        // 兜底：没写进任何分组的配置项也必须有地方去。要求是「一个不落」，
-        // 以后加了配置项忘了补分组，界面上会多出一个「其他」，而不是把它默默吞掉。
-        if (!byName.isEmpty()) {
-            keys.add(SECTION_OTHER);
-            grouped.put(SECTION_OTHER, new ArrayList<>(byName.values()));
-        }
-
         int index = 0;
-        for (final String key : keys) {
-            final SectionPane pane = new SectionPane(key);
-            pane.id(key);
-            for (final ConfigOption option : grouped.get(key)) {
+        for (final UiSpec.Group group : UiSpec.groups(options, orderKeys)) {
+            keys.add(group.titleKey());
+            final SectionPane pane = new SectionPane(group.titleKey());
+            pane.id(group.titleKey());
+            for (final ConfigOption option : group.options()) {
                 final FormRow row = rowFor(option);
                 // 出现时依次错开：越靠后的行收敛越慢，于是「从右往左依次出现」
                 row.appearSpeed(6.0 + index * 0.9);
@@ -459,7 +461,7 @@ public class ModSettingsCategoryScreen extends UiScreen {
         // 闸门用色块自己的进度，而不是写死延时 —— 关掉动画时就直接全部到位。
         final double bandProgress = instant ? 1.0 : band.reveal.value();
         for (final FormRow row : rows) {
-            row.appear.to(!closing && bandProgress > 0.5 ? 1.0 : 0.0);
+            row.appear.to(state == State.IDLE && bandProgress > 0.5 ? 1.0 : 0.0);
         }
 
         if (pendingSave && root.dragTarget == null && root.pressedWidget == null) {
@@ -467,8 +469,8 @@ public class ModSettingsCategoryScreen extends UiScreen {
             SablestopNow.saveConfig();
         }
 
-        if (closing && band.reveal.settled() && hero.grow.settled() && rowsHidden()) {
-            switchPending = true;
+        if (state == State.LEAVING && band.reveal.settled() && hero.grow.settled() && rowsHidden()) {
+            state = State.SWITCH_PENDING;
         }
     }
 
@@ -487,9 +489,8 @@ public class ModSettingsCategoryScreen extends UiScreen {
     public void render(final GuiGraphics graphics, final int mouseX, final int mouseY, final float partialTick) {
         updateAnims();
         super.render(graphics, mouseX, mouseY, partialTick);
-        if (switchPending) {
-            switchPending = false;
-            if (minecraft != null) {
+        if (state == State.SWITCH_PENDING) {
+                if (minecraft != null) {
                 final Screen target = next;
                 // 不能在渲染中途换屏：交给下一 tick
                 minecraft.execute(() -> minecraft.setScreen(target));
@@ -505,10 +506,10 @@ public class ModSettingsCategoryScreen extends UiScreen {
     }
 
     private void beginLeave(@Nullable final Screen target) {
-        if (closing) {
+        if (state != State.IDLE) {
             return;
         }
-        closing = true;
+        state = State.LEAVING;
         next = target;
         if (pendingSave) {
             pendingSave = false;

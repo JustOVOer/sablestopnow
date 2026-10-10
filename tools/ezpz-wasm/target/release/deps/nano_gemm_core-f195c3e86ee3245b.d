@@ -1,7 +1,0 @@
-G:\javadev\sablestop\tools\ezpz-wasm\target\release\deps\nano_gemm_core-f195c3e86ee3245b.d: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\nano-gemm-core-0.2.1\src\lib.rs
-
-G:\javadev\sablestop\tools\ezpz-wasm\target\release\deps\libnano_gemm_core-f195c3e86ee3245b.rlib: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\nano-gemm-core-0.2.1\src\lib.rs
-
-G:\javadev\sablestop\tools\ezpz-wasm\target\release\deps\libnano_gemm_core-f195c3e86ee3245b.rmeta: C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\nano-gemm-core-0.2.1\src\lib.rs
-
-C:\Users\Administrator\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\nano-gemm-core-0.2.1\src\lib.rs:

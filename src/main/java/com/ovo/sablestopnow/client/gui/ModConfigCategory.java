@@ -88,46 +88,53 @@ public enum ModConfigCategory {
         final SablestopNowConfig.Config config = SablestopNowConfig.INSTANCE;
         return switch (this) {
             case ASSEMBLER -> List.of(
-                    ConfigOption.bool("filter_excessive_force", config.filterExcessiveForce),
-                    ConfigOption.number("threshold", config.forceThreshold, 0.0, 10000.0, 10.0),
-                    ConfigOption.stringList("excluded_groups", config.excludedGroups),
-                    ConfigOption.number("max_records", config.maxRecords, 10.0, 10000.0),
-                    ConfigOption.bool("auto_pause_on_filter", config.autoPauseOnFilter),
-                    ConfigOption.bool("lock_new_sub_levels", config.lockNewSubLevels),
-                    ConfigOption.bool("disable_placement_collision_check", config.disablePlacementCollisionCheck),
-                    ConfigOption.bool("require_confirmation_before_split", config.requireConfirmationBeforeSplit),
-                    ConfigOption.bool("speed_limit_enabled", config.speedLimitEnabled),
-                    ConfigOption.number("speed_limit_threshold", config.speedLimitThreshold, 0.1, 200.0, 0.5));
+                    ConfigOption.bool("filter_excessive_force", config.filterExcessiveForce).section("gui.sablestopnow.section.force"),
+                    ConfigOption.number("threshold", config.forceThreshold, 0.0, 10000.0, 10.0).section("gui.sablestopnow.section.force"),
+                    ConfigOption.stringList("excluded_groups", config.excludedGroups).section("gui.sablestopnow.section.force"),
+                    ConfigOption.number("max_records", config.maxRecords, 10.0, 10000.0).section("gui.sablestopnow.section.force"),
+                    ConfigOption.bool("auto_pause_on_filter", config.autoPauseOnFilter).section("gui.sablestopnow.section.force"),
+                    ConfigOption.bool("lock_new_sub_levels", config.lockNewSubLevels).section("gui.sablestopnow.section.assembly"),
+                    ConfigOption.bool("disable_placement_collision_check", config.disablePlacementCollisionCheck).section("gui.sablestopnow.section.assembly"),
+                    ConfigOption.bool("require_confirmation_before_split", config.requireConfirmationBeforeSplit).section("gui.sablestopnow.section.assembly"),
+                    ConfigOption.bool("speed_limit_enabled", config.speedLimitEnabled).section("gui.sablestopnow.section.speed"),
+                    ConfigOption.number("speed_limit_threshold", config.speedLimitThreshold, 0.1, 200.0, 0.5).section("gui.sablestopnow.section.speed"),
+                    // 凸包内凹量（格）：曲面实体碰撞体的每个面往里收多少 —— 调"碰撞与画面是否重合"
+                    ConfigOption.number("hull_inset", config.hullInset, 0.0, 2.0, 0.01).section("gui.sablestopnow.section.hull"),
+                    // 凸分解块数预算：非凸/带孔的形状最多拆几块（1 = 关闭分解 ✓）
+                    ConfigOption.number("hull_max_pieces", config.hullMaxPieces, 1.0, 64.0).section("gui.sablestopnow.section.hull"));
             case STAFF -> List.of(
-                    ConfigOption.bool("enable_staff_enhance", config.enableStaffEnhance),
-                    ConfigOption.bool("new_control_scheme", config.newControlScheme),
-                    ConfigOption.bool("show_body_info", config.showBodyInfo),
-                    ConfigOption.number("staff_outline_thickness", config.staffOutlineThickness, 0.005, 0.5, 0.005),
-                    ConfigOption.number("staff_outline_bold_scale", config.staffOutlineBoldScale, 1.0, 8.0, 0.1),
-                    ConfigOption.number("rotate_sensitivity", config.staffRotateSensitivity, 0.001, 10.0, 0.05),
-                    ConfigOption.number("scroll_sensitivity", config.staffScrollSensitivity, 0.001, 10.0, 0.05),
-                    ConfigOption.number("center_pull_speed", config.staffCenterPullSpeed, 0.0001, 1.0, 0.005),
-                    ConfigOption.number("scale_sensitivity", config.staffScaleSensitivity, 0.005, 0.5, 0.005),
-                    ConfigOption.number("scale_min", config.staffScaleMin, 0.05, 1.0, 0.05),
-                    ConfigOption.number("scale_max", config.staffScaleMax, 1.0, 50.0, 0.5),
-                    ConfigOption.number("superliminal_max_distance", config.superliminalMaxDistance, 8.0, 256.0, 4.0),
-                    ConfigOption.bool("dragged_no_player_collision", config.draggedNoPlayerCollision),
-                    ConfigOption.bool("scaled_no_player_collision", config.scaledNoPlayerCollision),
-                    ConfigOption.bool("ghost_real", config.ghostReal),
+                    ConfigOption.bool("enable_staff_enhance", config.enableStaffEnhance).section("gui.sablestopnow.section.staff_core"),
+                    ConfigOption.bool("new_control_scheme", config.newControlScheme).section("gui.sablestopnow.section.staff_core"),
+                    ConfigOption.bool("show_body_info", config.showBodyInfo).section("gui.sablestopnow.section.staff_core"),
+                    ConfigOption.number("staff_outline_thickness", config.staffOutlineThickness, 0.005, 0.5, 0.005).section("gui.sablestopnow.section.staff_outline"),
+                    ConfigOption.number("staff_outline_bold_scale", config.staffOutlineBoldScale, 1.0, 8.0, 0.1).section("gui.sablestopnow.section.staff_outline"),
+                    ConfigOption.number("rotate_sensitivity", config.staffRotateSensitivity, 0.001, 10.0, 0.05).section("gui.sablestopnow.section.staff_control"),
+                    ConfigOption.number("scroll_sensitivity", config.staffScrollSensitivity, 0.001, 10.0, 0.05).section("gui.sablestopnow.section.staff_control"),
+                    ConfigOption.number("center_pull_speed", config.staffCenterPullSpeed, 0.0001, 1.0, 0.005).section("gui.sablestopnow.section.staff_control"),
+                    ConfigOption.number("scale_sensitivity", config.staffScaleSensitivity, 0.005, 0.5, 0.005).section("gui.sablestopnow.section.staff_scale"),
+                    ConfigOption.number("scale_min", config.staffScaleMin, 0.05, 1.0, 0.05).section("gui.sablestopnow.section.staff_scale"),
+                    ConfigOption.number("scale_max", config.staffScaleMax, 1.0, 50.0, 0.5).section("gui.sablestopnow.section.staff_scale"),
+                    ConfigOption.number("superliminal_max_distance", config.superliminalMaxDistance, 8.0, 256.0, 4.0).section("gui.sablestopnow.section.staff_scale"),
+                    ConfigOption.bool("dragged_no_player_collision", config.draggedNoPlayerCollision).section("gui.sablestopnow.section.staff_collision"),
+                    ConfigOption.bool("scaled_no_player_collision", config.scaledNoPlayerCollision).section("gui.sablestopnow.section.staff_collision"),
+                    ConfigOption.bool("ghost_real", config.ghostReal).section("gui.sablestopnow.section.staff_collision"),
                     ConfigOption.action("keybinds", () -> Minecraft.getInstance().setScreen(
-                            new KeyBindsScreen(Minecraft.getInstance().screen, Minecraft.getInstance().options))));
+                            new KeyBindsScreen(Minecraft.getInstance().screen, Minecraft.getInstance().options))).section("gui.sablestopnow.section.staff_keys"));
             case GOGGLES -> List.of(
-                    ConfigOption.bool("render_sub_level_outlines", config.renderSubLevelOutlines),
-                    ConfigOption.bool("outline_always_visible", config.outlineAlwaysVisible),
-                    ConfigOption.bool("outline_only_contour", config.outlineOnlyContour),
-                    ConfigOption.bool("outline_only_focused", config.outlineOnlyFocused),
-                    ConfigOption.number("outline_thickness", config.outlineThickness, 0.005, 0.5, 0.005),
-                    ConfigOption.bool("render_axis", config.renderAxis),
-                    ConfigOption.number("axis_angle_degrees", config.axisAngleDegrees, 1.0, 20.0, 0.5),
+                    ConfigOption.bool("render_sub_level_outlines", config.renderSubLevelOutlines).section("gui.sablestopnow.section.outline"),
+                    ConfigOption.bool("outline_always_visible", config.outlineAlwaysVisible).section("gui.sablestopnow.section.outline"),
+                    ConfigOption.bool("outline_only_contour", config.outlineOnlyContour).section("gui.sablestopnow.section.outline"),
+                    ConfigOption.bool("outline_only_focused", config.outlineOnlyFocused).section("gui.sablestopnow.section.outline"),
+                    ConfigOption.number("outline_thickness", config.outlineThickness, 0.005, 0.5, 0.005).section("gui.sablestopnow.section.outline"),
+                    ConfigOption.bool("render_axis", config.renderAxis).section("gui.sablestopnow.section.axis"),
+                    ConfigOption.number("axis_angle_degrees", config.axisAngleDegrees, 1.0, 20.0, 0.5).section("gui.sablestopnow.section.axis"),
                     // 界面自身的两项：改完立刻同步给 GUI 库，玩家不用退出界面就能看到效果
-                    ConfigOption.bool("ui_animations", config.uiAnimations)
+                    ConfigOption.bool("ui_animations", config.uiAnimations).section("gui.sablestopnow.section.ui")
                             .withChange(SablestopNowConfig::syncUiSettings),
-                    ConfigOption.number("ui_font_scale", config.uiFontScale, 0.5, 1.0, 0.01)
+                    // 自动缩字号下限（0.6~1.0 ✓ 与 ui_font_scale 同组 ✓ 属于"界面"这一组 ✓）
+                    ConfigOption.number("ui_text_shrink_min", config.uiTextShrinkMin, 0.6, 1.0, 0.01)
+                            .section("gui.sablestopnow.section.ui"),
+                    ConfigOption.number("ui_font_scale", config.uiFontScale, 0.5, 1.0, 0.01).section("gui.sablestopnow.section.ui")
                             .withChange(SablestopNowConfig::syncUiSettings));
         };
     }

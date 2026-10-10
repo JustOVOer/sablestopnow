@@ -46,11 +46,28 @@ public class ModSettingsScreen extends UiScreen {
     @Nullable
     private Label titleLine2;
 
-    /** ⚠ 不能用 {@code next == null} 当「没在关闭」的哨兵：Ctrl+O 打开时 parent 就是 null（关闭=回游戏）。 */
-    private boolean closing;
+    /**
+     * 界面状态机 ✓（P4 / docs/gui-统一.md 的原则 #4：**不要用一堆 boolean 判断当前在干什么** ✗）。
+     *
+     * <p>以前这里是 {@code closing} + {@code switchPending} 两个 boolean ✗ ⇒
+     * "正在关闭"与"该切屏了"的组合状态靠人脑维护 ✓ 加一个状态就要多想一遍组合 ✗。
+     * 现在只有一个枚举 ✓：{@link State#IDLE} / {@link State#LEAVING} / {@link State#SWITCH_PENDING} ✓。
+     *
+     * <p>⚠ {@code next == null} 不能当「没在关闭」的哨兵：Ctrl+O 打开时 parent 就是 null（关闭=回游戏）✓。
+     */
+    private enum State {
+        /** 正常显示/交互中 ✓。 */
+        IDLE,
+        /** 正在播反向动画 ✓ 播完才允许切屏 ✓。 */
+        LEAVING,
+        /** 动画播完了 ✓ 下一帧切屏 ✓（不能在渲染中途换屏 ✗）。 */
+        SWITCH_PENDING
+    }
+
+    private State state = State.IDLE;
     @Nullable
     private Screen next;
-    private boolean switchPending;
+
     private long lastNanos;
     private int panelW;
 
@@ -69,9 +86,17 @@ public class ModSettingsScreen extends UiScreen {
     protected void build() {
         root.closePopup();
         root.clear();
-        closing = false;
+        // ⚠⚠ 每次 build() 都是【新一代】控件 ⇒ 上一代的引用必须清掉 ✗✓（docs/gui-统一.md 的 I4 ✓）
+        //   否则字段数组/字段引用里会留着幽灵控件：动画循环仍会写它们的 margin/enabled ✗，
+        //   而控件树里已经没有它们 ⇒ 「看不见但仍在动的条目」✗。
+        //   这里显式清空 ✓；消费方（updateAnims / tilesHidden / panelHidden）本来就做了 null 检查 ✓ 安全 ✓。
+        java.util.Arrays.fill(tiles, null);
+        panel = null;
+        titleLine1 = null;
+        titleLine2 = null;
+
+        state = State.IDLE;
         next = null;
-        switchPending = false;
         // 重新显示（从大类详情返回）时从头播一遍出现动画；速度也要复原（离开时为了不拖沓调快过）
         titleAnim.speed(7.0).snap(0.0);
 
@@ -139,7 +164,7 @@ public class ModSettingsScreen extends UiScreen {
         // 依次登场：色块先落下来 → 标题再滑入 → 三个图标再从左到右依次出现。
         // 闸门用「前一个的进度」而不是写死延时：动画关掉、掉帧或窗口尺寸变化时顺序依然成立。
         final double panelProgress = instant || panel == null ? 1.0 : panel.reveal.value();
-        titleAnim.to(!closing && panelProgress > 0.35 ? 1.0 : 0.0);
+        titleAnim.to(state == State.IDLE && panelProgress > 0.35 ? 1.0 : 0.0);
         titleAnim.tick(UiSettings.animations, dt);
 
         // 标题：从左到右滑入，同时淡入；位置与透明度共用一个动画值
@@ -160,13 +185,13 @@ public class ModSettingsScreen extends UiScreen {
             }
             // 第 i 个要等前一个露出大半才开始（第一个等标题）
             final double gate = instant ? 1.0 : (i == 0 ? titleProgress : tiles[i - 1].appear.value());
-            tile.appear.to(!closing && gate > 0.6 ? 1.0 : 0.0);
+            tile.appear.to(state == State.IDLE && gate > 0.6 ? 1.0 : 0.0);
             tile.marginLeft = Math.round(Anim.lerp(-panelW * 0.7f, rowX(), tile.progress()));
-            tile.enabled = !closing;
+            tile.enabled = state == State.IDLE;
         }
 
-        if (closing && titleAnim.settled() && panelHidden() && tilesHidden()) {
-            switchPending = true;
+        if (state == State.LEAVING && titleAnim.settled() && panelHidden() && tilesHidden()) {
+            state = State.SWITCH_PENDING;
         }
     }
 
@@ -190,8 +215,8 @@ public class ModSettingsScreen extends UiScreen {
         // 先推进动画，再让库布局（布局会读到这里写进去的 margin），否则位置永远慢一帧
         updateAnims();
         super.render(graphics, mouseX, mouseY, partialTick);
-        if (switchPending) {
-            switchPending = false;
+        if (state == State.SWITCH_PENDING) {
+            state = State.IDLE;
             if (minecraft != null) {
                 final Screen target = next;
                 // 不能在渲染中途换屏：交给下一 tick
@@ -203,7 +228,7 @@ public class ModSettingsScreen extends UiScreen {
     // ============ 进入 / 离开 ============
 
     private void enter(final ModConfigCategory category, final IconTile from) {
-        if (closing) {
+        if (state != State.IDLE) {
             return;
         }
         // 把图标此刻的位置与缩放交给详情页，让「移动并放大」是从玩家点的那个图标接上去的
@@ -217,10 +242,10 @@ public class ModSettingsScreen extends UiScreen {
     }
 
     private void beginLeave(@Nullable final Screen target) {
-        if (closing) {
+        if (state != State.IDLE) {
             return;
         }
-        closing = true;
+        state = State.LEAVING;
         next = target;
         // 反向：先收色块、标题与图标跟着退回去；反向时序用更快的收敛，避免玩家等太久
         titleAnim.speed(11.0).to(0.0);

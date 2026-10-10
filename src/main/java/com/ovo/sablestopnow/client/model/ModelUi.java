@@ -239,7 +239,7 @@ public final class ModelUi {
         // 中英双语标签在 427×240 个 GUI 单位下必然超出屏幕（实测最右边的「齿轮配合」被切掉）。
         // hboxFit 会先按长标签量：放不下就整排换短标签（Language 文件里的 *.short），
         // 还放不下才等比压窄 —— 保证不会有按钮跑到屏幕外面去。
-        row.layout = Layouts.hboxFit(2, 2);
+        row.layout = Layouts.hboxWrap(2, 2, 2);
         row.prefW = Widget.FILL;
         row.prefH = 15;
         switch (TAB.get()) {
@@ -808,7 +808,9 @@ public final class ModelUi {
             com.ovo.sablestopnow.client.SketchClient.mode().setTool(value);
             refreshLeftPanel();
         });
-        button.prefW = Widget.FILL;
+        // ⚠ 不能用 FILL ✗：hboxFit 的比例缩放会跳过 FILL 子控件（源码 L164 ✓）
+        //   ⇒ 用确定宽度，让"放不下就缩"的机制真正作用到它 ✓（配合 Label 的自动短标签/缩字号 ✓）
+        button.prefW = 26;
         button.toggled = session.tool() == value;
         return button;
     }
@@ -2005,8 +2007,13 @@ public final class ModelUi {
                 // 而不是订阅：订阅写在建面板里的话，左栏每重建一次就多挂一条回调，
                 // 勾一下会发出 N 个包（配合编辑器那边踩过这个坑）。
                 final var row = new com.ovo.sablestopnow.client.gui.lib.Container();
-                row.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hbox(0, 3);
-                row.prefH = 13;
+                // ⚠ 这里以前是普通 hbox ✗ + 子控件 FILL ✗ ⇒ free=0 时每个按钮分到 0 宽 ✗✓
+                //   （五种图元挤一行 ⇒ "文字遮盖/看不见" ✓）。
+                //   hboxFit：放不下先让控件 setCompact ✓ 再按比例缩 ✓ 且 Math.max(1, …) 保证永不 0 ✓
+                // 折行版 ✓：五种图元一行塞不下时**自动折到第二行** ✓ 而不是压到 0 宽 ✗；
+                // 高度由布局自己写回（prefH = AUTO ✓）⇒ 这里不需要知道会折几行 ✓
+                row.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hboxWrap(0, 3, 2);
+                row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
                 row.add(sketchToolButton("model.sketch.tool.select",
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.SELECT, session));
                 row.add(sketchToolButton("model.sketch.tool.line",
@@ -2231,8 +2238,11 @@ public final class ModelUi {
                             .color(0xFF8FA0D8));
                     for (final com.ovo.sablestopnow.sketch.Solid solid : existing) {
                         final var row = new com.ovo.sablestopnow.client.gui.lib.Container();
-                        row.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hbox(0, 3);
-                        row.prefH = 13;
+                        // ⚠ 这里以前是普通 hbox ✗ + 子控件 FILL ✗ ⇒ free=0 时每个按钮分到 0 宽 ✗✓
+                //   （五种图元挤一行 ⇒ "文字遮盖/看不见" ✓）。
+                //   hboxFit：放不下先让控件 setCompact ✓ 再按比例缩 ✓ 且 Math.max(1, …) 保证永不 0 ✓
+                row.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hboxWrap(0, 3, 2);
+                        row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
                         // ⚠ 原来这一行**点一下就是删除**，按钮标签却只是「拉伸N」——
                         // 一个看起来像"选中"的按钮实际会删掉东西，是个真实的误操作陷阱。
                         // 现在拆成两个明确的按钮。

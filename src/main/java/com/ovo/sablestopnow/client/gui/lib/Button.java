@@ -123,6 +123,26 @@ public class Button extends Widget {
     }
 
     @Nullable
+    /**
+     * 自动短标签 ✓：若当前文案是可翻译的且存在 {@code <key>.short} ⇒ 返回它 ✓ 否则 {@code null} ✓。
+     *
+     * <p>为什么在库里做 ✗✓：{@link #compact(Component)} 需要**每个调用点**自己记得传短标签 ✗，
+     * 一旦忘了，窄容器里就只能省略号/被压扁 ✗（五种图元按钮挤一行就是实例 ✓）。
+     * 做成库行为后 ⇒ 只要 lang 里加了 {@code <key>.short}，全部按钮**自动**受益 ✓ 调用点零改动 ✗✓。
+     */
+    private String autoShortLabel() {
+        final Component component = label.get();
+        if (!(component.getContents()
+                instanceof net.minecraft.network.chat.contents.TranslatableContents translatable)) {
+            return null;
+        }
+        final String shortKey = translatable.getKey() + ".short";
+        final String value = Component.translatable(shortKey).getString();
+        if (value == null || value.isEmpty() || value.equals(shortKey)) {
+            return null; // 键不存在 ✓
+        }
+        return value;
+    }
     private Component tooltipText;
 
     @Override
@@ -141,8 +161,17 @@ public class Button extends Widget {
         if (label == null) {
             return "";
         }
-        if (compact && compactLabel != null) {
-            return compactLabel.getString();
+        if (compact) {
+            if (compactLabel != null) {
+                return compactLabel.getString();
+            }
+            // ★ 库级**自动短标签** ✓✓（新要求：不该让写界面的人记得传 compactLabel ✗）
+            //   与 Label 完全同一套约定 ✓：可翻译文案的键是 <key> ⇒ 试 <key>.short ✓
+            //   不存在就用原文 ✓（未解析的键会原样返回 ⇒ 一比就知道 ✓）。
+            final String auto = autoShortLabel();
+            if (auto != null) {
+                return auto;
+            }
         }
         return label.get().getString();
     }

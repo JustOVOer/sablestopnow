@@ -147,22 +147,31 @@ public final class UiLint {
     }
 
     private static void inspectTree(final Container parent, final String path, final List<Issue> issues) {
-        // ---- 兄弟命中区重叠 ----
-        final List<Widget> hittable = new ArrayList<>();
+        // ---- 兄弟重叠：**含文字遮盖** ✗✓（这是用户报的那一类 ✓）----------------------------
+        // 以前这里只收"可点击"的控件 ✗（{@code !pointerTransparent} ✓）⇒ 标签/文字**全被排除** ✗
+        // ⇒ "五个按钮挤一行、文字互相压住"✗ 这类问题**根本查不到** ✗✓（这正是它一直漏报的原因 ✓）。
+        // 现在收**所有可见且非零尺寸**的兄弟 ✓；任一方不接收点击（多半是文字/装饰 ✓）时，
+        // 措辞直接点明"遮盖"✓ 并给出重叠矩形，便于一眼定位 ✓。
+        final List<Widget> visible = new ArrayList<>();
         for (final Widget child : parent.children) {
-            if (child.visible && !child.pointerTransparent && child.w > 0 && child.h > 0) {
-                hittable.add(child);
+            if (child.visible && child.w > 0 && child.h > 0) {
+                visible.add(child);
             }
         }
-        for (int i = 0; i < hittable.size(); i++) {
-            for (int j = i + 1; j < hittable.size(); j++) {
-                final Widget a = hittable.get(i);
-                final Widget b = hittable.get(j);
-                if (overlaps(a, b)) {
-                    issues.add(new Issue("WARN", path, name(a) + " ⟷ " + name(b),
-                            "同一父容器下命中区重叠 " + rect(a) + " / " + rect(b)
-                                    + "（点击落到谁身上取决于层序）"));
+        for (int i = 0; i < visible.size(); i++) {
+            for (int j = i + 1; j < visible.size(); j++) {
+                final Widget a = visible.get(i);
+                final Widget b = visible.get(j);
+                if (!overlaps(a, b)) {
+                    continue;
                 }
+                final boolean textish = a.pointerTransparent || b.pointerTransparent;
+                issues.add(new Issue("WARN", path, name(a) + " ⟷ " + name(b),
+                        (textish ? "文字/装饰被遮盖 " : "同一父容器下命中区重叠 ")
+                                + rect(a) + " / " + rect(b)
+                                + (textish
+                                        ? "（至少一方不接收点击 ⇒ 多半是文字 ⇒ 会看不清 ✗ 建议：换行/短标签/缩字号/改布局）"
+                                        : "（点击落到谁身上取决于层序）")));
             }
         }
 
@@ -182,7 +191,15 @@ public final class UiLint {
             }
 
             // ---- 尺寸 / 越界 ----
-            if (child.visible && (child.w <= 0 || child.h <= 0)) {
+            // 0 尺寸：**只报用户能直接感知到的** ✓（能点的 ✓ 或要显示文字的 ✓）
+            // 纯布局容器/装饰在布局早期为 0 是正常的 ✗ —— 报出来只会淹没真正的缺陷 ✓
+            // （实测噪声：Container#null / Callout#null 各一条 ✗ 而它们并不是 bug ✓）
+            if (child.visible && (child.w <= 0 || child.h <= 0)
+                    && (interactive(child) || (child instanceof Label label2 && !label2.raw().isEmpty()))) {
+                // ⚠ 空文字标签不算缺陷 ✓：实测 SketchHud 的吸附提示在"没吸附"时就是空串 ✓
+                //   ⇒ 宽 0、高 9 ✓ 被误报成"尺寸为 0"✗（那次报告里的 0x9 就是它 ✓）。
+                //   同理，模型树里缩进用的 spacer 在 depth=0 时**故意**宽 0 ✓ ⇒ 也不该报 ✓
+                //   （它不是可交互控件、也不是有文字的标签 ⇒ 上面那个条件已经把它排除 ✓）。
                 issues.add(new Issue("ERROR", path, name(child),
                         "可见但尺寸为 0（" + child.w + "x" + child.h + "）：画不出来，也点不到"));
             }
@@ -192,6 +209,17 @@ public final class UiLint {
                                 + rect(child)));
             }
 
+            // ---- 文字没放下（库级自动回退也没救回来 ✓）--------------------------------
+            // 这是"全覆盖"的关键一半 ✓：任何界面、任何标签，只要它渲染时
+            // ① 只能省略号（ELLIPSIZED ✗）或 ② 声明 CLIP 又被硬裁（CLIPPED ✗），就在这里被点名 ✓
+            // —— 判断依据是 Label 自己记的结果 ✓ 不重算 ✗（库知道真相 ✓）。
+            // 与"控件互相遮盖"（上面那段兄弟重叠 ✓）合起来，正好覆盖用户报的两类毛病 ✓。
+            if (child instanceof Label label && child.visible
+                    && TextFit.isUnhandled(label.lastFit())) {   // ★ 判据只在 TextFit 里定义一次 ✓
+                issues.add(new Issue("WARN", path, name(child),
+                        "文字没放下（" + label.lastFit() + "）：框宽 " + child.w + "px ⇒ 这段文字被裁/省略 ✗"
+                                + "（建议：给更宽的框、加 <key>.short 短标签、或允许换行/自动缩字号 ✓）"));
+            }
             if (child instanceof Container container) {
                 inspectTree(container, where, issues);
             }

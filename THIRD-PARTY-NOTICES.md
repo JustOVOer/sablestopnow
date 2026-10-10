@@ -119,3 +119,17 @@ SOFTWARE.
 
 ⚠ **本文件的作用是"防误抄"，不是"许可清单"**：登记为 ✅ 的项目也只是**允许参考**，
 本项目实际并未引入任何第三方几何/贴图库（理由见 `docs/nurbs-unification-design.md` §2）。
+
+---
+
+## Sable / sable_rapier（**仅运行期依赖 + 本地自行编译 ✓ 本项目**不分发**其代码或二进制**）
+
+* 上游：Sable（Minecraft 1.21.1 物理模组）及其 `sable_rapier` 原生 crate。
+* 许可：**Polyform Shield License 1.0.0**（源码可见、**非开源**、含竞业限制条款）。
+* 本项目的立场：
+  1. **不随本仓库上传**其源码（原先存放在本地 `depends/` 的参考快照**不发布**）；
+  2. **不把**其编译产物打进本项目发布的 jar（`build.gradle` 的 `syncNativeLibrary` 默认关闭 ✓
+     仅当显式 `-Psablestopnow.syncNative=true` 时才内置）；
+  3. 需要碰撞特性的使用者，请**自行**从上游取得副本并**本地编译**，再把 DLL 放到
+     `<gamedir>/sablestopnow-natives/sable_rapier_x86_64_windows.dll` 手动启用（见 `native/README.md`）。
+* 若上游许可方有任何异议，请通过仓库 Issue 联系，我们会立即移除相关引用。

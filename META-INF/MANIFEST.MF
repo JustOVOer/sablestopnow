@@ -1,9 +1,0 @@
-Manifest-Version: 1.0
-Specification-Title: Sable
-Specification-Vendor: RyanHCode
-Specification-Version: 2.0.4
-Implementation-Title: common
-Implementation-Version: 2.0.4
-Implementation-Vendor: RyanHCode
-Built-On-Minecraft: 1.21.1
-

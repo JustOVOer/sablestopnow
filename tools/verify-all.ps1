@@ -155,7 +155,11 @@ Get-ChildItem $srcRoot -Recurse -Filter '*.java' | Where-Object { -not $_.FullNa
     # reference GuiGraphics at all; otherwise innocuous calls like java.util.Arrays.fill(...)
     # trip the rule (that false positive DID block a build once). A real offender must have
     # GuiGraphics in scope, so this keeps the check meaningful while dropping the noise.
-    if ($code -match 'GuiGraphics' -and $code -match '\.(fill|drawString|drawCenteredString|blit|renderItem)\(') {
+    # Match on the RECEIVER name, not on the method name alone: a regex cannot see types,
+    # but it CAN require that the call looks like `graphics.fill(...)` / `guiGraphics.fill(...)`.
+    # Without this, any innocuous `.fill(` (e.g. java.util.Arrays.fill) inside a file that
+    # legitimately mentions GuiGraphics trips the rule -- that happened twice.
+    if ($code -match 'GuiGraphics' -and $code -match '(?<![\w.])(graphics|guiGraphics|drawContext|context|poseStack)\s*\.\s*(fill|drawString|drawCenteredString|blit|renderItem)\s*\(') {
         $rawHits += $_.FullName.Substring($srcRoot.Length + 1)
     }
 }
@@ -235,7 +239,8 @@ if (-not (Test-Path $solverSrc) -or -not (Test-Path $harnessSrc)) {
             'SketchPlane.java', 'Sketch.java', 'SketchSession.java', 'SketchDatumPlanes.java',
             'SketchMode.java', 'SketchProfiles.java', 'Extrude.java', 'Revolve.java',
             'Solid.java', 'SolidMesh.java', 'SolidUv.java', 'SolidAppearance.java',
-            'SolidCollision.java', 'SketchDof.java', 'SketchMeasure.java'
+            'SolidCollision.java', 'SketchDof.java', 'SketchMeasure.java',
+            'ConvexDecomposition.java'
         ) | ForEach-Object { Join-Path $sketchDir $_ }
         # ⚠ **新增的纯逻辑包必须加进这张清单**，否则 SolidUv 引用它时，
         #   草图检查会报一整片 "找不到符号"（读起来像参数类型错，而不是缺文件）——
@@ -301,6 +306,51 @@ if (-not (Test-Path $solverSrc) -or -not (Test-Path $harnessSrc)) {
         } else {
             Write-Host '  SHELL_FIT_CHECK=FAIL (compile)'
             $failed.Add('shell fit harness failed to compile')
+        }
+        # --- 凸分解：非凸 / 带孔形状必须拆成凸块，且孔必须还是空的 ---
+        # 这一条**真的抓到过两个 bug**（顶点哈希碰撞让圆变成 11 块重叠多边形、
+        # 贪心顺序让圆环变成 48 块），两个都只在离线可见，所以它值得常驻。
+        $decompOut = $env:TEMP + '\decomp-gate'
+        Remove-Item -Recurse -Force $decompOut -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path $decompOut | Out-Null
+        & javac -encoding UTF-8 -nowarn -cp ($modelOut + ';' + $modelCp) -d $decompOut ($root + '\tools\ConvexDecompCheck.java') 2>&1 |
+            Select-Object -First 10 | ForEach-Object { Write-Host ('  ' + $_) }
+        if (Test-Path ($decompOut + '\ConvexDecompCheck.class')) {
+            $decompRun = & java -cp ($decompOut + ';' + $modelOut + ';' + $modelCp) ConvexDecompCheck 2>&1
+            $decompRun | Select-String -Pattern 'FAIL ' | ForEach-Object { Write-Host ('  ' + $_.Line) }
+            $decompLine = $decompRun | Select-String -Pattern 'CONVEX_DECOMP_CHECK=' | Select-Object -Last 1
+            if ($decompLine) { Write-Host ('  ' + $decompLine.Line) }
+            if (-not $decompLine -or $decompLine.Line -notmatch 'CONVEX_DECOMP_CHECK=OK') {
+                $failed.Add('convex decomposition check failed')
+            }
+        } else {
+            Write-Host '  CONVEX_DECOMP_CHECK=FAIL (compile)'
+            $failed.Add('convex decomposition harness failed to compile')
+        }
+        # --- 质量合成的坐标系回归：用【崩溃报告里的原始数字】钉住那个 1e17 惯量事故 ---
+        # 同一个坐标系错误在本项目里出现过两次（体素路 / 合并质量路），教训是"修一处不等于修一类"。
+        # 需要 Sable 的 MassData（SolidMassComposition.Composed 实现了它），所以从 run\mods 取。
+        $sableJar = Get-ChildItem ($root + '\run\mods') -Filter 'sable-neoforge-*.jar' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $sableJar) {
+            Write-Host '  MASS_FRAME_CHECK=SKIP (run\mods 里没有 sable jar)'
+        } else {
+            $massOut = $env:TEMP + '\massframe-gate'
+            Remove-Item -Recurse -Force $massOut -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force -Path $massOut | Out-Null
+            & javac -encoding UTF-8 -nowarn -cp ($modelCp + ';' + $sableJar.FullName) -sourcepath $srcRoot -d $massOut ($root + '\tools\MassFrameCheck.java') 2>&1 |
+                Select-Object -First 10 | ForEach-Object { Write-Host ('  ' + $_) }
+            if (Test-Path ($massOut + '\MassFrameCheck.class')) {
+                $massRun = & java -cp ($massOut + ';' + $modelCp + ';' + $sableJar.FullName) MassFrameCheck 2>&1
+                $massRun | Select-String -Pattern 'FAIL ' | ForEach-Object { Write-Host ('  ' + $_.Line) }
+                $massLine = $massRun | Select-String -Pattern 'MASS_FRAME_CHECK=' | Select-Object -Last 1
+                if ($massLine) { Write-Host ('  ' + $massLine.Line) }
+                if (-not $massLine -or $massLine.Line -notmatch 'MASS_FRAME_CHECK=OK') {
+                    $failed.Add('mass frame check failed')
+                }
+            } else {
+                Write-Host '  MASS_FRAME_CHECK=FAIL (compile)'
+                $failed.Add('mass frame harness failed to compile')
+            }
         }
         # --- 7/7 sketch persistence: NBT round-trip ---
         # Needs the Minecraft classes (CompoundTag etc.), so unlike the two checks above this one
@@ -442,7 +492,28 @@ if (Want 'param') {
 
 Write-Host ''
 if ($failed.Count -eq 0) {
-    Write-Host 'VERIFY_ALL=PASS'
+    if (Want 'guispec') {
+    Set-Step 'gui spec'
+    Write-Host '=== GUI spec invariants (options <-> SECTION_PLAN, lang keys) ==='
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'GuiSpecCheck.ps1') 2>&1 |
+        Select-String -Pattern 'GUI_SPEC_CHECK|I1 |I2 |I6 ' | ForEach-Object { Write-Host ('  ' + $_.Line) }
+    if ($LASTEXITCODE -ne 0) { $failed.Add('GUI spec invariants failed (see GUI_SPEC_CHECK above)') }
+}
+if (Want 'layout') {
+    Set-Step 'gui layout'
+    Write-Host '=== GUI layout constants (no font needed; see tools/GuiLayoutCheck.ps1) ==='
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'GuiLayoutCheck.ps1') 2>&1 |
+        Select-String -Pattern 'GUI_LAYOUT' | ForEach-Object { Write-Host ('  ' + $_.Line) }
+    if ($LASTEXITCODE -ne 0) { $failed.Add('GUI layout constant invariants failed (see GUI_LAYOUT_CHECK above)') }
+}
+if (Want 'guilang') {
+    Set-Step 'gui lang'
+    Write-Host '=== GUI option lang keys (I7: label/desc must exist in both languages) ==='
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'GuiLangCheck.ps1') 2>&1 |
+        Select-String -Pattern 'GUI_LANG_CHECK|I7 ' | ForEach-Object { Write-Host ('  ' + $_.Line) }
+    if ($LASTEXITCODE -ne 0) { $failed.Add('GUI option lang keys missing (see GUI_LANG_CHECK above)') }
+}
+Write-Host 'VERIFY_ALL=PASS'
     if (-not $NoProgress) {
         Set-Content -Path $progressFile -Value 'DONE|PASS|' -Encoding ASCII -ErrorAction SilentlyContinue
     }

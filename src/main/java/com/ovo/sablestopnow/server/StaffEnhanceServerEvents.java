@@ -29,6 +29,15 @@ public final class StaffEnhanceServerEvents {
         if (event.getServer().getTickCount() % 20 == 0) {
             com.ovo.sablestopnow.server.VoxelCollisionService.logABodies(event.getServer().overworld());
         }
+        // ★ 碰撞**不会自己回来** ✗ —— 实体碰撞只在"玩家保存草图/实体"的网络包里建 ✓
+        //   ⇒ 重开存档 / 重连之后，曲面实体**没有碰撞、也不贡献质量** ✗
+        //   （实测：进世界后一条 `凸分解` 日志都没有 ✓，而用户看到的正是"质量不足"✗）。
+        //   这里每秒自愈一次 ✓：结构一加载上就把它的实体碰撞补建 ✓（补过就跳过 ✓）。
+        if (event.getServer().getTickCount() % 20 == 7) {
+            for (final net.minecraft.server.level.ServerLevel level : event.getServer().getAllLevels()) {
+                SolidCollisionService.ensureCollisions(level);
+            }
+        }
         // 暂停步进 / 超速锁定 / 幽灵关节统一在每 tick 收尾维护
         StaffEnhanceServer.serverFeatures(event.getServer());
         // 施力点的清理是「结构没了 → 记录也该没」：每秒扫一次就够（施力点是个位数级），
@@ -109,6 +118,7 @@ public final class StaffEnhanceServerEvents {
     public static void onServerStopped(final ServerStoppedEvent event) {
         com.ovo.sablestopnow.server.HullTrace.close();
         StaffEnhanceServer.clearAll();
+        SolidCollisionService.clearSelfHeal();
         StaffSelectionRegistry.clearAll();
         StaffSnapshotRegistry.clearAll();
         MateRegistry.clearAll();

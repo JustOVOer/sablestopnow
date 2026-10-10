@@ -153,12 +153,29 @@ public abstract class RapierPhysicsPipelineMixin implements ScaledColliderPipeli
         if (parts.isEmpty() || tracker == null || tracker.isInvalid()) {
             return tracker;
         }
-        final org.joml.Vector3dc c = tracker.getCenterOfMass();
         final org.joml.Matrix3dc i = tracker.getInertiaTensor();
         final java.util.List<com.ovo.sablestopnow.physics.SolidMassComposition.Part> all =
                 new java.util.ArrayList<>(parts.size() + 1);
+        // ⚠⚠⚠ **跟踪器的质心在【刚体局部系】里是 (0,0,0)** ✗✓ —— 这里以前传的是
+        //   `tracker.getCenterOfMass()`，而它返回的是 **plot 绝对坐标（~2.048e7）** ✗。
+        //
+        //   实测（2026-10-03 ✓）：一根圆管被合并/缩放质量时走到这条路 ⇒
+        //     一个部分在 (2.048e7, 128.0, 2.0497e7) ✗、另一个在 (0.05, 6.5, −0.04) ✓
+        //     ⇒ 平行轴项 d² ≈ 8.4e14 ⇒ m·d² ≈ 1e17 ✗✗
+        //     ⇒ 合出来的**质心落在 2e7 处**、惯量炸掉 ⇒ 物理全乱：
+        //        「质量手感不足」✗「竖直落地插进地下 9 格」✗
+        //     ⇒ 而且本模组的坐标系守卫（`Check.FrameViolation` ✓）**直接抛异常**
+        //        ⇒ `Sable ticking physics` **崩服 + 断线** ✗✓
+        //
+        //   依据（Rapier 的约定，见 marten `algo.rs`）：collider 坐标 = local − center_of_mass，
+        //   且 `collider.rs` 把 `local_com` 设为 `Vec3::ZERO` ✓
+        //   ⇒ **刚体坐标系的原点【就是】质心** ✓ ⇒ 跟踪器在这里必须是 (0,0,0) ✓✓。
+        //   同一条教训在 `VoxelCollisionService` 的体素路里已经付过一次代价 ✓（那里的注释更详细 ✓）。
+        //
+        //   ⚠ 质量本身不受影响（它只是求和 ✓）—— **错的只有位置与惯量** ✗，
+        //   所以"质量看起来对"这件事以前一直掩盖了它 ✓。
         all.add(new com.ovo.sablestopnow.physics.SolidMassComposition.Part(
-                tracker.getMass(), c.x(), c.y(), c.z(),
+                tracker.getMass(), 0.0, 0.0, 0.0,
                 i.m00(), i.m11(), i.m22(), i.m01(), i.m02(), i.m12()));
         all.addAll(parts);
         final com.ovo.sablestopnow.physics.SolidMassComposition.Result r =

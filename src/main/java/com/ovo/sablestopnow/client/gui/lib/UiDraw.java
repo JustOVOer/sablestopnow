@@ -4,6 +4,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
@@ -245,6 +246,33 @@ public final class UiDraw {
 
     public static void textCentered(final GuiGraphics g, final Font font, final String s, final int cx, final int y,
                                     final int argb, final float scale, final boolean shadow) {
+        text(g, font, s, cx - Math.round(font.width(s) * scale / 2.0f), y, argb, scale, shadow);
+    }
+    // ============ 文本（FormattedCharSequence 版）============
+    // P3（docs/gui-统一.md）：Label 换行后每行是 FormattedCharSequence ✓ ——
+    // 以前 UiDraw 只有 String / Component 两版 ✗ ⇒ 换行渲染无处可画 ✗（那次构建因此失败 ✓）。
+    // 这里补齐三个重载 ✓，实现与 String 版逐行对应 ✓（Font#width 与 GuiGraphics#drawString 都有该类型重载 ✓）。
+
+    public static void text(final GuiGraphics g, final Font font, final FormattedCharSequence s, final int x,
+                            final int y, final int argb, final float scale, final boolean shadow) {
+        if (s == null) {
+            return;
+        }
+        final var pose = g.pose();
+        pose.pushPose();
+        pose.translate(x, y, 0.0f);
+        pose.scale(scale, scale, 1.0f);
+        g.drawString(font, s, 0, 0, argb, shadow);
+        pose.popPose();
+    }
+
+    public static void textRight(final GuiGraphics g, final Font font, final FormattedCharSequence s, final int right,
+                                 final int y, final int argb, final float scale, final boolean shadow) {
+        text(g, font, s, right - Math.round(font.width(s) * scale), y, argb, scale, shadow);
+    }
+
+    public static void textCentered(final GuiGraphics g, final Font font, final FormattedCharSequence s, final int cx,
+                                    final int y, final int argb, final float scale, final boolean shadow) {
         text(g, font, s, cx - Math.round(font.width(s) * scale / 2.0f), y, argb, scale, shadow);
     }
 

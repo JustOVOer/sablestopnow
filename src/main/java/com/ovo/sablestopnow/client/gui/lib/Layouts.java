@@ -62,6 +62,7 @@ public final class Layouts {
             final int free = Math.max(0, parent.innerH() - pad * 2 - fixed - gap * Math.max(0, visible - 1));
             final int each = fillCount > 0 ? free / fillCount : 0;
             int y = parent.innerY() + pad;
+            int rowIndex = 0;
             for (final Widget child : parent.children) {
                 if (!child.visible) {
                     continue;
@@ -183,6 +184,115 @@ public final class Layouts {
      *
      * <p>上/左边栏、状态栏、树状图的经典布局；带 {@code fill} 标记的子控件平分剩余空间。
      */
+    /**
+     * **自动换行的水平排列** ✓（新要求：排成一行就难免遮盖 ✗ ⇒ 由库折行 ✓）。
+     *
+     * <p>与 {@link #hbox} 的区别：一行放不下时**折到下一行** ✓，
+     * 而不是把每个控件压到 0 宽 ✗（那正是"五种图元挤一行 ⇒ 看不见/互相遮盖"✗ 的直接原因 ✓）。
+     *
+     * <p>并且**布局自己把容器高度算好** ✓（写回 {@code parent.prefH}）⇒
+     * 写界面的人不需要知道"这一行会不会折、折几行"✗✓ —— 这就是"库负责、调用点零负担" ✓。
+     *
+     * @param pad    上下左右内边距 ✓
+     * @param gap    同一行内的间距 ✓
+     * @param rowGap 行与行之间的间距 ✓
+     */
+    public static Layout hboxWrap(final int pad, final int gap, final int rowGap) {
+        return (parent, ctx) -> {
+            final int avail = Math.max(1, parent.innerW() - pad * 2);
+            final java.util.List<java.util.List<Widget>> rows = new java.util.ArrayList<>();
+            java.util.List<Widget> row = new java.util.ArrayList<>();
+            int used = 0;
+            for (final Widget child : parent.children) {
+                if (!child.visible) {
+                    continue;
+                }
+                final int need = child.marginLeft + child.wantW(ctx) + child.marginRight;
+                final int withGap = row.isEmpty() ? need : need + gap;
+                if (!row.isEmpty() && used + withGap > avail) {
+                    rows.add(row);
+                    row = new java.util.ArrayList<>();
+                    used = 0;
+                    row.add(child);
+                    used = need;
+                    continue;
+                }
+                row.add(child);
+                used += withGap;
+            }
+            if (!row.isEmpty()) {
+                rows.add(row);
+            }
+            final int rowCount = Math.max(1, rows.size());
+            // ★★ 行高由【孩子的需求】决定 ✓✓，**不是**"容器高度 ÷ 行数" ✗。
+            //   前者保证：两行永远不会互相压住 ✓（实测事故：容器 13px、两行 ⇒ 每行 5px ✗，
+            //   而按钮自己要 12px ✗ ⇒ 第一行 y=119..131 与第二行 y=122 重叠 9px ✓ —— 见 F9 报告 ✓）。
+            //   若孩子总高超过容器 ⇒ 让内容【溢出】（由父裁剪 ✓）而不是重叠 ✓✓
+            //   —— "绝不重叠"是库的硬保证 ✓；"放不放得下"由上层决定 ✓（放不下会被 UiLint 点名 ✓）。
+            int naturalH = 0;
+            final int[] rowHeights = new int[rows.size()];
+            for (int ri = 0; ri < rows.size(); ri++) {
+                int hWant = 1;
+                for (final Widget child : rows.get(ri)) {
+                    hWant = Math.max(hWant, child.marginTop + child.wantH(ctx) + child.marginBottom);
+                }
+                rowHeights[ri] = hWant;
+                naturalH += hWant;
+            }
+            naturalH += rowGap * (rowCount - 1);
+            // ★ 高度夹取 ✓✓（修"位置不对"✗）：
+            //   已实测：vbox 用 child.wantH(ctx) 定高度（Layouts L70 ✓），而它在本行自己的布局【之前】跑
+            //   ⇒ 它拿到的是**上一帧**的 prefH ✗ ⇒ 两行内容会被画到容器之外（视觉上就是"位置不对"✗）。
+            //   这里按【分配到的可用高】等比压缩各行高 ⇒ 内容**始终留在容器内** ✓ 且绝不重叠 ✓；
+            //   同时仍把自然高度写回 prefH ✓ ⇒ 父布局能长高时会自动变好 ✓。
+            final int availH = Math.max(1, parent.innerH() - pad * 2);
+            if (naturalH > availH) {
+                final int gaps = rowGap * (rowCount - 1);
+                final int forRows = Math.max(rowCount, availH - gaps);
+                final double k = (double) forRows / (double) Math.max(1, naturalH - gaps);
+                for (int ri = 0; ri < rowHeights.length; ri++) {
+                    rowHeights[ri] = Math.max(1, (int) Math.floor(rowHeights[ri] * k));
+                }
+            }
+            final int wanted = pad * 2 + naturalH;
+            // 把"我需要多高"写回父容器 ✓（AUTO 才写 ✓ 不覆盖调用方的显式设置 ✗）
+            if (parent.prefH == Widget.AUTO) {
+                parent.prefH = wanted;
+            }
+            int y = parent.innerY() + pad;
+            int rowIndex = 0;
+            for (final java.util.List<Widget> line : rows) {
+                int fixed = 0;
+                int fills = 0;
+                for (final Widget child : line) {
+                    if (child.prefW == Widget.FILL) {
+                        fills++;
+                    } else {
+                        fixed += child.wantW(ctx) + child.marginLeft + child.marginRight;
+                    }
+                }
+                final int free = Math.max(0, avail - fixed - gap * Math.max(0, line.size() - 1));
+                final int each = fills > 0 ? free / fills : 0;
+                int x = parent.innerX() + pad;
+                for (final Widget child : line) {
+                    final int cw = child.prefW == Widget.FILL ? each : child.wantW(ctx);
+                    final int ch = child.prefH == Widget.FILL || child.prefH == Widget.AUTO
+                            ? rowHeights[rowIndex] - child.marginTop - child.marginBottom : child.wantH(ctx);
+                    // ★ 分配宽 < 自然宽 ⇒ 让控件进入"紧凑"形态 ✓✓
+                    //   （Button 紧凑时会**自动**用 <key>.short ✓ ⇒ "圆弧（圆心/起点/终点）" 在 26px 里
+                    //    自动变成 1 字的「弧」✓；以前只有 hboxFit 会调 setCompact ✗ 换成 hboxWrap 后就没人调了 ✗✓）
+                    child.setCompact(child.prefW != Widget.FILL && cw < child.wantW(ctx));
+                    child.x = x + child.marginLeft;
+                    child.y = y + child.marginTop;
+                    child.w = Math.max(0, cw);
+                    child.h = Math.max(0, ch);
+                    x += child.marginLeft + cw + child.marginRight + gap;
+                }
+                y += rowHeights[rowIndex] + rowGap;
+                rowIndex++;
+            }
+        };
+    }
     public static Layout dock() {
         return dock(0, 0);
     }

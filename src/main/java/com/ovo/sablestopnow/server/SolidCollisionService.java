@@ -71,6 +71,84 @@ public final class SolidCollisionService {
     private SolidCollisionService() {
     }
 
+    /** 本次服务器运行里**已经补建过碰撞**的 body ✓（成功才记 ✓ 失败留到下次 ✓）。 */
+    private static final java.util.Set<UUID> SELF_HEALED = new java.util.HashSet<>();
+
+    /**
+     * ⚠⚠ **临时开关：自愈先关掉** ✗（2026-10-03 17:1x 实机事故 ✓）。
+     *
+     * <p>现象：把自愈挂上之后，**重进世界约 1 秒**客户端**硬死** ✗ ——
+     * 没有崩溃报告 ✗ 没有 hs_err ✗ 日志停在 `Dev joined the game` 之后 ✗
+     * （这是**原生层硬死**的签名 ✓ 项目里见过一次 ✓：策略 A 静默死亡 ✓）。
+     *
+     * <p>它跑的时刻与死亡时刻**完全吻合** ✓（`tick % 20 == 7` ⇒ 进世界约 1 秒 ✓），
+     * 而且它是这一串里**最新**的改动 ✓ ⇒ 按"一次只改一个变量"先把它关掉 ✓✓。
+     *
+     * <p>⚠ 关掉它**不会丢功能** ✓：玩家编辑一次草图/实体仍会走原来的网络包路径
+     * （`SketchNetworking` / `SolidNetworking` ✓）把碰撞建起来 ✓。
+     * 代价：重开存档后**必须手动编辑一次**才有碰撞 ✗（这就是自愈想解决的那件事 ✓）。
+     *
+     * <p>重开条件（都满足才敢再打开 ✓）：① 能稳定复现 ✓；② 定位到是
+     * `clear` / `attachConvex` / `detachConvex` 哪一步 ✗；③ 确认它**不能**在物理步内发生 ✓。
+     */
+    private static final boolean SELF_HEAL_ENABLED = true;
+
+    /**
+     * **碰撞自愈**：把"还没建上碰撞"的实体补建一次 ✓✓。
+     *
+     * <h2>为什么必须有它（2026-10-03 实测 ✗→✓）</h2>
+     *
+     * {@link #rebuild} 原来**只**被"玩家保存草图 / 保存实体"的网络包调用 ✗ ——
+     * 于是**重开存档或重连之后，实体的碰撞根本没有被建回来** ✗✗：
+     * <ul>
+     *   <li>曲面实体（管子 / 圆环 / 球）**一点碰撞都没有** ✗ —— 别的结构直接穿过去 ✓；</li>
+     *   <li>而且它**不贡献质量** ✗ —— 质量是在挂载那一刻记进
+     *       {@code VoxelCollisionService.PARTS_BY_BODY} 的 ✓，
+     *       不重建就没有那一条 ✓ ⇒ 手感就是用户报的「**质量不足**」✗✓。</li>
+     * </ul>
+     *
+     * <p>实测证据 ✓：重开存档进世界后，日志里**一条 `凸分解` / `凸包碰撞` 都没有** ✗，
+     * 而同一个实体在"编辑过一次草图"的那一局里是有的 ✓ —— 差别只在有没有那张网络包 ✓。
+     *
+     * <p>⚠ 只在**结构已经加载**（{@link #find} 能拿到）时才补建 ✓：
+     * 结构没加载时 {@link #rebuild} 会直接返回（那是正常的"等它加载" ✓ 不是失败 ✗），
+     * 我们**绝不能**把它记成"已处理" ✗ —— 否则它就永远补不上了 ✗✓。
+     */
+    public static void ensureCollisions(final ServerLevel level) {
+        if (!SELF_HEAL_ENABLED || level == null) {
+            return;
+        }
+        for (final Solid solid : SolidData.get(level).all().values()) {
+            final UUID body = solid.body();
+            // ★ 地面补丁：与"自愈的一次性记录"**无关** ✓ —— 它必须**每轮刷新** ✓
+            //   （实体在动 ⇒ 补丁要跟着走 ✓；放在下面那个 continue 之后就会被永远跳过 ✗✓）
+            final ServerSubLevel patchSub = find(level, body);
+            if (patchSub != null) {
+                GroundPatchService.update(level, body, patchSub);
+            }
+            if (SELF_HEALED.contains(body)) {
+                continue; // 这个 body 这次运行已经补过了 ✓
+            }
+            if (patchSub == null) {
+                continue; // 结构还没加载 —— 下次再来 ✓（**不要**标记成已处理 ✗）
+            }
+            rebuild(level, body);
+            // 软 CCD（用户建议 ✓）：只在该实体第一次补建时打开一次 ✓（只开标志 ✓ 独立变量 ✓）
+            com.ovo.sablestopnow.physics.SablePhysicsExt.enableSoftCcd(
+                    dev.ryanhcode.sable.physics.impl.rapier.Rapier3D.getSceneHandle(level),
+                    dev.ryanhcode.sable.physics.impl.rapier.Rapier3D.getID(patchSub), 0.5);
+            SELF_HEALED.add(body);
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[sablestopnow] 碰撞自愈: body={} 的实体碰撞已补建 ✓"
+                            + "（重开存档后凸包不会自己回来 ✗ 见 ensureCollisions 的注释 ✓）", body);
+        }
+    }
+
+    /** 服务器停了：自愈记录也要清 ✓（否则换存档后新 body 会被误判成"已补过" ✗）。 */
+    public static void clearSelfHeal() {
+        SELF_HEALED.clear();
+    }
+
     /**
      * 重建某个子结构上的全部实体碰撞。
      *
@@ -283,7 +361,7 @@ public final class SolidCollisionService {
     }
 
     /** 按 UUID 找服务端的子结构；没加载时返回 null。 */
-    private static ServerSubLevel find(final ServerLevel level, final UUID bodyId) {
+    static ServerSubLevel find(final ServerLevel level, final UUID bodyId) {
         final ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
         if (container == null) {
             return null;

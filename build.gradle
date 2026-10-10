@@ -284,6 +284,12 @@ def nativeDll = layout.projectDirectory.file(
         'depends/sable-main/sable_rapier/src/main/rust/target/release/sable_rapier.dll').asFile
 def nativeOutDir = layout.projectDirectory.dir('src/main/resources/sablestopnow/native')
 
+// ★ 版权/分发注意（2026-10-06）：
+//   sable_rapier 的 DLL 是 Sable（Polyform Shield 1.0.0，**非开源**）的衍生物 ✓
+//   ⇒ 默认**不**把它拷进 jar ✗（避免本项目的产物再分发第三方二进制 ✗）。
+//   需要内置时显式开：gradlew build -Psablestopnow.syncNative=true
+def syncNative = providers.gradleProperty('sablestopnow.syncNative').orNull == 'true'
+
 tasks.register('syncNativeLibrary') {
     group = 'build'
     description = '把我们自建的 Sable 原生库（含凸包）拷进模组资源；不存在则跳过。'
@@ -305,4 +311,6 @@ tasks.register('syncNativeLibrary') {
     }
 }
 
-tasks.named('processResources').configure { dependsOn 'syncNativeLibrary' }
+if (syncNative) {
+    tasks.named('processResources').configure { dependsOn 'syncNativeLibrary' }
+}

@@ -43,8 +43,32 @@ public final class SablePhysicsExt {
      * 而 Sable 自己的加载已经被 {@code Rapier3DNativeOverrideMixin} 在 HEAD 处**取消**掉了 ✓
      * —— 这样进程里只有**一份** Rapier 实例（两份 = 两个互不接触的物理世界 ✗）。
      */
+    /** 原生库构建号 —— 见 convex.rs ✓ 每次改原生都要 +1 ✓ */
+    public static native long nativeBuildId();
+
     static {
         NativeLibrary.load();
+    }
+
+    /**
+     * **启动标志**：加载自建原生库，并把它的构建号打进日志 ✓。
+     *
+     * <p>由 {@code SablestopNow} 的构造器调用 ⇒ **每次启动必然出现一行** ✓：
+     * <pre>[native] sable_rapier BUILD ID = 2610031449</pre>
+     *
+     * <p>⚠ 为什么必须由构造器主动调用，而不能只靠静态块：类的静态块只在**首次用到这个类**时跑 ✗，
+     * 那样标志会一直推迟到"实机第一次挂凸包"才出现 ✗ —— 等于没有启动标志 ✗。
+     *
+     * <p>⚠ 报错时**一定要把异常打全** ✓：这里以前只打一句"不匹配" ✗，
+     * 而真正的原因是原生侧**压根没有这个函数** ✗（见 convex.rs 里的历史教训 ✓）。
+     */
+    public static void initNative() {
+        try {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.warn("[native] sable_rapier BUILD ID = {}", nativeBuildId());
+        } catch (final Throwable t) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.error(
+                    "[native] 无法读取构建号（DLL 里没有 nativeBuildId ✗）= 游戏加载的原生库里没有这个函数", t);
+        }
     }
 
     private SablePhysicsExt() {
@@ -105,6 +129,47 @@ public final class SablePhysicsExt {
      */
     public static native long createConvexBody(long scene, int id, double[] points,
                                                double density, double[] pose);
+
+    /**
+     * **精细地面碰撞箱**（"地面补丁"）—— 建一个**独立的静态刚体**，携带 N 个盒碰撞体。
+     *
+     * <h2>为什么需要</h2>
+     * 曲面实体与**地面**的接触是"圆角凸包 vs 巨大极薄的板" ✗ ⇒ 落进 Rapier 写明的
+     * EPA 退化区（接触法线算错 ✗）⇒ 实机症状：先成功落地、再偶发 47.7 格/秒暴力弹射、
+     * 静止高度远低于视觉地面 ✗✓（而"结构 ↔ 结构"因为两边都是正常尺寸小盒所以正常 ✓）。
+     * ⇒ 实体接近地面时，用它下方的世界方块铺一层**正常尺寸的小盒** ✓ 让接触回到正常窄相 ✓。
+     *
+     * <h2>⚠ 刻意不用 {@code LevelCollider}</h2>
+     * 那条路要过 Sable 的 solver-hook / manifold-id 机制 ✗（查不到 id 即视为无接触 ✗✓）
+     * ⇒ 用它会重蹈同一个病 ✓。本函数与 {@code boxes.rs::createBox} 同形态
+     * （**不加** {@code LEVEL_GROUP} ✓）—— fork 注释里亲手标注过那条路 "which works" ✓✓。
+     *
+     * @param scene    物理场景句柄（{@code Rapier3D.getSceneHandle(level)}）
+     * @param id       我们自己分配的刚体 id（{@code Rapier3D.nextBodyID()}）
+     * @param boxes    扁平 {@code [minX,minY,minZ,maxX,maxY,maxZ] × N}，**世界坐标**（方块单位）
+     * @param friction 摩擦系数
+     * @return 该刚体 id；{@code < 0} 表示失败
+     */
+    public static native long createStaticBoxes(long scene, int id, double[] boxes,
+                                                double friction);
+
+    /**
+     * 拆掉 {@link #createStaticBoxes} 建的那个静态刚体（连同它的全部盒碰撞体 ✓）。
+     *
+     * <p>⚠ 必须调 ✓ —— 否则"实体走到哪 ⇒ 地面补丁铺到哪"会一直累积 ✗（既漏内存又拖慢步进 ✗）。
+     * <p>幂等 ✓：{@code id} 无效时什么都不做 ✓，所以清理路径可以放心地重复调用 ✓。
+     */
+    public static native void removeStaticBoxes(long scene, int id);
+
+    /**
+     * 软 CCD（soft CCD）—— 用户建议 ✓ 2026-10-03。
+     * 我们的症状是"圆管落下就陷进地里"✗ ⇒ 深穿透类失败 ✓。
+     * Rapier 的 enable_ccd 与软 CCD（set_soft_ccd_prediction）正是为此设计 ✓：
+     * 给接触预测提前量 ⇒ 穿透之前就生成接触 ⇒ 不先陷进去再纠正 ✓。
+     * ⚠ 只开标志 ✓ 不动几何/质量/碰撞分组 ✓ ⇒ 最"干净"的一个旋钮 ✓。
+     * @param prediction 提前量（方块单位）；<=0 表示只开 CCD ✓
+     */
+    public static native boolean enableSoftCcd(long scene, int mountId, double prediction);
 
     /**
      * 生成一个**正棱柱**（圆柱的多边形近似）的凸包顶点。

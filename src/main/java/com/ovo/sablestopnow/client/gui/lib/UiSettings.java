@@ -11,6 +11,14 @@ public final class UiSettings {
     /** 字体缩放（0.5 ~ 1.0），由配置写入。默认 1.0：原版是点阵字体，非整数缩放会发虚。 */
     public static float fontScale = 1.0f;
 
+    /**
+     * **自动缩字号的下限** ✓（P3/新要求：窄了先缩字号，缩到这个比例还不行为止 ✓）。
+     *
+     * <p>为什么做成设置 ✗✓：不同界面能容忍的"变小"程度不同 ✓ ——
+     * 工具条那种一排按钮希望多缩一点（0.7）✓，正文标签希望少缩一点（0.9）✓。
+     * 默认 0.80：再小点阵字就发虚了 ✓。
+     */
+    public static float textShrinkMin = 0.80f;
     /** 调试：在界面上画出控件边界。 */
     public static boolean debugBounds = false;
 

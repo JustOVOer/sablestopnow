@@ -1,4 +1,4 @@
-﻿{
+{
   "itemGroup.sablestopnow": "Example Mod Tab",
   "block.sablestopnow.example_block": "Example Block",
   "item.sablestopnow.example_item": "Example Item",
@@ -46,6 +46,8 @@
   "config.sablestopnow.axis_constant_size": "Axis Constant Screen Size",
   "config.sablestopnow.axis_angle_degrees": "Axis Angle (degrees)",
   "config.sablestopnow.outline_thickness": "Outline box thickness (blocks)",
+  "config.sablestopnow.collision.hull_inset": "Hull inset (blocks)",
+  "config.sablestopnow.collision.hull_max_pieces": "Max convex pieces",
   "config.sablestopnow.staff_enhance.staff_outline_thickness": "Staff outline box thickness (blocks)",
   "config.sablestopnow.staff_enhance.staff_outline_bold_scale": "Bold outline scale",
 
@@ -239,6 +241,10 @@
   "gui.sablestopnow.opt.speed_limit_enabled.desc": "线速度超过阈值时自动锁定并广播（被拖拽的豁免） | Locks bodies that move too fast",
   "gui.sablestopnow.opt.speed_limit_threshold": "超速阈值 | Speed threshold",
   "gui.sablestopnow.opt.speed_limit_threshold.desc": "单位：格/秒 | Blocks per second",
+  "gui.sablestopnow.opt.hull_inset": "凸包内凹 | Hull inset",
+  "gui.sablestopnow.opt.hull_inset.desc": "曲面实体的凸包每个面往里收多少格；0 = 完全不收 | Blocks each hull face is inset by (0 = off)",
+  "gui.sablestopnow.opt.hull_max_pieces": "凸分解块数上限 | Max convex pieces",
+  "gui.sablestopnow.opt.hull_max_pieces.desc": "非凸/带孔的形状最多拆成几个凸块（1 = 关闭凸分解，孔会被填掉） | Convex pieces a non-convex solid may be split into (1 = off)",
 
   "gui.sablestopnow.opt.enable_staff_enhance": "启用物理手杖增强 | Enable staff enhancements",
   "gui.sablestopnow.opt.enable_staff_enhance.desc": "总开关：关闭时手杖行为与原版航空学完全一致 | Master switch",
@@ -374,6 +380,7 @@
   "gui.sablestopnow.section.force": "力过滤与记录 | Force filter & records",
   "gui.sablestopnow.section.assembly": "组装与放置 | Assembly & placement",
   "gui.sablestopnow.section.speed": "超速保护 | Overspeed guard",
+  "gui.sablestopnow.section.hull": "凸包碰撞 | Hull collision",
   "gui.sablestopnow.section.staff_core": "总开关与信息面板 | Master switch & info panel",
   "gui.sablestopnow.section.staff_outline": "手杖描边 | Staff outlines",
   "gui.sablestopnow.section.staff_control": "操作手感 | Control feel",
@@ -391,6 +398,8 @@
   "gui.sablestopnow.opt.ui_animations.desc": "界面动画总开关：关闭后色块展开、滑入、淡入淡出等全部直接到位（低配机器或觉得晃眼时关掉） | Master switch for every animation in the settings GUI",
   "gui.sablestopnow.opt.ui_font_scale": "界面字号缩放 | UI font scale",
   "gui.sablestopnow.opt.ui_font_scale.desc": "设置界面的文字缩放（0.5~1.0）：调小可以让一屏塞下更多设置项 | Text scale of the settings GUI (0.5~1.0)",
+  "gui.sablestopnow.opt.ui_text_shrink_min": "文字自动缩字号下限",
+  "gui.sablestopnow.opt.ui_text_shrink_min.desc": "文字放不下时先按这个比例缩小，再退回短标签/换行/省略号。0.6~1.0，默认 0.80。",
 
   "config.sablestopnow.ui.ui_animations": "界面动画开关 | UI animations",
   "config.sablestopnow.ui.ui_font_scale": "界面字号缩放 | UI font scale",
@@ -544,6 +553,11 @@
   "model.sketch.tool.arc": "圆弧（圆心/起点/终点）",
   "model.sketch.tool.circle": "圆",
   "model.sketch.tool.select": "选择",
+  "model.sketch.tool.select.short": "选",
+  "model.sketch.tool.line.short": "线",
+  "model.sketch.tool.rectangle.short": "矩",
+  "model.sketch.tool.circle.short": "圆",
+  "model.sketch.tool.arc.short": "弧",
   "model.sketch.done": "完成草图",
   "model.sketch.cancel": "放弃",
   "model.tool.normal_to.short": "正视此面",

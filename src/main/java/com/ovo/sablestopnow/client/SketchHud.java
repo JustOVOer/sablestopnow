@@ -434,6 +434,20 @@ public final class SketchHud {
         if (shown == null) {
             return;
         }
+        // ★ 需求 (4)「悬停可标注实体时**光标变化**」✓
+        //   做法 ✓：在**指针本体位置**画一个标注光标**准星** ✓（CAD 里的尺寸光标 ✓）
+        //   为什么不动系统指针 ✗：GLFW 指针由 Minecraft 每帧接管 ✓ 强改会闪烁甚至消失 ✗
+        final int curX = guiX(mc);
+        final int curY = guiY(mc);
+        final int curArgb = session.lockedVariant() >= 0 ? 0xEEFFCC55 : 0xAAFFCC55;
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, curX + 3, curY - 9, curX + 3, curY - 3,
+                1.4f, curArgb);
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, curX + 3, curY + 3, curX + 3, curY + 9,
+                1.4f, curArgb);
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, curX - 9, curY + 3, curX - 3, curY + 3,
+                1.4f, curArgb);
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, curX + 3, curY + 3, curX + 9, curY + 3,
+                1.4f, curArgb);
         final int px = guiX(mc) + OFFSET_X;
         final int py = guiY(mc) + OFFSET_Y + 12; // 让开吸附提示那一行 ✓ 免得两者叠字 ✗
         final String text = Component.translatable(shown.labelKey()).getString()

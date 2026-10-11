@@ -357,11 +357,15 @@ public final class SketchClient {
                             session.clearSelection();
                         }
                         // ★ 立刻在**鼠标旁**弹出改值小框 ✓（SolidWorks 的 Modify 框 ✓ 用户要求 ✓）
-                        //   刚落的约束就是最后一条 ✓ 所以下标 = size()-1 ✓
-                        com.ovo.sablestopnow.client.SketchHud.openEdit(
-                                work.constraints().size() - 1, cand.labelKey(), cand.value());
-                    }
+                        //   下标必须用"同 kind 同操作数"找出来的**真实下标** ✓
+                        //   （原来用 size()-1 ✗：过定义拦截走**替换**时约束数量不变 ⇒ 会指到别的约束 ✗
+                        //     表现正是用户实测的"线线距离确定后几何没有改变"✗）
+                        final int ci = session.dimensionIndexOf(cand.solverKind(), cand.vars());
+                        if (ci >= 0) {
+                            com.ovo.sablestopnow.client.SketchHud.openEdit(ci, cand.labelKey(), cand.value());
+                        }
                 }
+            }
             }
             return true; // 消费掉 ✓ 不让草图模式再把它当成"落点"✗
         }

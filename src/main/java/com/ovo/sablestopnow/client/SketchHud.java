@@ -51,6 +51,8 @@ public final class SketchHud {
     public record LabelHit(int constraintIndex, boolean driving, double x, double y) {
     }
 
+    /** 尺寸绘制诊断节流 ✓（每秒最多一行 ✓ 用来定位"尺寸画不出来"✗）。 */
+    private static long dimDrawDiagMs;
     private static final java.util.List<LabelHit> LABEL_HITS = new java.util.ArrayList<>();
 
     /**
@@ -311,6 +313,16 @@ public final class SketchHud {
                 new java.util.ArrayList<>();
         all.addAll(com.ovo.sablestopnow.sketch.SketchMeasure.referenceDimensions(working));
         all.addAll(com.ovo.sablestopnow.sketch.SketchMeasure.existingDimensions(working));
+        // ★ 诊断 ✓：一次分清"列表为空"✗ / "子结构为空"✗ / "投影失败"✗（三者处置完全不同 ✓）
+        final long nowMs = System.currentTimeMillis();
+        if (nowMs - dimDrawDiagMs >= 1000L) {
+            dimDrawDiagMs = nowMs;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[sketch-dim-draw] list={} sub=ok firstAnchor=({},{})",
+                    all.size(),
+                    all.isEmpty() ? 0.0 : all.get(0).anchorU(),
+                    all.isEmpty() ? 0.0 : all.get(0).anchorV());
+        }
         for (final var d : all) {
             final double[] luv = labelUv(d); // ★ 画与命中共用这个位置 ✓（拖过就用拖到的 ✓）
             final org.joml.Vector3d local =
@@ -318,7 +330,7 @@ public final class SketchHud {
             final org.joml.Vector3d world = sub.renderPose().transformPosition(local, tmp);
             final double[] screen = com.ovo.sablestopnow.client.model.ModelCamera
                     .projectToScreen(new net.minecraft.world.phys.Vec3(world.x, world.y, world.z), mc);
-            if (screen == null || screen.length < 3 || screen[2] <= 0.0) {
+            if (screen == null || screen.length < 2) { // ★ 只要 2 个分量 ✓（projectToScreen 返回 {x,y} ✗ 无深度 ✓；
                 continue; // 在相机背后 / 投影失败 → 不画（否则文字会在屏幕上乱飘）
             }
             // ---- 尺寸线（SolidWorks 的画法：线**穿过标签**，两端有界线与箭头 ✓）----
@@ -760,7 +772,7 @@ public final class SketchHud {
         final org.joml.Vector3d world = sub.renderPose().transformPosition(local, tmp);
         final double[] screen = com.ovo.sablestopnow.client.model.ModelCamera
                 .projectToScreen(new net.minecraft.world.phys.Vec3(world.x, world.y, world.z), mc);
-        if (screen == null || screen.length < 3 || screen[2] <= 0.0) {
+        if (screen == null || screen.length < 2) { // ★ 只要 2 个分量 ✓（projectToScreen 返回 {x,y} ✗ 无深度 ✓；
             return null;
         }
         return screen;

@@ -153,6 +153,27 @@ public final class SketchSession {
      * @param vars  该约束的变量表 ✓（与 shim 的 kind 表一致 ✓）
      * @return true = 落成了（新建或改值 ✓）；false = 没动（不可表达 / 参数不对 ✓）
      */
+    /**
+     * 找到"同 kind 同操作数"的约束下标 ✓；没有则 -1 ✓。
+     *
+     * <p>为什么需要它 ✗✓：`dimensionWith` 在**过定义拦截**时会**替换**已有约束（数量不增 ✓），
+     * 调用方若用"constraints().size()-1"当新约束下标 ⇒ 会指到**别的**约束上 ✗
+     * ⇒ 表现就是"改值确定后几何没有改变"（用户实测 ✓）。
+     */
+    public int dimensionIndexOf(final int kind, final int[] vars) {
+        if (this.working == null || vars == null) {
+            return -1;
+        }
+        final java.util.List<Sketch.Constraint> list = this.working.constraints();
+        for (int i = 0; i < list.size(); i++) {
+            final Sketch.Constraint c = list.get(i);
+            if (c.kind() == kind && sameOperands(c.operands(), vars)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     public boolean dimensionWith(final int kind, final double value, final int[] vars) {
         if (this.working == null || vars == null || vars.length == 0 || kind == 0) {
             return false;

@@ -657,21 +657,6 @@ public final class ModelUi {
         //   作用对象 = 当前**选中的图元** ✓（选中一条线再点 ⇒ 它变辅助线/变回实体 ✓）
         //   外观 ✓ 世界渲染画实线 + 我在 SketchHud 叠一层**虚线** ✓（用户确认：辅助线就是虚线 ✓）
         //   ⚠ 教训 ✓：上一轮我删「吸附即约束」按键时**把它一起删了** ✗（删除区间要按行核对 ✓）
-        final var constructionBtn = new Button(
-                Component.translatable("model.sketch.construction"), () -> {
-                    final var sel = session.selection();
-                    if (sel.isEmpty() || session.working() == null) {
-                        return;
-                    }
-                    final boolean nowConstruction = session.working().toggleConstruction(sel.get(0));
-                    com.ovo.sablestopnow.client.model.ModelMode.prompt(nowConstruction
-                            ? "model.sketch.construction_on" : "model.sketch.construction_off");
-                    refreshLeftPanel();
-                });
-        constructionBtn.toggled = !session.selection().isEmpty()
-                && session.working() != null
-                && session.working().isConstruction(session.selection().get(0));
-        body.add(constructionBtn);
         // ★ **尺寸链**开关 ✓（需求 (3) 的最后一条 ✓ 与"辅助线"同一套写法 ✓）
         final var chainBtn = new Button(Component.translatable("model.dim.chain"), () -> {
             session.setChainMode(!session.chainMode());
@@ -2146,11 +2131,21 @@ public final class ModelUi {
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.CIRCLE, session));
                 // 圆弧：三次点击（圆心 → 起点 → 终点）
                 row.add(sketchToolButton("model.sketch.tool.arc",
-                        com.ovo.sablestopnow.sketch.SketchSession.Tool.ARC, session));                // ★ **智能尺寸**（SolidWorks 的 Smart Dimension ✓）—— 用户反馈"没有入口"✗
-                //   它是第 6 个工具按钮 ✓ 与另外五个同一套写法 ✓
-                //   （`hboxWrap` 会自动折行 ✓ 文字会自动短标签 ✓ ⇒ 加第 6 个也不会遮盖 ✓）
-                row.add(sketchToolButton("model.sketch.tool.dimension",
-                        com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION, session));
+                        com.ovo.sablestopnow.sketch.SketchSession.Tool.ARC, session));
+                // ★ **辅助线** ✓：按用户要求放在**图元按键**里 ✓ 且是**直接绘制**模式 ✓（不是转换 ✗）
+                //   开启后用直线工具画出来的图元**直接就是辅助线** ✓（虚线外观 ✓ 不计入轮廓/拉伸 ✓）
+                final var constructionTool = new com.ovo.sablestopnow.client.gui.lib.Button(
+                        Component.translatable("model.sketch.construction"), () -> {
+                            session.setConstructionDraw(!session.constructionDraw());
+                            com.ovo.sablestopnow.client.model.ModelMode.prompt(
+                                    session.constructionDraw()
+                                            ? "model.sketch.construction_on"
+                                            : "model.sketch.construction_off");
+                            refreshLeftPanel();
+                        });
+                constructionTool.prefW = 26;
+                constructionTool.toggled = session.constructionDraw();
+                row.add(constructionTool);
                 body.add(row);
                 body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
                 // 几何约束：作用在**当前选中的图元**上（左栏「选择」工具点中的那个）。

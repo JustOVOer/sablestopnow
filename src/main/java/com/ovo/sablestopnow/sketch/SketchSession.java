@@ -241,6 +241,35 @@ public final class SketchSession {
      */
     private boolean chainMode;
 
+    /**
+     * **辅助线绘制模式** ✓（用户要求 ✓ 直接绘制辅助线，而不是把已有图元"转"成辅助线 ✗）。
+     *
+     * <p>开启后，**下一个画出来的图元直接就是辅助线** ✓（与普通直线同一个工具 ✓ 只是标记不同 ✓）。
+     */
+    private boolean constructionDraw;
+
+    public boolean constructionDraw() {
+        return this.constructionDraw;
+    }
+
+    public void setConstructionDraw(final boolean value) {
+        this.constructionDraw = value;
+    }
+
+    /**
+     * 若开着**辅助线绘制模式** ⇒ 把**刚创建的图元**直接标记为辅助线 ✓
+     *（用户要求：直接绘制辅助线 ✓ 不是把已有图元转过去 ✗）。
+     */
+    private void markConstructionIfDrawing() {
+        if (!this.constructionDraw || this.working == null) {
+            return;
+        }
+        final java.util.List<Sketch.Entity> all = this.working.entities();
+        if (!all.isEmpty()) {
+            this.working.toggleConstruction(all.get(all.size() - 1));
+        }
+    }
+
     public boolean chainMode() {
         return this.chainMode;
     }
@@ -750,6 +779,7 @@ public final class SketchSession {
                     final double[] q = reflect(working.variable(v[2]), working.variable(v[3]),
                             ax, ay, dx, dy, len2);
                     working.addLine(p[0], p[1], q[0], q[1]);
+                    markConstructionIfDrawing(); // ★ 直接绘制辅助线 ✓（用户要求 ✓）
                     created++;
                 }
                 case CIRCLE -> {
@@ -758,6 +788,7 @@ public final class SketchSession {
                             ax, ay, dx, dy, len2);
                     final double r = Math.abs(working.variable(v[2]));
                     working.addCircle(c[0], c[1], r);
+                    markConstructionIfDrawing(); // ★ 直接绘制辅助线 ✓（用户要求 ✓）
                     created++;
                 }
                 case ARC -> {
@@ -771,6 +802,7 @@ public final class SketchSession {
                     final double na0 = 2.0 * theta - a1;
                     final double na1 = 2.0 * theta - a0;
                     working.addArc(c[0], c[1], r, na0, na1);
+                    markConstructionIfDrawing(); // ★ 直接绘制辅助线 ✓（用户要求 ✓）
                     created++;
                 }
                 case POINT -> {
@@ -778,6 +810,7 @@ public final class SketchSession {
                     final double[] p = reflect(working.variable(v[0]), working.variable(v[1]),
                             ax, ay, dx, dy, len2);
                     working.addPoint(p[0], p[1]);
+                    markConstructionIfDrawing(); // ★ 直接绘制辅助线 ✓（用户要求 ✓）
                     created++;
                 }
                 default -> {

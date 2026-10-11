@@ -545,6 +545,7 @@
   "model.sketch.constraint_selected": "已选中该约束（按 Delete 删除）",
   "model.smart.open": "智能尺寸（点这里开始标注）",
   "model.sketch.construction": "辅助线",
+  "model.dim.chain": "尺寸链（保留基准）",
   "model.sketch.construction_on": "已转为辅助线",
   "model.sketch.construction_off": "已转回实体",
   "model.relation.parallel": "平行",

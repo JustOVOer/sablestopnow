@@ -323,18 +323,26 @@ public final class SketchClient {
             // ★ 修实测根因 ✓：智能尺寸下**第一次点图元要能选中它** ✓
             //   （以前这里直接去"放置"✗ ⇒ 选择恒为空 ⇒ 预览永远不出现 ✗✓）
             //   SolidWorks 的做法 ✓：点实体 ⇒ 选中并开始预览 ✓；已有选择时再点 ⇒ 放置 ✓。
-            if (picked.isEmpty()) {
-                final Vector3d uvPick = MODE.planePoint(localFrom, localDir);
-                if (uvPick != null) {
-                    final var hit = session.pickEntity(uvPick.x, uvPick.y, MODE.pickTolerance());
-                    if (hit != null) {
-                        session.toggleEntity(hit);
-                        return true; // 这一步只负责选中 ✓ 不放置 ✗
-                    }
+            final Vector3d uvPick = MODE.planePoint(localFrom, localDir);
+            final var hit = uvPick == null ? null
+                    : session.pickEntity(uvPick.x, uvPick.y, MODE.pickTolerance());
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[sketch-dim] click: hit={} selection={} entities={} constraints={}",
+                    hit == null ? "none" : hit.kind(), picked.size(),
+                    work == null ? -1 : work.entities().size(),
+                    work == null ? -1 : work.constraints().size());
+            // ★ SolidWorks 语义 ✓（我前两版各错一次 ✗ 这是修正版 ✓）：
+            //     点**图元** ⇒ 加入选择（最多两个 ✓）  点**空白** ⇒ 用当前选择**放置** ✓
+            //   为什么必须这样 ✗✓：若"点第二个图元"就直接放置 ⇒ 永远选不中第二个 ✗
+            //     ⇒ 两图元尺寸（线线距离 / 两线夹角 ✓ 需求 (3) ✓）走不通 ✗
+            if (hit != null) {
+                if (picked.size() >= 2) {
+                    session.clearSelection(); // 已选两个还想选 ⇒ 从这一个重新开始 ✓ 不至于卡住 ✓
                 }
-                return true; // 点到空处 ⇒ 消费掉 ✓ 不清选择 ✗
+                session.toggleEntity(hit);
+                return true; // 只负责选中 ✓ 不放置 ✗
             }
-            if (work != null && picked.size() <= 2) {
+            if (work != null && !picked.isEmpty() && picked.size() <= 2) {
                 final var cand = com.ovo.sablestopnow.sketch.SketchMeasure.preview(
                         work, picked, session.hoverU(), session.hoverV(), session.lockedVariant());
                 if (cand != null) {
@@ -343,7 +351,16 @@ public final class SketchClient {
                     MODE.solve();
                     com.ovo.sablestopnow.client.model.ModelMode.prompt(placed
                             ? "model.measure.added" : "model.measure.not_lockable");
-                            if (placed) { session.clearSelection(); } // 放完就清 ✓ 下一次点击重新开始选 ✓（SolidWorks 一致 ✓）
+                    if (placed) {
+                        // 放完就清 ✓ —— 但**尺寸链**模式下要**保留选择** ✓ 让下一个图元加到同一基准上 ✓（需求 (3) ✓）
+                        if (!session.chainMode()) {
+                            session.clearSelection();
+                        }
+                        // ★ 立刻在**鼠标旁**弹出改值小框 ✓（SolidWorks 的 Modify 框 ✓ 用户要求 ✓）
+                        //   刚落的约束就是最后一条 ✓ 所以下标 = size()-1 ✓
+                        com.ovo.sablestopnow.client.SketchHud.openEdit(
+                                work.constraints().size() - 1, cand.labelKey(), cand.value());
+                    }
                 }
             }
             return true; // 消费掉 ✓ 不让草图模式再把它当成"落点"✗

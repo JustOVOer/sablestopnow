@@ -131,6 +131,13 @@ public final class SketchHud {
         box.minW = 180;
         box.minH = 62;
         box.layout = Layouts.vbox(10, 4);
+        // ★ 贴到**鼠标旁** ✓（用户要求：落下尺寸时应在鼠标旁边弹窗改长度 ✓ 别塞进左栏 ✗）
+        //   实现 ✓：图层根用绝对布局 ⇒ 控件自己带 x/y ✓（Widget.x/y + Layouts.absolute ✓）
+        layer.root.layout = Layouts.absolute();
+        box.x = clamp((int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() + 14, 6,
+                Math.max(6, layer.root.w - box.minW - 6));
+        box.y = clamp((int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() + 10, 6,
+                Math.max(6, layer.root.h - box.minH - 6));
         box.add(new Label(Component.translatable(labelKey)).color(0xFFFFCC55));
         // 数值输入 ✓：numeric() + 打开就全选 ✓（照 ModelCouplingUi 的既有用法 ✓）
         final com.ovo.sablestopnow.client.gui.lib.TextField field =

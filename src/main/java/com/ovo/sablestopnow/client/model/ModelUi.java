@@ -653,6 +653,32 @@ public final class ModelUi {
         openSmart.toggled = session.tool()
                 == com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION;
         body.add(openSmart);
+        // ★ **辅助线**开关 ✓（SolidWorks 的 Construction Geometry ✓ 用户要求 ✓）
+        //   作用对象 = 当前**选中的图元** ✓（选中一条线再点 ⇒ 它变辅助线/变回实体 ✓）
+        //   外观 ✓ 世界渲染画实线 + 我在 SketchHud 叠一层**虚线** ✓（用户确认：辅助线就是虚线 ✓）
+        //   ⚠ 教训 ✓：上一轮我删「吸附即约束」按键时**把它一起删了** ✗（删除区间要按行核对 ✓）
+        final var constructionBtn = new Button(
+                Component.translatable("model.sketch.construction"), () -> {
+                    final var sel = session.selection();
+                    if (sel.isEmpty() || session.working() == null) {
+                        return;
+                    }
+                    final boolean nowConstruction = session.working().toggleConstruction(sel.get(0));
+                    com.ovo.sablestopnow.client.model.ModelMode.prompt(nowConstruction
+                            ? "model.sketch.construction_on" : "model.sketch.construction_off");
+                    refreshLeftPanel();
+                });
+        constructionBtn.toggled = !session.selection().isEmpty()
+                && session.working() != null
+                && session.working().isConstruction(session.selection().get(0));
+        body.add(constructionBtn);
+        // ★ **尺寸链**开关 ✓（需求 (3) 的最后一条 ✓ 与"辅助线"同一套写法 ✓）
+        final var chainBtn = new Button(Component.translatable("model.dim.chain"), () -> {
+            session.setChainMode(!session.chainMode());
+            refreshLeftPanel();
+        });
+        chainBtn.toggled = session.chainMode();
+        body.add(chainBtn);
         //   只列**关系**（水平/竖直/平行/垂直/等长/中点/重合/固定 ✓）✗——
         //   尺寸已经在上面那份列表里了 ✓ 两边都列会让人以为标重了 ✗。
         //   用统一库的 Button + hboxWrap ✓ ⇒ 窄了自动折行 ✓ 文字自动短标签 ✓ 不会遮盖 ✓
@@ -841,6 +867,8 @@ public final class ModelUi {
                                            final com.ovo.sablestopnow.sketch.SketchSession session) {
         final Button button = new Button(Component.translatable(labelKey), () -> {
             com.ovo.sablestopnow.client.SketchClient.mode().setTool(value);
+            // 可观测性 ✓（放模组侧：SketchSession 被离线 harness 单独编译 ✗ 不能依赖 SablestopNow ✓）
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch] tool={}", value);
             refreshLeftPanel();
         });
         // ⚠ 不能用 FILL ✗：hboxFit 的比例缩放会跳过 FILL 子控件（源码 L164 ✓）

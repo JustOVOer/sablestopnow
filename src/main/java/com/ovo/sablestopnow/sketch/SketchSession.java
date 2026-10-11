@@ -213,6 +213,22 @@ public final class SketchSession {
     private boolean snapConstraints = true;
 
     /**
+     * **尺寸链**模式 ✓（SolidWorks 的 Baseline 尺寸 ✓ 需求 (3) 的一条 ✓）。
+     *
+     * <p>语义 ✓：放置一条尺寸后**不清空选择** ✓ ⇒ 下一个被点的图元会**加到同一个基准上** ✓
+     * ⇒ 于是"基准线 → 后面每个图元"依次成链 ✓（点空白放置 ✓ 点图元加选 ✓ 与已有手势完全一致 ✓）。
+     */
+    private boolean chainMode;
+
+    public boolean chainMode() {
+        return this.chainMode;
+    }
+
+    public void setChainMode(final boolean value) {
+        this.chainMode = value;
+    }
+
+    /**
      * 当前**选中的约束**下标 ✓（-1 = 没选中 ✓）—— 用户点图元旁的小图标选中它 ✓ 再删掉 ✓
      * （SolidWorks：点几何关系图标 ⇒ 高亮 ⇒ Delete 删除 ✓）。
      */
@@ -313,8 +329,6 @@ public final class SketchSession {
     }
 
     public void setTool(final Tool value) {
-        // 可观测性 ✓：切工具时打一行 ⇒ 排查"按钮没生效/工具没切过去"时看日志即可 ✓（不猜 ✗）
-        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch] tool={}", value);
         this.tool = value;
         // 换工具必须丢掉上一半的输入，否则会出现"用直线的第一个点点出一个矩形"
         this.pending.clear();

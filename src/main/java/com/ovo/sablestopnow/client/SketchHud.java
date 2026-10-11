@@ -353,8 +353,8 @@ public final class SketchHud {
                     }
                     // 尺寸线本体 + 两端箭头（用统一库的矢量绘制 ✓ 不手写 fill ✗）
                     // ★ 箭头改成**开放式 V 形** ✓（参考图 1/2/3/4 全是这种 ✓ 我原来画的是实心圆点 ✗）
-                    dimArrow(g, ax, ay, bx, by, lineArgb, true);
-                    dimArrow(g, bx, by, ax, ay, lineArgb, true);
+                    dimArrow(g, ax, ay, bx, by, lineArgb);
+                    dimArrow(g, bx, by, ax, ay, lineArgb);
                     // ★ 尺寸线**在文字处断开** ✓（参考图 1 最清楚：左段 + 文字 + 右段 ✓ 我原来线穿过文字 ✗）
                     //   做法 ✓：量出文字半宽 ⇒ 把尺寸线画成两段 ✓ 中间留白给文字 ✓
                     final double segLen = Math.hypot(bx - ax, by - ay);
@@ -802,7 +802,7 @@ public final class SketchHud {
     private static void dimArrow(final net.minecraft.client.gui.GuiGraphics g,
                                  final double tipX, final double tipY,
                                  final double fromX, final double fromY,
-                                 final int argb, final boolean unusedFilled) {
+                                 final int argb) {
         final double dx = tipX - fromX;
         final double dy = tipY - fromY;
         final double len = Math.hypot(dx, dy);

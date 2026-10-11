@@ -470,7 +470,14 @@ public final class SketchClient {
 
     /** 完成并提交给服务端；没在编辑就什么都不做。 */
     public static void finish() {
+        com.ovo.sablestopnow.client.SketchHud.closeEdit(); // ★ 退出草图 ⇒ 关掉改值浮层 ✓（否则输入被挡住 ✓）
         final Sketch sketch = MODE.finish();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch] exit: anyOpen={} blocksWorldInput={} active={} stage={} tool={}",
+                com.ovo.sablestopnow.client.gui.lib.Ui.anyOpen(),
+                com.ovo.sablestopnow.client.gui.lib.Ui.blocksWorldInput(),
+                com.ovo.sablestopnow.client.SketchClient.active(), MODE.stage(),
+                MODE.session() == null ? "none" : MODE.session().tool());
         SketchRenderer.setEditing(null);
         if (sketch != null) {
             SketchNetworking.sendSave(sketch);
@@ -479,7 +486,14 @@ public final class SketchClient {
 
     /** 放弃（不提交）。 */
     public static void cancel() {
+        com.ovo.sablestopnow.client.SketchHud.closeEdit(); // ★ 取消草图 ⇒ 关掉改值浮层 ✓（否则输入被挡住 ✓）
         MODE.cancel();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch] exit: anyOpen={} blocksWorldInput={} active={} stage={} tool={}",
+                com.ovo.sablestopnow.client.gui.lib.Ui.anyOpen(),
+                com.ovo.sablestopnow.client.gui.lib.Ui.blocksWorldInput(),
+                com.ovo.sablestopnow.client.SketchClient.active(), MODE.stage(),
+                MODE.session() == null ? "none" : MODE.session().tool());
         SketchRenderer.setEditing(null);
     }
 

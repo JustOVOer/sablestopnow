@@ -111,6 +111,19 @@ public final class SketchHud {
     private static int editConstraint = -1;
 
     /** 打开改值浮层 ✓（由 ModelInput 双击命中后调用 ✓）。 */
+    /** 关掉改值浮层 ✓（退出草图 / 取消草图时必须调用 ✓ 否则输入会被我们自己挡住 ✓）。 */
+    public static void closeEdit() {
+    // ★ 诊断 ✓：万一"手杖逻辑又被航空学覆盖"✗ ⇒ 这行会告诉我们是不是有层没关干净 ✓
+    com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+            "[sketch] closeEdit: anyOpen={} blocksWorldInput={} top={}",
+            com.ovo.sablestopnow.client.gui.lib.Ui.anyOpen(),
+            com.ovo.sablestopnow.client.gui.lib.Ui.blocksWorldInput(),
+            com.ovo.sablestopnow.client.gui.lib.Ui.top() == null ? "none"
+                    : com.ovo.sablestopnow.client.gui.lib.Ui.top().name);
+        Ui.close(EDIT_LAYER);
+        editConstraint = -1;
+    }
+
     public static void openEdit(final int constraintIndex, final String labelKey,
                                 final double value) {
         Ui.close(EDIT_LAYER); // 先关旧的 ✓ 重建最省心 ✓（不残留上一次的状态 ✗）
@@ -201,6 +214,9 @@ public final class SketchHud {
         final Minecraft mc = Minecraft.getInstance();
         if (!SketchClient.active() || mc.player == null || mc.level == null) {
             Ui.close(LAYER);
+            Ui.close(EDIT_LAYER); // ★ 草图不在时必须关掉**改值浮层** ✓
+            //   为什么关键 ✗✓：该层 consumeInput=true ⇒ 不关的话我们自己的输入处理会以为"有界面开着"
+            //   ⇒ 主动让位给航空学（手杖逻辑被覆盖 ✗✓）而原版 Minecraft 不认这个层 ⇒ 滚轮照样切物品栏 ✓
             snapLabel = null;
             return;
         }

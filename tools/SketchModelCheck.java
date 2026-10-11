@@ -110,6 +110,7 @@ public final class SketchModelCheck {
         revolveMesh();
         mirrorSelection();
         smartDimensions();
+        circleDimensionDisplay();
         voxelBoxes();
         debugSphereSketch();
         voxelize16();
@@ -5423,6 +5424,32 @@ public final class SketchModelCheck {
      * <p>最要紧的一条：**表达不了的必须退成参考尺寸**，不能假装标上了 ——
      * 我们的 DISTANCE 只支持点到点，角度/点到线/平行线距都落不成约束。
      */
+    /**
+     * 圆/弧尺寸的**显示参考点**必须取"上下极值" ✓（对齐 SolidWorks 参考图 3 ✓）。
+     *
+     * <p>为什么必须断言 ✗✓：这段只影响"看起来对不对" ✓ 若只靠肉眼 ⇒ 以后有人顺手改回去也不会有人发现 ✗。
+     */
+    private static void circleDimensionDisplay() {
+        final Sketch k = new Sketch(java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                "Sketch1", SketchPlane.base(SketchPlane.Base.FRONT, new Vector3d()));
+        final Sketch.Entity circle = k.addCircle(4.0, 7.0, 3.0);
+        k.addConstraint(com.ovo.sablestopnow.sketch.SketchSolver.RADIUS, 3.0,
+                circle.vars()[0], circle.vars()[1], circle.vars()[2]);
+        final var dims = com.ovo.sablestopnow.sketch.SketchMeasure.existingDimensions(k);
+        eq(dims.size(), 1, "圆半径会出现在已放置尺寸列表里");
+        final var d = dims.get(0);
+        // 标签锚点：圆心右侧一个半径再加 20px ⇒ 尺寸线落在圆**外侧** ✓（参考图 3 ✓）
+        near(d.anchorU(), 4.0 + 3.0 + 20.0, "半径标签在圆外侧（+20px）");
+        near(d.anchorV(), 7.0, "半径标签在圆心高度");
+        // 参考点：上下极值 ⇒ 界线水平引出、尺寸线竖直 ✓
+        final double[] ends = com.ovo.sablestopnow.sketch.SketchMeasure.endpointsOf(k, d);
+        check(ends != null && ends.length >= 4, "圆尺寸能推导出显示参考点");
+        near(ends[0], 4.0, "参考点 = 圆心 x");
+        near(ends[1], 7.0 - 3.0, "参考点 = 圆**下**极值 y");
+        near(ends[2], 4.0, "参考点 = 圆心 x（另一端同 x ⇒ 尺寸线竖直 ✓）");
+        near(ends[3], 7.0 + 3.0, "参考点 = 圆**上**极值 y");
+    }
+
     private static void smartDimensions() {
         // ⚠ 和别处一样必须用 editing()：直接 new SketchSession() 的话 working() 是 null
         final com.ovo.sablestopnow.sketch.SketchSession s = editing();

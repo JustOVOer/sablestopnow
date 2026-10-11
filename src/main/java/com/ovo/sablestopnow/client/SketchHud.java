@@ -305,6 +305,11 @@ public final class SketchHud {
             }
             // ---- 尺寸线（SolidWorks 的画法：线**穿过标签**，两端有界线与箭头 ✓）----
             // 参考点按需推导 ✓（推导不出就只画文字 ✓ 宁可少画不画错 ✓）
+            // ★ 参考图 3/4 ✓：尺寸线**放不下文字**时 ⇒ 文字移到线**外侧** ✓（默认沿线的方向 ✓）
+            boolean shortLine = false;
+            double lineDirX = 1.0;
+            double lineDirY = 0.0;
+
             final double[] ends = com.ovo.sablestopnow.sketch.SketchMeasure
                     .endpointsOf(working, d);
             if (ends != null) {
@@ -350,6 +355,8 @@ public final class SketchHud {
                                 mx2 + ux * half, my2 + uy * half, bx, by, 1.5f, lineArgb);
                     } else {
                         // 空间太窄 ⇒ 整条画出来 ✓（文字会落在旁边 ✓ 与参考图 3/4 的"外侧文字"一致 ✓）
+                        shortLine = true;
+                        if (segLen > 1.0e-6) { lineDirX = (bx - ax) / segLen; lineDirY = (by - ay) / segLen; }
                         com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ax, ay, bx, by, 1.5f, lineArgb);
                     }
                 }
@@ -365,10 +372,13 @@ public final class SketchHud {
             } else {
                 argb = 0xFFE6E6E6;                       // 正常
             }
+            // 文字实际落点 ✓（画与双击命中共用 ✓ —— 否则"看到的位置点不中"✗）
+            final double textX = screen[0] + (shortLine ? lineDirX * 24.0 : 0.0);
+            final double textY = screen[1] + (shortLine ? lineDirY * 24.0 : 0.0);
             com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, mc.font, text,
-                    (int) screen[0], (int) screen[1], argb, 1.0f, true);
+                    (int) textX, (int) textY, argb, 1.0f, true);
             // 登记屏幕位置 ✓ 供双击命中（一处投影 ✓ 两处使用 ✓）
-            LABEL_HITS.add(new LabelHit(d.constraintIndex(), d.driving(), screen[0], screen[1]));
+            LABEL_HITS.add(new LabelHit(d.constraintIndex(), d.driving(), textX, textY));
             shown++;
             if (shown >= 48) {
                 break; // 上限：约束很多时别把屏幕糊满，也别把 GUI 批次撑爆

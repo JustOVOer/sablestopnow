@@ -514,6 +514,7 @@
   "model.dim.made_reference": "已改为从动尺寸（约束已移除）",
   "model.dim.already_reference": "它本来就是从动尺寸",
   "model.dim.edit_ok": "确定",
+  "model.dim.unsatisfied": "该尺寸无法满足（求解器未收敛，几何已回滚）",
   "model.dim.edit_cancel": "取消",
   "model.smart.locked": "已锁定对齐方式（再次右键切换）",
   "model.smart.unlocked": "已取消锁定（回到自动捕捉）",

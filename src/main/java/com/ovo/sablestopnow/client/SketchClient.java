@@ -255,6 +255,13 @@ public final class SketchClient {
         work.replaceConstraint(constraintIndex,
                 new com.ovo.sablestopnow.sketch.Sketch.Constraint(c.kind(), c.operands(), value));
         MODE.solve();
+        // ★ 明确反馈 ✓：改值后若求解器**没满足**（或触发塌陷回滚 ✓）⇒ 提示 ✓
+        //   为什么必须提示 ✗✓：否则就是用户实测的"确定后却没有改变"✗ —— 玩家分不清"没生效"和"做不到"✗
+        final var solved = MODE.lastSolve();
+        if (solved == null || !solved.ok()) {
+            com.ovo.sablestopnow.client.model.ModelMode.prompt("model.dim.unsatisfied");
+            return false;
+        }
         return true;
     }
     /**

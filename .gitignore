@@ -96,3 +96,6 @@ AGENTS.md
 ### ezpz shim：**我们自己写的** C-ABI shim ✓ 必须随仓库分发（改它才能改约束集 ✓）
 ### 只忽略 Rust 编译产物 ✓
 /tools/ezpz-wasm/target/
+
+### SolidWorks 界面截图（用户本地参考用 ✓ 有版权 ✗ 不随仓库分发 ✓）
+/智能尺寸参考图/

@@ -322,14 +322,36 @@ public final class SketchHud {
                     final double by = sb[1] + oy;
                     final int lineArgb = d.driving() ? 0xCCE6E6E6 : 0x998C93A8;
                     // 界线：从参考点拉到尺寸线两端（留一点缝，SW 也这样 ✓）
-                    com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
-                            sa[0], sa[1], ax, ay, 1.0f, lineArgb);
-                    com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
-                            sb[0], sb[1], bx, by, 1.0f, lineArgb);
+                    // ★ 界线按参考图画 ✓：与几何**留小缝**（4px ✓）· **超出**尺寸线一小段（6px ✓）
+                    //   （参考图 1/3/4 都明显超出 ✓ 我原来"贴到尺寸线就停"✗）
+                    //   ⚠ 线线距离**不画界线** ✓（参考图 2 ✓ 两条线本身就是基准 ✓ 画了反而乱 ✗）
+                    final boolean skipExt = d.labelKey() != null && d.labelKey().contains("line_line");
+                    if (!skipExt) {
+                        extLine(g, sa[0], sa[1], ax, ay, lineArgb);
+                        extLine(g, sb[0], sb[1], bx, by, lineArgb);
+                    }
                     // 尺寸线本体 + 两端箭头（用统一库的矢量绘制 ✓ 不手写 fill ✗）
-                    com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ax, ay, bx, by, 1.5f, lineArgb);
-                    com.ovo.sablestopnow.client.gui.lib.UiVector.disc(g, ax, ay, 2.5, lineArgb);
-                    com.ovo.sablestopnow.client.gui.lib.UiVector.disc(g, bx, by, 2.5, lineArgb);
+                    // ★ 箭头改成**开放式 V 形** ✓（参考图 1/2/3/4 全是这种 ✓ 我原来画的是实心圆点 ✗）
+                    dimArrow(g, ax, ay, bx, by, lineArgb, true);
+                    dimArrow(g, bx, by, ax, ay, lineArgb, true);
+                    // ★ 尺寸线**在文字处断开** ✓（参考图 1 最清楚：左段 + 文字 + 右段 ✓ 我原来线穿过文字 ✗）
+                    //   做法 ✓：量出文字半宽 ⇒ 把尺寸线画成两段 ✓ 中间留白给文字 ✓
+                    final double segLen = Math.hypot(bx - ax, by - ay);
+                    if (segLen > 44.0) { // ≈ 数字文字宽（"5.000" 约 30px ✓）× 1.4 ⇒ 能放下才断开 ✓
+                        final double ux = (bx - ax) / segLen;
+                        final double uy = (by - ay) / segLen;
+                        final double mx2 = (ax + bx) * 0.5;
+                        final double my2 = (ay + by) * 0.5;
+                        // 用文字实际宽度决定断口 ✓（按标签在线的哪一侧不影响断口 ✓）
+                        final double half = 19.0; // 三位小数（如 "5.000"）的半个文字宽 + 余量 ✓（此处 text 还没声明 ✓ 所以用等价常量 ✓）
+                        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ax, ay,
+                                mx2 - ux * half, my2 - uy * half, 1.5f, lineArgb);
+                        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
+                                mx2 + ux * half, my2 + uy * half, bx, by, 1.5f, lineArgb);
+                    } else {
+                        // 空间太窄 ⇒ 整条画出来 ✓（文字会落在旁边 ✓ 与参考图 3/4 的"外侧文字"一致 ✓）
+                        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ax, ay, bx, by, 1.5f, lineArgb);
+                    }
                 }
             }
             // 从动/参考尺寸 ⇒ **灰 + 括号** ✓（SolidWorks 的表示法 ✓ 见任务 (5) ✓）
@@ -711,7 +733,58 @@ public final class SketchHud {
                 / Math.max(1, mc.getWindow().getHeight()));
     }
 
+    /**
+     * 画一个**开放式箭头** ✓（参考图里的样式：两条短线成 V 形 ✓ 不是实心圆点 ✗）。
+     *
+     * @param tipX/tipY 箭尖 ✓ @param fromX/fromY 尺寸线的另一端（用来定方向 ✓）
+     */
+    /**
+     * 画一条**界线** ✓（SolidWorks 样式：起点离几何留 4px 缝 ✓ 终点超出尺寸线 6px ✓）。
+     */
+    private static void extLine(final net.minecraft.client.gui.GuiGraphics g,
+                                final double gx, final double gy,
+                                final double dx2, final double dy2, final int argb) {
+        final double dx = dx2 - gx;
+        final double dy = dy2 - gy;
+        final double len = Math.hypot(dx, dy);
+        if (len < 1.0e-6) {
+            return;
+        }
+        final double ux = dx / len;
+        final double uy = dy / len;
+        final double gap = 4.0;    // 与几何留缝 ✓
+        final double over = 6.0;   // 超出尺寸线 ✓
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
+                gx + ux * gap, gy + uy * gap,
+                dx2 + ux * over, dy2 + uy * over, 1.0f, argb);
+    }
+
+    private static void dimArrow(final net.minecraft.client.gui.GuiGraphics g,
+                                 final double tipX, final double tipY,
+                                 final double fromX, final double fromY,
+                                 final int argb, final boolean unusedFilled) {
+        final double dx = tipX - fromX;
+        final double dy = tipY - fromY;
+        final double len = Math.hypot(dx, dy);
+        if (len < 1.0e-6) {
+            return;
+        }
+        final double ux = dx / len;
+        final double uy = dy / len;
+        final double size = 7.0;   // 箭羽长度 ✓（参考图约 6~8px ✓）
+        final double spread = 0.42; // 张角 ✓
+        final double px = -uy;
+        final double py = ux;
+        final double bx1 = tipX - ux * size + px * size * spread;
+        final double by1 = tipY - uy * size + py * size * spread;
+        final double bx2 = tipX - ux * size - px * size * spread;
+        final double by2 = tipY - uy * size - py * size * spread;
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, tipX, tipY, bx1, by1, 1.4f, argb);
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, tipX, tipY, bx2, by2, 1.4f, argb);
+    }
+
     private static int clamp(final int value, final int min, final int max) {
         return Math.max(min, Math.min(Math.max(min, max), value));
     }
 }
+

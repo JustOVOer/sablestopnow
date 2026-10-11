@@ -60,6 +60,31 @@ public final class SketchHud {
      * 玩家拖的只是"显示在哪"✓ —— 属于**视图状态** ✗ 不是几何 ✗
      * ⇒ 存 UI 侧最合适 ✓（也不污染存档/网络协议 ✓）。
      */
+    // ================= 约束小图标（图元旁 ✓ SolidWorks 的几何关系图标 ✓）===================
+
+    /** 一个约束字形的屏幕位置 ✓（供"点选约束"用 ✓ 与尺寸标签同一套做法 ✓）。 */
+    public record GlyphHit(int constraintIndex, int glyphKind, double x, double y) {
+    }
+
+    private static final java.util.List<GlyphHit> GLYPH_HITS = new java.util.ArrayList<>();
+
+    /** 命中测试：屏幕坐标附近的约束字形 ✓。 */
+    @Nullable
+    public static GlyphHit pickGlyph(final double mx, final double my, final double tol) {
+        GlyphHit best = null;
+        double bestD = tol * tol;
+        for (final GlyphHit h : GLYPH_HITS) {
+            final double dx = h.x() - mx;
+            final double dy = h.y() - my;
+            final double d = dx * dx + dy * dy;
+            if (d <= bestD) {
+                bestD = d;
+                best = h;
+            }
+        }
+        return best;
+    }
+
     private static final java.util.Map<Integer, double[]> LABEL_OVERRIDE =
             new java.util.HashMap<>();
 
@@ -98,6 +123,13 @@ public final class SketchHud {
         layer.closeOnEscape = true;
         final com.ovo.sablestopnow.client.gui.lib.Callout box =
                 new com.ovo.sablestopnow.client.gui.lib.Callout();
+        // ★ 修实测告警 ✓：[ui-lint] 布局塌陷 Callout#null 104x0 ✗
+        //   原因 ✓：Callout 的 AUTO 尺寸要靠 measure() ✓ 而这条链在某些时机拿不到 ⇒ 高塌成 0 ✗
+        //   ⇒ 用 Callout **自带**的 minW/minH（它的 measure 里就是 max(minW, 内容) ✓）
+        //     自动变大 ✓ 但**永不塌成 0** ✓✓（比写死尺寸好：内容多了还能自己长 ✓）
+        box.id = "sketch.dim.edit.box";
+        box.minW = 180;
+        box.minH = 62;
         box.layout = Layouts.vbox(10, 4);
         box.add(new Label(Component.translatable(labelKey)).color(0xFFFFCC55));
         // 数值输入 ✓：numeric() + 打开就全选 ✓（照 ModelCouplingUi 的既有用法 ✓）
@@ -169,6 +201,13 @@ public final class SketchHud {
         drawDimensionLabels(event.getGuiGraphics(), mc);
         // 智能尺寸的**实时预览**（半透明 ✓ 跟着指针 ✓ 自动捕捉方位 ✓ 锁定态画环 ✓）
         drawSmartPreview(event.getGuiGraphics(), mc);
+        // 吸附到网格时**把那条格线画出来**（虚线 ✓ 用户要求 ✓）
+        drawSnapOverlay(event.getGuiGraphics(), mc);
+        // 图元旁的**约束小图标** ✓（SolidWorks 的几何关系图标 ✓ 用户要求 ✓）
+        drawConstraintGlyphs(event.getGuiGraphics(), mc);
+        // 辅助线用**虚线**画一遍 ✓（SolidWorks 的构造几何就是虚线 ✓ 创建方式与直线一致 ✓）
+        // 不参与轮廓/拉伸 ✓（SketchProfiles ×2 + Extrude ×1 已跳过 ✓）
+        drawConstructionOverlay(event.getGuiGraphics(), mc);
 
         UiLayer layer = Ui.layer(LAYER);
         if (layer == null) {
@@ -363,15 +402,282 @@ public final class SketchHud {
         }
     }
 
+    /**
+     * 在每个图元旁画它的**约束小图标** ✓（用户要求 ✓ 参考 SolidWorks 的几何关系图标 ✓）。
+     *
+     * <p>只画**关系**（水平/竖直/平行/垂直/等长/中点/重合/固定 ✓）✗ ——
+     * **尺寸**（距离/半径/角度 ✓）已经是"尺寸线 + 数值"了 ✓ 再画图标是重复 ✗。
+     *
+     * <p>位置 ✓：图元的**代表点**（线取中点 ✓ 点取自身 ✓ 圆/弧取圆心 ✓）投影到屏幕后偏 8px ✓；
+     * 同一图元上的多个约束沿 x 方向依次错开 ✓ 免得叠在一起 ✗。
+     */
+    private static void drawConstraintGlyphs(final net.minecraft.client.gui.GuiGraphics g,
+                                             final Minecraft mc) {
+        GLYPH_HITS.clear(); // 每帧重建 ✓ 相机一动就更新 ✓
+        if (!SketchClient.active() || mc.level == null) {
+            return;
+        }
+        final SketchSession session = SketchClient.mode().session();
+        final var work = session == null ? null : session.working();
+        if (work == null) {
+            return;
+        }
+        dev.ryanhcode.sable.sublevel.ClientSubLevel sub = null;
+        if (dev.ryanhcode.sable.api.sublevel.SubLevelContainer.getContainer(mc.level)
+                instanceof final dev.ryanhcode.sable.api.sublevel.ClientSubLevelContainer c) {
+            for (final dev.ryanhcode.sable.sublevel.ClientSubLevel s : c.getAllSubLevels()) {
+                if (s.getUniqueId().equals(work.body())) {
+                    sub = s;
+                }
+            }
+        }
+        if (sub == null) {
+            return;
+        }
+        final org.joml.Vector3d tmp = new org.joml.Vector3d();
+        final java.util.Map<Integer, Integer> perEntity = new java.util.HashMap<>();
+        final java.util.List<com.ovo.sablestopnow.sketch.Sketch.Constraint> cons = work.constraints();
+        for (int i = 0; i < cons.size(); i++) {
+            final int glyph = glyphOf(cons.get(i).kind());
+            if (glyph == 0) {
+                continue; // 尺寸类不画图标 ✓
+            }
+            final int[] ops = cons.get(i).operands();
+            if (ops.length == 0) {
+                continue;
+            }
+            final com.ovo.sablestopnow.sketch.Sketch.Entity owner = entityOwning(work, ops[0]);
+            if (owner == null) {
+                continue;
+            }
+            final double[] uv = anchorUv(work, owner);
+            final double[] screen = project(work, sub, uv[0], uv[1], mc, tmp);
+            if (screen == null) {
+                continue;
+            }
+            final int slot = perEntity.merge(anchorKey(owner), 1, Integer::sum) - 1;
+            final double gx = screen[0] + 8.0 + slot * 11.0;
+            final double gy = screen[1] - 8.0;
+            final boolean picked = session.selectedConstraint() == i;
+            com.ovo.sablestopnow.client.gui.lib.UiVector.constraintGlyph(g, gx, gy, glyph,
+                    picked ? 0xFFFFCC55 : 0xDD7FE3FF);
+            if (picked) {
+                // 选中态 ✓：套一个圈（用户要求"可选中"✓ 必须看得出选了谁 ✓）
+                com.ovo.sablestopnow.client.gui.lib.UiVector.ring(g, gx, gy, 7.0, 1.5, 0xFFFFCC55);
+            }
+            GLYPH_HITS.add(new GlyphHit(i, glyph, gx, gy));
+        }
+    }
+
+    /** 求解器约束类型 → 字形常量 ✓；**尺寸类**返回 0（不画图标 ✓）。 */
+    private static int glyphOf(final int kind) {
+        return switch (kind) {
+            case com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL ->
+                    com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_HORIZONTAL;
+            case com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL ->
+                    com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_VERTICAL;
+            case com.ovo.sablestopnow.sketch.SketchSolver.PARALLEL ->
+                    com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_PARALLEL;
+            case com.ovo.sablestopnow.sketch.SketchSolver.PERPENDICULAR ->
+                    com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_PERPENDICULAR;
+            case com.ovo.sablestopnow.sketch.SketchSolver.EQUAL_LEN ->
+                    com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_EQUAL;
+            case com.ovo.sablestopnow.sketch.SketchSolver.MIDPOINT ->
+                    com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_MIDPOINT;
+            case com.ovo.sablestopnow.sketch.SketchSolver.COINCIDENT ->
+                    com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_COINCIDENT;
+            case com.ovo.sablestopnow.sketch.SketchSolver.FIXED ->
+                    com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_FIXED;
+            default -> 0;
+        };
+    }
+
+    /** 哪个图元拥有这个变量下标 ✓（扫一遍就好 ✓ 图元数量很小 ✓）。 */
+    @Nullable
+    private static com.ovo.sablestopnow.sketch.Sketch.Entity entityOwning(
+            final com.ovo.sablestopnow.sketch.Sketch work, final int varIndex) {
+        for (final com.ovo.sablestopnow.sketch.Sketch.Entity e : work.entities()) {
+            for (final int v : e.vars()) {
+                if (v == varIndex) {
+                    return e;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** 图元的代表点（平面 uv ✓）：线取中点 ✓ 点取自身 ✓ 圆/弧取圆心 ✓。 */
+    private static double[] anchorUv(final com.ovo.sablestopnow.sketch.Sketch work,
+                                     final com.ovo.sablestopnow.sketch.Sketch.Entity e) {
+        final int[] v = e.vars();
+        return switch (e.kind()) {
+            case LINE -> new double[] {
+                    (work.variable(v[0]) + work.variable(v[2])) * 0.5,
+                    (work.variable(v[1]) + work.variable(v[3])) * 0.5};
+            default -> new double[] {work.variable(v[0]), work.variable(v[1])};
+        };
+    }
+
+    /** 用来给同一图元上的多个字形排序（图元身份 ✓ 用首变量下标 ✓）。 */
+    private static int anchorKey(final com.ovo.sablestopnow.sketch.Sketch.Entity e) {
+        return e.vars()[0];
+    }
+    /**
+     * 把**吸附到的那条格线**画出来 ✓（虚线 ✓ 用户要求 "吸附提示用虚线" ✓）。
+     *
+     * <p>只画"穿过吸附点、沿被吸附的那一轴"的一段 ✓（不是无限长 ✓）——
+     * 长度取当前子结构在该轴上的尺寸 ✓ 够用且不会画到世界外面去 ✓。
+     */
+    private static void drawSnapOverlay(final net.minecraft.client.gui.GuiGraphics g,
+                                        final Minecraft mc) {
+        if (!SketchClient.active() || mc.level == null) {
+            return;
+        }
+        final SketchSession session = SketchClient.mode().session();
+        final SketchSession.KeyPoint kp = SketchClient.mode().snapAt();
+        if (session == null || kp == null || kp.kind() != SketchSession.KeyKind.GRID) {
+            return;
+        }
+        final var working = session.working();
+        if (working == null) {
+            return;
+        }
+        dev.ryanhcode.sable.sublevel.ClientSubLevel sub = null;
+        if (dev.ryanhcode.sable.api.sublevel.SubLevelContainer.getContainer(mc.level)
+                instanceof final dev.ryanhcode.sable.api.sublevel.ClientSubLevelContainer c) {
+            for (final dev.ryanhcode.sable.sublevel.ClientSubLevel s : c.getAllSubLevels()) {
+                if (s.getUniqueId().equals(working.body())) {
+                    sub = s;
+                }
+            }
+        }
+        if (sub == null) {
+            return;
+        }
+        final boolean uInt = Math.abs(kp.u() - Math.round(kp.u())) < 1.0e-6;
+        final boolean vInt = Math.abs(kp.v() - Math.round(kp.v())) < 1.0e-6;
+        final double half = 32.0; // 半长（方块 ✓）
+        final org.joml.Vector3d tmp = new org.joml.Vector3d();
+        final int argb = 0xCC66E0FF;
+        if (uInt && !vInt) {
+            drawDashBetween(g, working, sub, mc, tmp, kp.u(), kp.v() - half, kp.u(), kp.v() + half, argb);
+        } else if (!uInt && vInt) {
+            drawDashBetween(g, working, sub, mc, tmp,
+                    kp.u() - half, kp.v(), kp.u() + half, kp.v(), argb);
+        }
+        // 格点：不画线 ✓（点本身就是提示 ✓ 提示文字里也写了坐标 ✓）
+    }
+
+    /**
+     * 把**辅助线**用虚线描一遍 ✓（用户要求 ✓）。
+     *
+     * <p>为什么画在**屏幕空间**而不是世界空间 ✗✓：世界那边（SketchRenderer）画的是实线 ✓
+     * 改它要动顶点流 ✓ 而这层虚线只是"标注这是参考几何"的视觉语言 ✓ 屏幕空间足够 ✓
+     * 且能直接复用同一套投影（一处投影、两处使用 ✓ 不会"看到的和世界里的对不上"✗）。
+     */
+    private static void drawConstructionOverlay(final net.minecraft.client.gui.GuiGraphics g,
+                                                final Minecraft mc) {
+        if (!SketchClient.active() || mc.level == null) {
+            return;
+        }
+        final SketchSession session = SketchClient.mode().session();
+        final var work = session == null ? null : session.working();
+        if (work == null) {
+            return;
+        }
+        final var list = work.constructionEntities();
+        if (list.isEmpty()) {
+            return;
+        }
+        dev.ryanhcode.sable.sublevel.ClientSubLevel sub = null;
+        if (dev.ryanhcode.sable.api.sublevel.SubLevelContainer.getContainer(mc.level)
+                instanceof final dev.ryanhcode.sable.api.sublevel.ClientSubLevelContainer c) {
+            for (final dev.ryanhcode.sable.sublevel.ClientSubLevel s : c.getAllSubLevels()) {
+                if (s.getUniqueId().equals(work.body())) {
+                    sub = s;
+                }
+            }
+        }
+        if (sub == null) {
+            return;
+        }
+        final org.joml.Vector3d tmp = new org.joml.Vector3d();
+        for (final var e : list) {
+            final int[] v = e.vars();
+            final int argb = 0xCC8C93A8; // 暗灰 ✓ 与"从动/参考"同一语义色 ✓
+            switch (e.kind()) {
+                case LINE -> drawDashBetween(g, work, sub, mc, tmp,
+                        work.variable(v[0]), work.variable(v[1]),
+                        work.variable(v[2]), work.variable(v[3]), argb);
+                case CIRCLE -> {
+                    // 圆：用 24 段折线描一圈虚线 ✓（够圆也不重 ✓）
+                    final double cx = work.variable(v[0]);
+                    final double cy = work.variable(v[1]);
+                    final double r = Math.abs(work.variable(v[2]));
+                    for (int i = 0; i < 24; i++) {
+                        final double a0 = i * Math.PI * 2.0 / 24.0;
+                        final double a1 = (i + 1) * Math.PI * 2.0 / 24.0;
+                        if (i % 2 == 0) {
+                            drawDashBetween(g, work, sub, mc, tmp,
+                                    cx + Math.cos(a0) * r, cy + Math.sin(a0) * r,
+                                    cx + Math.cos(a1) * r, cy + Math.sin(a1) * r, argb);
+                        }
+                    }
+                }
+                default -> {
+                    // 点/弧暂不描 ✓（点没有"线"可画 ✓ 弧的虚线等有需要再加 ✓ 宁可少画不画错 ✓）
+                }
+            }
+        }
+    }
+
+    /** 把平面上的两点投影后连成**虚线** ✓（投影失败就不画 ✓）。 */
+    private static void drawDashBetween(final net.minecraft.client.gui.GuiGraphics g,
+                                        final com.ovo.sablestopnow.sketch.Sketch sketch,
+                                        final dev.ryanhcode.sable.sublevel.ClientSubLevel sub,
+                                        final Minecraft mc, final org.joml.Vector3d tmp,
+                                        final double u0, final double v0, final double u1,
+                                        final double v1, final int argb) {
+        final double[] a = project(sketch, sub, u0, v0, mc, tmp);
+        final double[] b = project(sketch, sub, u1, v1, mc, tmp);
+        if (a == null || b == null) {
+            return;
+        }
+        com.ovo.sablestopnow.client.gui.lib.UiVector.dashedLine(
+                g, a[0], a[1], b[0], b[1], 1.5f, argb, 6.0, 4.0);
+    }
+
     /** 提示文本的活取值。没有吸附目标时给空串 —— 反正此时 alpha 已经把它隐掉了。 */
     private static Component snapText() {
         if (!SketchClient.active()) {
             return Component.empty();
         }
         final SketchSession.KeyPoint kp = SketchClient.mode().snapAt();
-        return kp == null ? Component.empty()
-                : Component.translatable("model.sketch.snap.hint",
-                        Component.translatable(kp.kind().labelKey()));
+        if (kp == null) {
+            return Component.empty();
+        }
+        // ★ 网格吸附要**说明吸到了哪条线** ✓（用户反馈 1 ✓）
+        //   判据 ✓（由吸附结果的坐标反推 ✓ 不需要额外状态 ✓）：
+        //     两个坐标都是整数 ⇒ 吸到**格点** ✓
+        //     只有 u 是整数   ⇒ 吸到**竖向格线** u = k ✓（另一轴自由 ⇒ 可沿线滑动 ✓）
+        //     否则            ⇒ 吸到**横向格线** v = k ✓
+        if (kp.kind() == SketchSession.KeyKind.GRID) {
+            final boolean uInt = Math.abs(kp.u() - Math.round(kp.u())) < 1.0e-6;
+            final boolean vInt = Math.abs(kp.v() - Math.round(kp.v())) < 1.0e-6;
+            if (uInt && vInt) {
+                return Component.translatable("model.sketch.snap.grid_point",
+                        String.format(java.util.Locale.ROOT, "(%d, %d)",
+                                Math.round(kp.u()), Math.round(kp.v())));
+            }
+            if (uInt) {
+                return Component.translatable("model.sketch.snap.grid_line_u",
+                        String.format(java.util.Locale.ROOT, "%d", Math.round(kp.u())));
+            }
+            return Component.translatable("model.sketch.snap.grid_line_v",
+                    String.format(java.util.Locale.ROOT, "%d", Math.round(kp.v())));
+        }
+        return Component.translatable("model.sketch.snap.hint",
+                Component.translatable(kp.kind().labelKey()));
     }
 
     /** 平面 uv → 屏幕（相机背后返回 null ✓ 不画）。与上面循环里用的是同一条链路 ✓。 */

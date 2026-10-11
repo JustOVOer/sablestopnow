@@ -266,6 +266,7 @@ public final class Extrude {
     /** 曲面临界：轮廓里出现圆/弧时走棱盒分解。 */
     public static boolean hasCurvature(final Sketch sketch) {
         for (final Sketch.Entity e : sketch.entities()) {
+            if (sketch.isConstruction(e)) { continue; } // 辅助线**不参与轮廓/拉伸** ✓（SolidWorks 一致 ✓）
             if (e.kind() == Sketch.EntityKind.CIRCLE || e.kind() == Sketch.EntityKind.ARC) {
                 return true;
             }

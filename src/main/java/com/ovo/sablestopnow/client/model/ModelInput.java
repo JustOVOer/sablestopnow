@@ -384,6 +384,15 @@ public final class ModelInput {
                 return true;
             }
             case GLFW.GLFW_KEY_DELETE -> {
+                // 草图里选中了约束 ⇒ Delete 删掉它 ✓（SolidWorks 一致 ✓）
+                if (com.ovo.sablestopnow.client.SketchClient.active()
+                        && com.ovo.sablestopnow.client.SketchClient.mode().session() != null
+                        && com.ovo.sablestopnow.client.SketchClient.mode().session()
+                                .deleteSelectedConstraint()) {
+                    com.ovo.sablestopnow.client.SketchClient.mode().solve();
+                    ModelMode.prompt("model.sketch.constraint_deleted");
+                    return true;
+                }
                 ModelUi.deleteSelectedMate();
                 return true;
             }
@@ -468,6 +477,17 @@ public final class ModelInput {
             // ★ 双击**已放置尺寸** ⇒ 改值浮层 ✓（SolidWorks：双击尺寸数字弹框改值 ⇒ 几何实时驱动 ✓）
             if (tryDimensionEdit(mc)) {
                 return;
+            }            // ★ 点在**约束小图标**上 ⇒ 选中该约束 ✓（再按 Delete 删掉 ✓ SolidWorks 的做法 ✓）
+            if (com.ovo.sablestopnow.client.SketchClient.mode().session() != null) {
+                final var g = com.ovo.sablestopnow.client.SketchHud.pickGlyph(
+                        dimGuiX(mc), dimGuiY(mc), 10.0);
+                if (g != null) {
+                    com.ovo.sablestopnow.client.SketchClient.mode().session()
+                            .selectConstraint(g.constraintIndex());
+                    ModelMode.prompt("model.sketch.constraint_selected");
+                    return; // 消费掉 ✓ 不要顺手清选择/放置 ✗
+                }
+                com.ovo.sablestopnow.client.SketchClient.mode().session().selectConstraint(-1);
             }            // ★ 按在**已有尺寸标签**上 ⇒ 这次按下是"拖标签"✓ 不是"放置新尺寸"✗
             if (com.ovo.sablestopnow.client.SketchClient.mode().session() != null
                     && com.ovo.sablestopnow.client.SketchClient.mode().session().tool()

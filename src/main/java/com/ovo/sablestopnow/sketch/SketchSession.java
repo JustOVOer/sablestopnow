@@ -205,6 +205,47 @@ public final class SketchSession {
      */
     private boolean referenceMode;
 
+    /**
+     * **吸附即约束** ✓（用户要求 ✓ 对齐 SolidWorks 的"自动添加约束"✓ 默认开 ✓ 可关 ✗）。
+     *
+     * <p>关掉之后吸附仍然只是"落点对齐"✓ 但不写约束 ✓ —— 想画自由尺寸时会需要 ✓。
+     */
+    private boolean snapConstraints = true;
+
+    /**
+     * 当前**选中的约束**下标 ✓（-1 = 没选中 ✓）—— 用户点图元旁的小图标选中它 ✓ 再删掉 ✓
+     * （SolidWorks：点几何关系图标 ⇒ 高亮 ⇒ Delete 删除 ✓）。
+     */
+    private int selectedConstraint = -1;
+
+    public int selectedConstraint() {
+        return this.selectedConstraint;
+    }
+
+    public void selectConstraint(final int index) {
+        this.selectedConstraint = index;
+    }
+
+    /** 删掉当前选中的约束 ✓；返回是否真的删了 ✓。 */
+    public boolean deleteSelectedConstraint() {
+        if (this.working == null || this.selectedConstraint < 0
+                || this.selectedConstraint >= this.working.constraints().size()) {
+            this.selectedConstraint = -1;
+            return false;
+        }
+        final Sketch.Constraint c = this.working.constraints().get(this.selectedConstraint);
+        this.selectedConstraint = -1;
+        return this.working.removeConstraint(c);
+    }
+
+    public boolean snapConstraints() {
+        return this.snapConstraints;
+    }
+
+    public void setSnapConstraints(final boolean value) {
+        this.snapConstraints = value;
+    }
+
     public boolean referenceMode() {
         return this.referenceMode;
     }
@@ -272,6 +313,8 @@ public final class SketchSession {
     }
 
     public void setTool(final Tool value) {
+        // 可观测性 ✓：切工具时打一行 ⇒ 排查"按钮没生效/工具没切过去"时看日志即可 ✓（不猜 ✗）
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch] tool={}", value);
         this.tool = value;
         // 换工具必须丢掉上一半的输入，否则会出现"用直线的第一个点点出一个矩形"
         this.pending.clear();
@@ -968,7 +1011,25 @@ public final class SketchSession {
     private void constrainToSnap(final int[] newPointVars) {
         final KeyPoint snapped = this.pendingSnap;
         this.pendingSnap = null;
-        if (snapped == null || snapped.owner() == null || working == null) {
+        if (snapped == null || working == null || !this.snapConstraints) {
+            return;
+        }
+        // ★ **网格吸附也要变成约束** ✓（用户要求"吸附即约束"✓）
+        //   格点不是图元 ⇒ 没有 owner ✓（以前就在这里被 return 掉了 ✗✓）
+        //   语义 ✓：吸到竖向格线 ⇒ 固定 u ✓（v 自由 ⇒ 还能沿线滑动 ✓ 与吸附行为一致 ✓）；
+        //           吸到横向格线 ⇒ 固定 v ✓；吸到格点 ⇒ 两个都固定 ✓。
+        if (snapped.kind() == KeyKind.GRID) {
+            final double ru = Math.round(snapped.u());
+            final double rv = Math.round(snapped.v());
+            if (Math.abs(snapped.u() - ru) < 1.0e-6) {
+                working.addConstraint(SketchSolver.FIXED, ru, newPointVars[0]);
+            }
+            if (Math.abs(snapped.v() - rv) < 1.0e-6) {
+                working.addConstraint(SketchSolver.FIXED, rv, newPointVars[1]);
+            }
+            return;
+        }
+        if (snapped.owner() == null) {
             return;
         }
         // 已经属于同一个图元就不加（自己和自己重合是退化约束）

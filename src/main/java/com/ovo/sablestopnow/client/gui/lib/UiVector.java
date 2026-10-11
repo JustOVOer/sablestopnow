@@ -100,6 +100,91 @@ public final class UiVector {
     }
 
     /** 折线；{@code closed} 为真时首尾相接。 */
+    /**
+     * **虚线** ✓（吸附提示 / 辅助线都用它 ✓ 用户要求 ✓）。
+     *
+     * <p>为什么放进库 ✗✓：虚线是"这是参考/提示、不是实体"的**通用视觉语言** ✓
+     * 每个调用点各写一遍"分成几段"迟早不一致 ✗ ⇒ 库统一 ✓（短标签、折行那些也是这个道理 ✓）。
+     *
+     * @param dash 线段长（像素 ✓）@param gap 间隔长（像素 ✓）
+     */
+    // ================= 约束小字形 ✓（SolidWorks 的"图元旁的几何关系图标"✓）=================
+
+    /** 字形种类 ✓（与 SketchSolver 的约束类型解耦 ✓ 免得库依赖求解器 ✗）。 */
+    public static final int GLYPH_HORIZONTAL = 1;
+    public static final int GLYPH_VERTICAL = 2;
+    public static final int GLYPH_PARALLEL = 3;
+    public static final int GLYPH_PERPENDICULAR = 4;
+    public static final int GLYPH_EQUAL = 5;
+    public static final int GLYPH_MIDPOINT = 6;
+    public static final int GLYPH_COINCIDENT = 7;
+    public static final int GLYPH_FIXED = 8;
+    public static final int GLYPH_GRID = 9;
+
+    /**
+     * 在 {@code (cx, cy)} 处画一个**约束小字形** ✓（大小约 9px ✓）。
+     *
+     * <p>为什么放库里 ✗✓：字形是"同一套视觉语言"✓ —— 尺寸、关系、辅助线要看起来是一家人 ✓
+     * 每个地方各画一套迟早风格漂移 ✗（短标签/折行/虚线都是这个道理 ✓）。
+     *
+     * @param kind 上面的 GLYPH_* 常量 ✓
+     */
+    public static void constraintGlyph(final GuiGraphics g, final double cx, final double cy,
+                                       final int kind, final int argb) {
+        final double r = 4.5;
+        final float w = 1.4f;
+        switch (kind) {
+            case GLYPH_HORIZONTAL -> line(g, cx - r, cy, cx + r, cy, w, argb);
+            case GLYPH_VERTICAL -> line(g, cx, cy - r, cx, cy + r, w, argb);
+            case GLYPH_PARALLEL -> {
+                line(g, cx - r, cy + r, cx + r, cy - r, w, argb);
+                line(g, cx - r + 2.5, cy + r, cx + r + 2.5, cy - r, w, argb);
+            }
+            case GLYPH_PERPENDICULAR -> {
+                line(g, cx - r, cy - r, cx - r, cy + r, w, argb);
+                line(g, cx - r, cy + r, cx + r, cy + r, w, argb);
+            }
+            case GLYPH_EQUAL -> {
+                line(g, cx - r, cy - 1.8, cx + r, cy - 1.8, w, argb);
+                line(g, cx - r, cy + 1.8, cx + r, cy + 1.8, w, argb);
+            }
+            case GLYPH_MIDPOINT -> {
+                line(g, cx - r, cy - r, cx - r, cy + r, w, argb);
+                line(g, cx - r, cy, cx + r, cy, w, argb);
+            }
+            case GLYPH_COINCIDENT -> disc(g, cx, cy, 2.4, argb);
+            case GLYPH_FIXED -> {
+                roundRectOutline(g, (float) (cx - 3.5), (float) (cy - 3.5), 7f, 7f, 1.5f, 1.4f, argb);
+            }
+            case GLYPH_GRID -> {
+                line(g, cx - r, cy, cx + r, cy, w, argb);
+                line(g, cx, cy - r, cx, cy + r, w, argb);
+                disc(g, cx, cy, 1.2, argb);
+            }
+            default -> {
+                // 不认识的种类什么都不画 ✓（宁可少画，不画错的 ✓）
+            }
+        }
+    }
+
+    public static void dashedLine(final GuiGraphics g, final double x0, final double y0,
+                                  final double x1, final double y1, final float width,
+                                  final int argb, final double dash, final double gap) {
+        final double dx = x1 - x0;
+        final double dy = y1 - y0;
+        final double len = Math.hypot(dx, dy);
+        if (len < 1.0e-6 || dash <= 0.0) {
+            return;
+        }
+        final double ux = dx / len;
+        final double uy = dy / len;
+        double at = 0.0;
+        while (at < len) {
+            final double end = Math.min(len, at + dash);
+            line(g, x0 + ux * at, y0 + uy * at, x0 + ux * end, y0 + uy * end, width, argb);
+            at = end + gap;
+        }
+    }
     public static void polyline(final GuiGraphics g, final double[] xs, final double[] ys,
                                 final float width, final int argb, final boolean closed) {
         if (xs == null || xs.length < 2) {

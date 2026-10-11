@@ -320,7 +320,21 @@ public final class SketchClient {
             final var session = MODE.session();
             final var work = session.working();
             final var picked = session.selection();
-            if (work != null && !picked.isEmpty() && picked.size() <= 2) {
+            // ★ 修实测根因 ✓：智能尺寸下**第一次点图元要能选中它** ✓
+            //   （以前这里直接去"放置"✗ ⇒ 选择恒为空 ⇒ 预览永远不出现 ✗✓）
+            //   SolidWorks 的做法 ✓：点实体 ⇒ 选中并开始预览 ✓；已有选择时再点 ⇒ 放置 ✓。
+            if (picked.isEmpty()) {
+                final Vector3d uvPick = MODE.planePoint(localFrom, localDir);
+                if (uvPick != null) {
+                    final var hit = session.pickEntity(uvPick.x, uvPick.y, MODE.pickTolerance());
+                    if (hit != null) {
+                        session.toggleEntity(hit);
+                        return true; // 这一步只负责选中 ✓ 不放置 ✗
+                    }
+                }
+                return true; // 点到空处 ⇒ 消费掉 ✓ 不清选择 ✗
+            }
+            if (work != null && picked.size() <= 2) {
                 final var cand = com.ovo.sablestopnow.sketch.SketchMeasure.preview(
                         work, picked, session.hoverU(), session.hoverV(), session.lockedVariant());
                 if (cand != null) {
@@ -329,6 +343,7 @@ public final class SketchClient {
                     MODE.solve();
                     com.ovo.sablestopnow.client.model.ModelMode.prompt(placed
                             ? "model.measure.added" : "model.measure.not_lockable");
+                            if (placed) { session.clearSelection(); } // 放完就清 ✓ 下一次点击重新开始选 ✓（SolidWorks 一致 ✓）
                 }
             }
             return true; // 消费掉 ✓ 不让草图模式再把它当成"落点"✗
@@ -421,6 +436,18 @@ public final class SketchClient {
                 ? com.ovo.sablestopnow.client.model.ModelCamera.yaw() // 法线是 ±Y ⇒ yaw 保持原样 ✓
                 : Math.toDegrees(Math.atan2(-lx, lz));
         com.ovo.sablestopnow.client.model.ModelCamera.alignTo((float) yawDeg, (float) pitchDeg);
+        // ★ **自证式修正** ✓：不依赖"我对 yaw/pitch 符号的记忆"✗（真机上已出现 plates=0 的疑点 ✗）
+        //   做法 ✓：设置完读回真实视线方向 ✓，若它与面法线**同向**（说明相机朝着背面 ✗）
+        //        就把 yaw 转 180°、pitch 取反再设一次 ✓ ⇒ 无论约定如何，结果都必然是"正对着面看"✓
+        final var look = com.ovo.sablestopnow.client.model.ModelCamera.lookVector();
+        final double dot = look.x * normal.x + look.y * normal.y + look.z * normal.z;
+        if (dot > 0.0) {
+            com.ovo.sablestopnow.client.model.ModelCamera.alignTo(
+                    (float) (yawDeg + 180.0), (float) -pitchDeg);
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[sketch] face-on corrected: dot={} ⇒ flipped",
+                    String.format(java.util.Locale.ROOT, "%.3f", dot));
+        }
         return true;
     }
 

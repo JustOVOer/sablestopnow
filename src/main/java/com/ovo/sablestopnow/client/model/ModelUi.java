@@ -642,7 +642,42 @@ public final class ModelUi {
             return;
         }
         body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
-        body.add(new Label(Component.translatable("model.dim.title")).color(0xFF8FA0D8));
+        body.add(new Label(Component.translatable("model.dim.title")).color(0xFF8FA0D8));        // ★ **显眼入口** ✓：工具行折成两行后「智能尺寸」可能在第二行不好找 ✗（用户实测反馈）
+        //   这里再给一个**整行**按钮 ✓（面板行是 FILL 宽 ✓ 一眼就能看到 ✓）
+        //   两个入口改的是同一个状态（session.tool）✓ ⇒ 不会各说一套 ✗。
+        final var openSmart = new Button(Component.translatable("model.smart.open"), () -> {
+            com.ovo.sablestopnow.client.SketchClient.mode().setTool(
+                    com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION);
+            refreshLeftPanel();
+        });
+        openSmart.toggled = session.tool()
+                == com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION;
+        body.add(openSmart);
+        //   只列**关系**（水平/竖直/平行/垂直/等长/中点/重合/固定 ✓）✗——
+        //   尺寸已经在上面那份列表里了 ✓ 两边都列会让人以为标重了 ✗。
+        //   用统一库的 Button + hboxWrap ✓ ⇒ 窄了自动折行 ✓ 文字自动短标签 ✓ 不会遮盖 ✓
+        for (int ci = 0; ci < live.constraints().size(); ci++) {
+            final var c = live.constraints().get(ci);
+            final String nameKey = relationNameKey(c.kind());
+            if (nameKey == null) {
+                continue; // 尺寸类 ✓ 上面已经列过 ✓
+            }
+            final int index = ci;
+            final var row = new com.ovo.sablestopnow.client.gui.lib.Container();
+            row.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hboxWrap(0, 4, 2);
+            row.prefW = com.ovo.sablestopnow.client.gui.lib.Widget.FILL;
+            row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
+            row.add(new Label(Component.translatable(nameKey)).color(
+                    session.selectedConstraint() == index ? 0xFFFFCC55 : 0xFFB9C4E8));
+            row.add(new Button(Component.translatable("model.sketch.constraint_delete"), () -> {
+                session.selectConstraint(index);
+                if (session.deleteSelectedConstraint()) {
+                    com.ovo.sablestopnow.client.SketchClient.mode().solve();
+                    refreshLeftPanel();
+                }
+            }));
+            body.add(row);
+        }
         for (final var d : existing) {
             // 实测 ≠ 常数 → 求解器还没算平，用警示色并同时给出两个数
             final boolean off = Math.abs(d.measured() - d.value()) > 1.0e-4;
@@ -813,6 +848,21 @@ public final class ModelUi {
         button.prefW = 26;
         button.toggled = session.tool() == value;
         return button;
+    }
+
+    /** 求解器约束类型 → 名称 lang key ✓；**尺寸类**返回 null（列表里不重复列 ✓）。 */
+    private static String relationNameKey(final int kind) {
+        return switch (kind) {
+            case com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL -> "model.relation.horizontal";
+            case com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL -> "model.relation.vertical";
+            case com.ovo.sablestopnow.sketch.SketchSolver.PARALLEL -> "model.relation.parallel";
+            case com.ovo.sablestopnow.sketch.SketchSolver.PERPENDICULAR -> "model.relation.perpendicular";
+            case com.ovo.sablestopnow.sketch.SketchSolver.EQUAL_LEN -> "model.relation.equal_len";
+            case com.ovo.sablestopnow.sketch.SketchSolver.MIDPOINT -> "model.relation.midpoint";
+            case com.ovo.sablestopnow.sketch.SketchSolver.COINCIDENT -> "model.relation.coincident";
+            case com.ovo.sablestopnow.sketch.SketchSolver.FIXED -> "model.relation.fixed";
+            default -> null;
+        };
     }
 
     private static void fitView() {
@@ -2013,7 +2063,10 @@ public final class ModelUi {
                 // 折行版 ✓：五种图元一行塞不下时**自动折到第二行** ✓ 而不是压到 0 宽 ✗；
                 // 高度由布局自己写回（prefH = AUTO ✓）⇒ 这里不需要知道会折几行 ✓
                 row.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hboxWrap(0, 3, 2);
-                row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
+                // ★ 明确给**两行**高度 ✓：6 个 26px 按钮在窄左栏里必然折行 ✓
+                //   而自动换行只写 prefH、父 vbox 不一定当帧重读 ⇒ 第二行会被压掉 ✗（F9 报告里只看到 4 个 ✗）
+                //   ⇒ 这里写死两行高（比依赖时序稳 ✓ 一行时略空一点 ✓ 可接受 ✓）
+                row.prefH = 28;
                 row.add(sketchToolButton("model.sketch.tool.select",
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.SELECT, session));
                 row.add(sketchToolButton("model.sketch.tool.line",
@@ -2024,7 +2077,11 @@ public final class ModelUi {
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.CIRCLE, session));
                 // 圆弧：三次点击（圆心 → 起点 → 终点）
                 row.add(sketchToolButton("model.sketch.tool.arc",
-                        com.ovo.sablestopnow.sketch.SketchSession.Tool.ARC, session));
+                        com.ovo.sablestopnow.sketch.SketchSession.Tool.ARC, session));                // ★ **智能尺寸**（SolidWorks 的 Smart Dimension ✓）—— 用户反馈"没有入口"✗
+                //   它是第 6 个工具按钮 ✓ 与另外五个同一套写法 ✓
+                //   （`hboxWrap` 会自动折行 ✓ 文字会自动短标签 ✓ ⇒ 加第 6 个也不会遮盖 ✓）
+                row.add(sketchToolButton("model.sketch.tool.dimension",
+                        com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION, session));
                 body.add(row);
                 body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
                 // 几何约束：作用在**当前选中的图元**上（左栏「选择」工具点中的那个）。
@@ -2148,7 +2205,10 @@ public final class ModelUi {
                             final var crow = new com.ovo.sablestopnow.client.gui.lib.Container();
                             crow.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hboxWrap(0, 3, 2);
                             crow.prefW = com.ovo.sablestopnow.client.gui.lib.Widget.FILL;
-                            crow.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
+                            // ★ 明确给**两行**高度 ✓：6 个 26px 按钮在窄左栏里必然折行 ✓
+                            //   而自动换行只写 prefH、父 vbox 不一定当帧重读 ⇒ 第二行会被压掉 ✗（F9 报告里只看到 4 个 ✗）
+                            //   ⇒ 这里写死两行高（比依赖时序稳 ✓ 一行时略空一点 ✓ 可接受 ✓）
+                            row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
                             for (int ci = 0; ci < cands.size(); ci++) {
                                 final int index = ci;
                                 final var cb = new Button(
@@ -2295,6 +2355,9 @@ public final class ModelUi {
                 //   （五种图元挤一行 ⇒ "文字遮盖/看不见" ✓）。
                 //   hboxFit：放不下先让控件 setCompact ✓ 再按比例缩 ✓ 且 Math.max(1, …) 保证永不 0 ✓
                 row.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hboxWrap(0, 3, 2);
+                        // ★ 明确给**两行**高度 ✓：6 个 26px 按钮在窄左栏里必然折行 ✓
+                        //   而自动换行只写 prefH、父 vbox 不一定当帧重读 ⇒ 第二行会被压掉 ✗（F9 报告里只看到 4 个 ✗）
+                        //   ⇒ 这里写死两行高（比依赖时序稳 ✓ 一行时略空一点 ✓ 可接受 ✓）
                         row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
                         // ⚠ 原来这一行**点一下就是删除**，按钮标签却只是「拉伸N」——
                         // 一个看起来像"选中"的按钮实际会删掉东西，是个真实的误操作陷阱。

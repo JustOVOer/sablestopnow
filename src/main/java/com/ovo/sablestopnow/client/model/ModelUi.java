@@ -893,6 +893,47 @@ public final class ModelUi {
         };
     }
 
+    // ================= 「随指针实时联动」的轻量同步 ✓（需求 (4) ✓）=================
+
+    /** 当前左栏显示的候选按钮 ✓（面板重建时刷新 ✓ 每帧只改它们的 toggled ✓）。 */
+    private static final java.util.List<Button> SMART_CAND_BTNS = new java.util.ArrayList<>();
+
+    /**
+     * 每帧把候选按钮的高亮同步到"当前预览候选" ✓。
+     *
+     * <p>为什么不把预览放进 leftPanelSignature ✗✓：那会让**每帧重建整栏** ✗
+     * 而文件里已有实测教训 —— 重建会把正在打字的输入框换成新实例、丢焦点 ✗（见签名那段注释 ✓）。
+     * 所以这里只改 toggled 标志 ✓ 不碰控件实例 ✓ 不碰焦点 ✓。
+     */
+    public static void syncSmartCandidateToggles() {
+        if (SMART_CAND_BTNS.isEmpty()) {
+            return;
+        }
+        final var session = com.ovo.sablestopnow.client.SketchClient.mode().session();
+        final var live = session == null ? null : session.working();
+        if (live == null || session.selection().isEmpty()) {
+            return; // 没草图/没选择 ⇒ 保持原样 ✓
+        }
+        final var smart = com.ovo.sablestopnow.sketch.SketchMeasure
+                .smartDimension(live, session.selection());
+        if (smart == null) {
+            return;
+        }
+        final var cands = com.ovo.sablestopnow.sketch.SketchMeasure.variants(live, smart);
+        final var shown = com.ovo.sablestopnow.sketch.SketchMeasure.preview(
+                live, session.selection(), session.hoverU(), session.hoverV(),
+                session.lockedVariant());
+        if (shown == null || cands.size() != SMART_CAND_BTNS.size()) {
+            return; // 候选集变了 ⇒ 等下一次面板重建 ✓（不在这里动结构 ✗）
+        }
+        for (int i = 0; i < cands.size(); i++) {
+            final var c = cands.get(i);
+            final boolean same = c.solverKind() == shown.solverKind()
+                    && Math.abs(c.value() - shown.value()) < 1.0e-9;
+            SMART_CAND_BTNS.get(i).toggled = same;
+        }
+    }
+
     private static void fitView() {
         final UUID id = ModelMode.selectedModel();
         if (id != null) {
@@ -2227,6 +2268,7 @@ public final class ModelUi {
                                 String.format(java.util.Locale.ROOT, "%.3f",
                                         use != null ? use.value() : smart.value())))
                                 .color(0xFFFFCC55));
+                        SMART_CAND_BTNS.clear(); // ★ 面板重建 ⇒ 候选按钮表也重建 ✓（防悬空引用 ✗）
                         if (cands.size() > 1) {
                             // 临时切换/锁定候选 ✓（SolidWorks：默认平行尺寸，可切换水平/竖直 ✓）
                             // 用统一 GUI 库的 Button + hboxWrap ✓ ⇒ 窄了自动折行 ✓ 文字自动短标签 ✓
@@ -2246,6 +2288,7 @@ public final class ModelUi {
                                                     ? -1 : index);
                                         });
                                 cb.toggled = session.lockedVariant() == ci;
+                                SMART_CAND_BTNS.add(cb); // ★ 让"随指针实时联动"能轻量同步它 ✓ 不重建整栏 ✓
                                 crow.add(cb);
                             }
                             body.add(crow);

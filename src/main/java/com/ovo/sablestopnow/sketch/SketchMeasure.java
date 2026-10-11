@@ -130,7 +130,7 @@ public final class SketchMeasure {
                 final double r = Math.abs(sketch.variable(v[2]));
                 // 标签画在圆心**右边一个半径**处：正好落在圆周上，一眼看出是哪个圆
                 out.add(new Dimension(i, c.kind(), c.value(), r, true, "model.dim.radius",
-                        sketch.variable(v[0]) + r, sketch.variable(v[1])));
+                        sketch.variable(v[0]) + r + 20.0, sketch.variable(v[1]))); // ★ 尺寸线移到圆外侧 ✓（参考图 3 ✓）
             } else if ((c.kind() == SketchSolver.POINT_LINE_DISTANCE
                     || c.kind() == SketchSolver.HPOINT_LINE_DISTANCE
                     || c.kind() == SketchSolver.VPOINT_LINE_DISTANCE
@@ -578,6 +578,15 @@ public final class SketchMeasure {
         final int[] v = sketch.constraints().get(dim.constraintIndex()).operands();
         final int kind = dim.solverKind();
         try {
+            // ★ 参考图 3 ✓：圆/弧的尺寸用**上下两个极值点** ✓
+            //   ⇒ 界线从圆的顶/底**水平引出** ✓ 尺寸线**竖直** ✓ 与 SolidWorks 的直径标注外观一致 ✓
+            if (kind == SketchSolver.RADIUS && v.length >= 3) {
+                final double ccx = sketch.variable(v[0]);
+                final double ccy = sketch.variable(v[1]);
+                final double rr = Math.abs(sketch.variable(v[2]));
+                return new double[] {ccx, ccy - rr, ccx, ccy + rr};
+            }
+
             if (kind == SketchSolver.DISTANCE && v.length >= 4) {
                 return new double[] {sketch.variable(v[0]), sketch.variable(v[1]),
                         sketch.variable(v[2]), sketch.variable(v[3])};

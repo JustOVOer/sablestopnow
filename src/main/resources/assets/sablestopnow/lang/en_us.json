@@ -544,6 +544,8 @@
   "model.smart.open": "智能尺寸（点这里开始标注）",
   "model.sketch.construction": "辅助线",
   "model.sketch.construction.short": "辅助",
+  "model.sketch.construction_draw_on": "辅助线绘制模式：开（接下来画的图元就是辅助线）",
+  "model.sketch.construction_draw_off": "辅助线绘制模式：关",
   "model.dim.chain": "尺寸链（保留基准）",
   "model.sketch.construction_on": "已转为辅助线",
   "model.sketch.construction_off": "已转回实体",

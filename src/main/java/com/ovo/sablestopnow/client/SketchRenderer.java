@@ -576,6 +576,7 @@ public final class SketchRenderer {
             conflicted = SketchDof.maxResidual(live) > 1.0e-6;
         }
         for (final Sketch.Entity entity : sketch.entities()) {
+            if (sketch.isConstruction(entity)) { continue; } // ★ 辅助线交给屏幕空间**虚线**画 ✓ 否则实线叠虚线看起来还是实线 ✗
             final int[] v = entity.vars();
             final boolean selected = session != null && session.isSelected(entity);
             final float[] entityColor;

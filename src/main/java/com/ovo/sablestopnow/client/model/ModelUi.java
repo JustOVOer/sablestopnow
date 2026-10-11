@@ -2139,8 +2139,8 @@ public final class ModelUi {
                             session.setConstructionDraw(!session.constructionDraw());
                             com.ovo.sablestopnow.client.model.ModelMode.prompt(
                                     session.constructionDraw()
-                                            ? "model.sketch.construction_on"
-                                            : "model.sketch.construction_off");
+                                            ? "model.sketch.construction_draw_on"
+                                            : "model.sketch.construction_draw_off");
                             refreshLeftPanel();
                         });
                 constructionTool.prefW = 26;

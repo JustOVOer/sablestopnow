@@ -148,6 +148,10 @@ public final class SketchHud {
         box.layout = Layouts.vbox(10, 4);
         // ★ 贴到**鼠标旁** ✓（用户要求：落下尺寸时应在鼠标旁边弹窗改长度 ✓ 别塞进左栏 ✗）
         //   实现 ✓：图层根用绝对布局 ⇒ 控件自己带 x/y ✓（Widget.x/y + Layouts.absolute ✓）
+        // ★ 修"改值框跑到屏幕左上角"✗：图层根**必须先有屏幕尺寸** ✓
+        //   之前 clamp 的上界用 layer.root.w/h ✗ 而它们恒为 0 ⇒ 坐标被夹到 (6,6) ⇒ 左上角 ✗✓
+        layer.size(net.minecraft.client.Minecraft.getInstance().getWindow().getGuiScaledWidth(),
+                net.minecraft.client.Minecraft.getInstance().getWindow().getGuiScaledHeight());
         layer.root.layout = Layouts.absolute();
         box.x = clamp((int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() + 14, 6,
                 Math.max(6, layer.root.w - box.minW - 6));

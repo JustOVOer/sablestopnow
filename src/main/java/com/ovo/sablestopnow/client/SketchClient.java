@@ -241,6 +241,22 @@ public final class SketchClient {
      *
      * @return true = 确实改了并求解了 ✓
      */
+    /**
+     * **求解诊断** ✓：一处写、多点位调用 ✓（用户要求：要写日志就一次写足 ✓ 别反复重测 ✗）。
+     *
+     * <p>打印 约束数 / 是否满足 / 未满足数 / 迭代数 / 求解异常 —— 定位"无法求解"必需的全部信息 ✓。
+     */
+    private static void logSolve(final String tag, final int kind, final double value,
+                                  final int varCount) {
+        final var r = MODE.lastSolve();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch-solve] {}: kind={} value={} vars={} ok={} satisfied={} unsatisfied={} iters={} err={}",
+                tag, kind, String.format(java.util.Locale.ROOT, "%.4f", value), varCount,
+                r != null && r.ok(), r != null && r.satisfied(),
+                r == null ? -1 : r.unsatisfied(), r == null ? -1 : r.iterations(),
+                MODE.lastSolveError() == null ? "-" : MODE.lastSolveError());
+    }
+
     public static boolean applyDimensionValue(final int constraintIndex, final double value) {
         final var session = MODE.session();
         if (session == null) {
@@ -254,7 +270,14 @@ public final class SketchClient {
         final var c = work.constraints().get(constraintIndex);
         work.replaceConstraint(constraintIndex,
                 new com.ovo.sablestopnow.sketch.Sketch.Constraint(c.kind(), c.operands(), value));
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch-solve] edit: idx={} kind={} old={} new={}",
+                constraintIndex, c.kind(),
+                String.format(java.util.Locale.ROOT, "%.4f", c.value()),
+                String.format(java.util.Locale.ROOT, "%.4f", value));
         MODE.solve();
+        logSolve("edit-after", c.kind(), value,
+                c.operands() == null ? -1 : c.operands().length);
         // ★ 明确反馈 ✓：改值后若求解器**没满足**（或触发塌陷回滚 ✓）⇒ 提示 ✓
         //   为什么必须提示 ✗✓：否则就是用户实测的"确定后却没有改变"✗ —— 玩家分不清"没生效"和"做不到"✗
         final var solved = MODE.lastSolve();
@@ -353,9 +376,16 @@ public final class SketchClient {
                 final var cand = com.ovo.sablestopnow.sketch.SketchMeasure.preview(
                         work, picked, session.hoverU(), session.hoverV(), session.lockedVariant());
                 if (cand != null) {
+                    com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                            "[sketch-solve] place: kind={} value={} vars={} label={}",
+                            cand.solverKind(),
+                            String.format(java.util.Locale.ROOT, "%.4f", cand.value()),
+                            cand.vars() == null ? -1 : cand.vars().length, cand.labelKey());
                     final boolean placed = session.dimensionWith(
                             cand.solverKind(), cand.value(), cand.vars());
                     MODE.solve();
+                    logSolve("place-after", cand.solverKind(), cand.value(),
+                            cand.vars() == null ? -1 : cand.vars().length);
                     com.ovo.sablestopnow.client.model.ModelMode.prompt(placed
                             ? "model.measure.added" : "model.measure.not_lockable");
                     if (placed) {

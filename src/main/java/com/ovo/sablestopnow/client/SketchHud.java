@@ -354,7 +354,8 @@ public final class SketchHud {
                     final double perpX = sb[1] - sa[1];
                     final double perpY = -(sb[0] - sa[0]);
                     final double perpLen = Math.hypot(perpX, perpY);
-                    if (perpLen > 1.0e-6) {
+                    // ⚠ 只对"**没被手动拖过**"的标签生效 ✓：拖过的以玩家拖到的位置为准 ✓（否则会再偏 18px ✗）
+                    if (perpLen > 1.0e-6 && !LABEL_OVERRIDE.containsKey(d.constraintIndex())) {
                         screen[0] += perpX / perpLen * 18.0;
                         screen[1] += perpY / perpLen * 18.0;
                     }

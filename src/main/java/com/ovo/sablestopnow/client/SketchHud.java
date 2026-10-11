@@ -347,6 +347,17 @@ public final class SketchHud {
                 final double[] sb = project(working, sub, ends[2], ends[3], mc, tmp);
                 if (sa != null && sb != null) {
                     // 尺寸线 = 参考点连线**平移到标签所在的那一侧** ✓（于是标签正好落在线中 ✓）
+                    // ★ 与参考图 1/2 一致 ✓：尺寸线与文字要**偏在实体外侧** ✓
+                    //   原来标签取图元中点 ✗ ⇒ 尺寸线正好压在实体线上 ⇒ 数字盖住线、箭头贴着线 ✗
+                    //   做法 ✓：沿**垂直于尺寸方向**偏 18px ✓（screen 被下面的平移数学复用 ✓
+                    //   所以文字与尺寸线会**一起**偏 ✓；双击命中也走 textX/textY ✓ 三者始终一致 ✓）
+                    final double perpX = sb[1] - sa[1];
+                    final double perpY = -(sb[0] - sa[0]);
+                    final double perpLen = Math.hypot(perpX, perpY);
+                    if (perpLen > 1.0e-6) {
+                        screen[0] += perpX / perpLen * 18.0;
+                        screen[1] += perpY / perpLen * 18.0;
+                    }
                     final double mx = (sa[0] + sb[0]) * 0.5;
                     final double my = (sa[1] + sb[1]) * 0.5;
                     final double ox = screen[0] - mx;

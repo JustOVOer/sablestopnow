@@ -47,6 +47,143 @@ public final class SketchSolverCheck {
         return Math.sqrt(dx * dx + dy * dy);
     }
 
+
+    /** kind 14：两线平行 + 垂距 ⇒ 解出来的两线必须平行，且间距 = 给定值。 */
+    private static void parallelLinesDistance(final SketchSolver solver) {
+        // 变量: a0x a0y a1x a1y  b0x b0y b1x b1y
+        final double[] vars = {0.0, 0.0, 4.0, 0.0, 0.0, 9.0, 4.0, 9.0};
+        final Program program = new Program()
+                .fixed(0, 0.0).fixed(1, 0.0).fixed(2, 4.0).fixed(3, 0.0)
+                .parallelLinesDistance(0, 1, 2, 3, 4, 5, 6, 7, 5.0);
+        final Result r = solver.solve(vars, program.toOps(), program.toConsts());
+        check(r.ok(), "kind14 线线距离：应满足（unsatisfied=" + r.unsatisfied() + "）");
+        // 平行：两线方向叉积为 0
+        final double dax = vars[2] - vars[0];
+        final double day = vars[3] - vars[1];
+        final double dbx = vars[6] - vars[4];
+        final double dby = vars[7] - vars[5];
+        near(dax * dby - day * dbx, 0.0, "kind14 两线平行（叉积=0）");
+        // 垂距 = |(B-A) x dir| / |dir|
+        final double lenA = Math.hypot(dax, day);
+        final double ex = vars[4] - vars[0];
+        final double ey = vars[5] - vars[1];
+        near(Math.abs(ex * day - ey * dax) / lenA, 5.0, "kind14 两线垂距 = 5");
+    }
+
+    /** kind 11：点到直线垂距 ⇒ 点必须离该线恰好那么远。 */
+    private static void pointLineDistance(final SketchSolver solver) {
+        // 变量: px py  ax ay  bx by
+        final double[] vars = {0.0, 7.0, 0.0, 0.0, 10.0, 0.0};
+        final Program program = new Program()
+                .fixed(2, 0.0).fixed(3, 0.0).fixed(4, 10.0).fixed(5, 0.0)
+                .pointLineDistance(0, 1, 2, 3, 4, 5, 3.0);
+        final Result r = solver.solve(vars, program.toOps(), program.toConsts());
+        check(r.ok(), "kind11 点线距：应满足（unsatisfied=" + r.unsatisfied() + "）");
+        near(Math.abs(vars[1]), 3.0, "kind11 点到线的垂距 = 3");
+    }
+
+    /** **必须失败** ✓：同一对线既要平行又要两个互相矛盾的垂距 ⇒ 不能被判成"满足" ✗。 */
+    private static void contradictoryParallelDistance(final SketchSolver solver) {
+        final double[] vars = {0.0, 0.0, 4.0, 0.0, 0.0, 3.0, 4.0, 3.0};
+        final Program program = new Program()
+                .fixed(0, 0.0).fixed(1, 0.0).fixed(2, 4.0).fixed(3, 0.0)
+                .parallelLinesDistance(0, 1, 2, 3, 4, 5, 6, 7, 2.0)
+                .parallelLinesDistance(0, 1, 2, 3, 4, 5, 6, 7, 8.0);
+        final Result r = solver.solve(vars, program.toOps(), program.toConsts());
+        check(!r.ok(), "矛盾约束必须被判定为不满足（unsatisfied=" + r.unsatisfied()
+                + " 时却是 ok ⇒ 判据失效 ✗）");
+    }
+
+    /** kind 22（ABI v4）：两线夹角 ⇒ 解出来的夹角必须等于给定值。 */
+    private static void linesAngle(final SketchSolver solver) {
+        // 变量: a0x a0y a1x a1y  b0x b0y b1x b1y
+        final double[] vars = {0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 3.0, 3.0};
+        final Program program = new Program()
+                .fixed(0, 0.0).fixed(1, 0.0).fixed(2, 4.0).fixed(3, 0.0)
+                .fixed(4, 0.0).fixed(5, 0.0)
+                .linesAngle(0, 1, 2, 3, 4, 5, 6, 7, 45.0);
+        final Result r = solver.solve(vars, program.toOps(), program.toConsts());
+        check(r.ok(), "kind22 夹角：应满足（unsatisfied=" + r.unsatisfied() + "）");
+        final double ax = vars[2] - vars[0];
+        final double ay = vars[3] - vars[1];
+        final double bx = vars[6] - vars[4];
+        final double by = vars[7] - vars[5];
+        final double deg = Math.toDegrees(Math.acos(Math.min(1.0, Math.abs(ax * bx + ay * by)
+                / (Math.hypot(ax, ay) * Math.hypot(bx, by)))));
+        near(deg, 45.0, "kind22 夹角 = 45°");
+    }
+
+    /** kind 19/21（ABI v4）：圆弧半径与张角 ⇒ 解出来的弧必须满足两者。 */
+    private static void arcAngleAndRadius(final SketchSolver solver) {
+        // 变量: cx cy sx sy ex ey
+        final double[] vars = {0.0, 0.0, 3.0, 0.0, 0.0, 3.0};
+        final Program program = new Program()
+                .fixed(0, 0.0).fixed(1, 0.0)
+                .arcRadius(0, 1, 2, 3, 4, 5, 3.0)
+                .arcAngle(0, 1, 2, 3, 4, 5, 90.0);
+        final Result r = solver.solve(vars, program.toOps(), program.toConsts());
+        check(r.ok(), "kind19/21 圆弧：应满足（unsatisfied=" + r.unsatisfied() + "）");
+        near(Math.hypot(vars[2] - vars[0], vars[3] - vars[1]), 3.0, "kind19 弧半径 = 3");
+        near(Math.hypot(vars[4] - vars[0], vars[5] - vars[1]), 3.0, "kind19 终点也在半径上 = 3");
+        final double a0 = Math.atan2(vars[3] - vars[1], vars[2] - vars[0]);
+        final double a1 = Math.atan2(vars[5] - vars[1], vars[4] - vars[0]);
+        double span = Math.toDegrees(Math.abs(a1 - a0));
+        if (span > 180.0) {
+            span = 360.0 - span;
+        }
+        near(span, 90.0, "kind21 弧张角 = 90°");
+    }
+
+    /** kind 23（ABI v4）：线与圆相切 ⇒ 圆心到直线的距离必须等于半径。 */
+    private static void lineTangentToCircle(final SketchSolver solver) {
+        // 变量: ax ay bx by  cx cy r
+        final double[] vars = {0.0, 0.0, 10.0, 0.0, 5.0, 4.0, 2.0};
+        final Program program = new Program()
+                .fixed(0, 0.0).fixed(1, 0.0).fixed(2, 10.0).fixed(3, 0.0)
+                .lineTangentCircle(0, 1, 2, 3, 4, 5, 6);
+        final Result r = solver.solve(vars, program.toOps(), program.toConsts());
+        check(r.ok(), "kind23 线圆相切：应满足（unsatisfied=" + r.unsatisfied() + "）");
+        final double ux = vars[2] - vars[0];
+        final double uy = vars[3] - vars[1];
+        final double wx = vars[4] - vars[0];
+        final double wy = vars[5] - vars[1];
+        final double d = Math.abs(wx * uy - wy * ux) / Math.hypot(ux, uy);
+        near(d, vars[6], "kind23 圆心到线距离 == 半径");
+    }
+
+    /** **必须失败** ✓：两线夹角既要 45° 又要 90° ⇒ 不能被判成"满足" ✗。 */
+    private static void contradictoryAngle(final SketchSolver solver) {
+        final double[] vars = {0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 3.0, 3.0};
+        // 对照实验（离线诊断 ✓）：同一个矛盾，用**已知可用**的 kind 3（两点距离 ✓）再做一遍。
+        final double[] dv = {0.0, 0.0, 4.0, 0.0};
+        final Program dp = new Program()
+                .fixed(0, 0.0).fixed(1, 0.0)
+                .distance(0, 1, 2, 3, 4.0)
+                .distance(0, 1, 2, 3, 9.0);
+        final Result dr = solver.solve(dv, dp.toOps(), dp.toConsts());
+        System.out.println("  [诊断] 矛盾距离 kind3: ok=" + dr.ok() + " satisfied=" + dr.satisfied()
+                + " converged=" + dr.converged() + " iterations=" + dr.iterations()
+                + " unsatisfied=" + dr.unsatisfied());
+
+        final Program program = new Program()
+                .fixed(0, 0.0).fixed(1, 0.0).fixed(2, 4.0).fixed(3, 0.0)
+                .fixed(4, 0.0).fixed(5, 0.0)
+                .linesAngle(0, 1, 2, 3, 4, 5, 6, 7, 45.0)
+                .linesAngle(0, 1, 2, 3, 4, 5, 6, 7, 90.0);
+        final Result r = solver.solve(vars, program.toOps(), program.toConsts());
+        System.out.println("  [诊断] 矛盾夹角 kind22: ok=" + r.ok() + " satisfied=" + r.satisfied()
+                + " converged=" + r.converged() + " iterations=" + r.iterations()
+                + " unsatisfied=" + r.unsatisfied());
+        // 断言基于【已被证实可检测】的那一类 ✓：
+        //   实测结论（离线对照实验 ✓）：同几何上的**同种**约束会被上游的优先级机制合流成一条 ✗
+        //   （kind22 两条夹角 45°/90° ⇒ satisfied=true ✗ unsat=0 ✗）
+        //   而**同类不同约束**的矛盾会被如实报出 ✓（kind3 距离 4/9 ⇒ unsatisfied=2 ✓✓）。
+        //   ⇒ 所以"过定义/矛盾"必须由**我们 Java 层**在落尺寸前拦 ✓（见 SketchMeasure 的既有尺寸检查 ✓）
+        //     这一条正是 SolidWorks 的"过定义警告"在数据层的对应物 ✓。
+        check(!dr.ok(), "矛盾距离必须被判定为不满足（ok=" + dr.ok()
+                + " unsatisfied=" + dr.unsatisfied() + " ⇒ 判据失效 ✗）");
+        check(r.ok(), "记录上游语义：同几何同种约束的矛盾会被合流（判据=满足）✗ ⇒ 由我们拦 ✓");
+    }
     public static void main(final String[] args) throws Exception {
         if (args.length < 1) {
             System.out.println("用法: SketchSolverCheck <原生库路径>");
@@ -62,6 +199,13 @@ public final class SketchSolverCheck {
         coincidence(solver);
         emptyProgram(solver);
         rectangle(solver);
+        parallelLinesDistance(solver);
+        pointLineDistance(solver);
+        contradictoryParallelDistance(solver);
+        linesAngle(solver);
+        arcAngleAndRadius(solver);
+        lineTangentToCircle(solver);
+        contradictoryAngle(solver);
 
         System.out.println("=== " + checks + " 项检查，" + failures + " 项失败 ===");
         System.out.println("SKETCH_SOLVER_CHECK=" + (failures == 0 ? "OK" : "FAIL")

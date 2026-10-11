@@ -1297,9 +1297,17 @@ public final class SketchModelCheck {
                         && mode.snapAt().kind()
                         == com.ovo.sablestopnow.sketch.SketchSession.KeyKind.ENDPOINT,
                 "提示的种类是端点");
-        // 悬停在空白处不提示
+        // ✅ 悬停在**整数格点**上 ⇒ 现在会吸附到 **MC 网格** ✓
+        //   （用户要求：该面的方块网格"顶点与网格线"都可吸附 ✓ —— uv 单位就是方块 ✓）
         mode.hover(new Vector3d(30, 20, 30), new Vector3d(0, -1, 0));
-        check(mode.snapAt() == null, "空白处不提示吸附");
+        check(mode.snapAt() != null
+                        && mode.snapAt().kind()
+                        == com.ovo.sablestopnow.sketch.SketchSession.KeyKind.GRID,
+                "格点上吸附到 MC 网格（GRID）");
+        // ⚠ **对偶断言必须保留** ✗：格点/格线与图元都够不着时 ⇒ 仍然不提示 ✓
+        //   取 25.5：离上下两个整数格各 0.5 ✓（拾取容差在这个相机距离下约 0.4 ✓）⇒ 吸不到 ✓
+        mode.hover(new Vector3d(25.5, 20, 25.5), new Vector3d(0, -1, 0));
+        check(mode.snapAt() == null, "远离格点与图元时不提示吸附（对偶断言 ✓ 别到处乱吸 ✗）");
         mode.cancel();
     }
 
@@ -5560,7 +5568,11 @@ public final class SketchModelCheck {
         eq(one.solverKind(), com.ovo.sablestopnow.sketch.SketchSolver.DISTANCE, "用 DISTANCE");
         near(one.value(), 10.0, "长度 = 10", 1.0e-6);
 
-        // ⚠ 两条**不平行**的线 → 角度；我们的 DISTANCE 表达不了 → 必须 expressible=false
+        // ✅ 两条**不平行**的线 → 夹角 ✓ —— ABI v4 起 LINES_ANGLE(22) 是**真约束** ✓
+        //    ⇒ 期望从"必须 expressible=false"（旧的、诚实但保守的行为 ✗）
+        //      升级为"expressible=true 且 kind==LINES_ANGLE" ✓✓
+        //    ⚠ 但那条**对偶性质必须保留** ✗：绝不能把它塞成 DISTANCE
+        //      —— 那是一条语义不同的假约束 ✗（DISTANCE 只支持点到点 ✓）
         s.setTool(com.ovo.sablestopnow.sketch.SketchSession.Tool.LINE);
         s.click(0.0, 20.0);
         s.click(5.0, 25.0);
@@ -5569,9 +5581,12 @@ public final class SketchModelCheck {
         final var two = com.ovo.sablestopnow.sketch.SketchMeasure.smartDimension(k,
                 java.util.List.of(equal, diag));
         check(two != null, "两条线 → 有推断结果");
-        check(!two.expressible(),
-                "两条**不平行**的线推出来是角度/最近距，而我们的 DISTANCE 只支持点到点 → "
-                        + "**必须 expressible=false**（退成参考尺寸），绝不能塞一条语义不同的假约束");
+        check(two.expressible(), "不平行两线 → 夹角现在是**可表达**的真约束（ABI v4 ✓）");
+        eq(two.solverKind(), com.ovo.sablestopnow.sketch.SketchSolver.LINES_ANGLE,
+                "夹角必须用 LINES_ANGLE(22)");
+        check(two.solverKind() != com.ovo.sablestopnow.sketch.SketchSolver.DISTANCE,
+                "绝不能把夹角塞成 DISTANCE —— 语义不同的假约束 ✗（对偶断言 ✓ 必须保留）");
+        near(two.value(), 45.0, "夹角 = 45°（水平线 vs 斜率 1 的斜线）", 1.0e-6);
 
         // 两个"点一样"的图元（圆 + 圆）→ 点距，能约束
         final com.ovo.sablestopnow.sketch.SketchSession s2 = editing();

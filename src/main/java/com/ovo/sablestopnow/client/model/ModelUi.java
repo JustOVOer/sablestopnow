@@ -2128,11 +2128,45 @@ public final class ModelUi {
                     final var smart = com.ovo.sablestopnow.sketch.SketchMeasure
                             .smartDimension(live, picked);
                     if (smart != null) {
+                        // ★ 实时预览 ✓：按**指针方位**自动捕捉候选（右键锁定优先 ✓）
+                        //   候选来自 SketchMeasure.variants（平行/水平/竖直 或 半径/直径 ✓）
+                        final var cands = com.ovo.sablestopnow.sketch.SketchMeasure.variants(live, smart);
+                        final var shown = com.ovo.sablestopnow.sketch.SketchMeasure.preview(
+                                live, picked, session.hoverU(), session.hoverV(),
+                                session.lockedVariant());
+                        final var use = shown != null ? shown
+                                : (cands.isEmpty() ? null : cands.get(0));
                         body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
                         body.add(new Label(Component.translatable("model.smart.result",
                                 Component.translatable(smart.labelKey()),
-                                String.format(java.util.Locale.ROOT, "%.3f", smart.value())))
+                                String.format(java.util.Locale.ROOT, "%.3f",
+                                        use != null ? use.value() : smart.value())))
                                 .color(0xFFFFCC55));
+                        if (cands.size() > 1) {
+                            // 临时切换/锁定候选 ✓（SolidWorks：默认平行尺寸，可切换水平/竖直 ✓）
+                            // 用统一 GUI 库的 Button + hboxWrap ✓ ⇒ 窄了自动折行 ✓ 文字自动短标签 ✓
+                            final var crow = new com.ovo.sablestopnow.client.gui.lib.Container();
+                            crow.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hboxWrap(0, 3, 2);
+                            crow.prefW = com.ovo.sablestopnow.client.gui.lib.Widget.FILL;
+                            crow.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
+                            for (int ci = 0; ci < cands.size(); ci++) {
+                                final int index = ci;
+                                final var cb = new Button(
+                                        Component.translatable(cands.get(ci).labelKey()), () -> {
+                                            // 再点一次 = 取消锁定 ✓（回到自动捕捉 ✓）
+                                            session.lockVariant(session.lockedVariant() == index
+                                                    ? -1 : index);
+                                        });
+                                cb.toggled = session.lockedVariant() == ci;
+                                crow.add(cb);
+                            }
+                            body.add(crow);
+                        }
+                        // ★ 从动/驱动开关 ✓（SolidWorks：驱动尺寸可切换为从动 = 只显示不驱动 ✓）
+                        final var refBtn = new Button(Component.translatable("model.dim.reference"),
+                                () -> session.setReferenceMode(!session.referenceMode()));
+                        refBtn.toggled = session.referenceMode();
+                        body.add(refBtn);
                         if (smart.expressible()) {
                             body.add(new Button(Component.translatable("model.measure.dimension"),
                                     () -> {
@@ -2149,14 +2183,33 @@ public final class ModelUi {
                                         if (again == null || !again.expressible()) {
                                             return;
                                         }
-                                        final boolean ok;
-                                        if (sel.size() == 1) {
-                                            ok = mode.session().dimensionEntity(
-                                                    sel.get(0), again.value());
-                                        } else {
-                                            ok = mode.session().dimensionBetween(
-                                                    sel.get(0), sel.get(1), again.value());
+                                        // ★ 走**通用落约束** ✓：用"当前候选"的 kind 与值 ✓
+                                        //   ⇒ 夹角/线线距/点线距/水平竖直 全部一次打通 ✓
+                                        //   并且自带**过定义拦截** ✓（同几何同种约束 ⇒ 改值而非新建 ✓）
+                                        final var now = com.ovo.sablestopnow.sketch.SketchMeasure
+                                                .preview(work, sel, mode.session().hoverU(),
+                                                        mode.session().hoverV(),
+                                                        mode.session().lockedVariant());
+                                        final var cand = now != null ? now
+                                                : (com.ovo.sablestopnow.sketch.SketchMeasure
+                                                        .variants(work, again).isEmpty() ? null
+                                                        : com.ovo.sablestopnow.sketch.SketchMeasure
+                                                                .variants(work, again).get(0));
+                                        // 从动模式 ✓：不落约束 ✗，而且把已有约束删掉 ⇒ 退成参考尺寸 ✓（灰 + 括号 ✓）
+                                        if (mode.session().referenceMode()) {
+                                            final var already = com.ovo.sablestopnow.sketch.SketchMeasure
+                                                    .alreadyDimensioned(work, again);
+                                            final boolean removed = already != null
+                                                    && work.removeConstraint(already);
+                                            mode.solve();
+                                            com.ovo.sablestopnow.client.model.ModelMode.prompt(
+                                                    removed ? "model.dim.made_reference"
+                                                            : "model.dim.already_reference");
+                                            return;
                                         }
+                                        final boolean ok = cand != null && mode.session()
+                                                .dimensionWith(cand.solverKind(), cand.value(),
+                                                        cand.vars());
                                         if (ok) {
                                             mode.solve();
                                             ModelMode.prompt("model.measure.added");

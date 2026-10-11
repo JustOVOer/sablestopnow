@@ -163,13 +163,33 @@ public final class SketchClient {
         // 已经过关键点吸附与水平/竖直推理。喂原始 uv 的话，预览会落在光标处、
         // 松手却吸到别处 —— 看起来就是"预览在骗人"。
         final Vector3d uv = MODE.planePoint(localFrom, localDir);
+        lastCursorUv = uv; // 拖动尺寸要用"指针在平面上的位置" ✓ 与命中同一套坐标 ✓
         final double[] preview = MODE.previewUv();
+        // ★ 把"真按下去会用的点"推进会话 ✓（与上面注释同一口径 ✓ 不用原始 uv ✗）
+        //   ⇒ 智能尺寸的 preview(...) 靠它做**方位自动捕捉**（平行/水平/竖直 ✓）
+        //     左栏面板也读同一处状态 ⇒ 三处联动 ✓ 不会各算一套 ✗
+        if (preview != null) {
+            MODE.session().setHover(preview[0], preview[1]);
+        } else if (uv != null) {
+            MODE.session().setHover(uv.x, uv.y);
+        }
         if (preview == null) {
             SketchRenderer.clearPreviewPoint();
         } else {
             SketchRenderer.setPreviewPoint(preview[0], preview[1]);
         }
         diagUv(uv, localFrom, localDir);
+    }
+
+    /** 指针在草图平面上的 uv ✓（每帧由 {@link #hover} 更新 ✓ 拖动标签用 ✓）。 */
+    @Nullable
+    private static Vector3d lastCursorUv;
+
+    /** 指针的平面 uv ✓；还没算出来时返回 null ✓。 */
+    @Nullable
+    public static double[] cursorUv() {
+        final Vector3d uv = lastCursorUv;
+        return uv == null ? null : new double[] {uv.x, uv.y};
     }
 
     private static long lastUvDiagMs;
@@ -210,6 +230,70 @@ public final class SketchClient {
      *
      * @return true 表示这次点击被草图模式消费了（调用方不要再往下走拾取/拖拽）
      */
+    /**
+     * **双击改值**：改一条**已有**约束的值并立刻求解 ✓（= SolidWorks 的"输入新值 ⇒ 模型实时驱动更新"✓）。
+     *
+     * <p>为什么按 {@code constraintIndex} 改 ✗✓：双击命中的是屏幕上那个标签 ✓
+     * 而标签来自 {@code SketchMeasure.Dimension} ✓ 它自带所对应的约束下标 ✓✓
+     * ⇒ 改的就是"玩家看到的那一条"✓ 不存在"点 A 改了 B"✗。
+     *
+     * <p>只**改值**不换类型 ✓（类型要换 ⇒ 用面板的候选按钮或右键锁定 ✓ 语义分开 ✓）。
+     *
+     * @return true = 确实改了并求解了 ✓
+     */
+    public static boolean applyDimensionValue(final int constraintIndex, final double value) {
+        final var session = MODE.session();
+        if (session == null) {
+            return false;
+        }
+        final var work = session.working();
+        if (work == null || constraintIndex < 0
+                || constraintIndex >= work.constraints().size()) {
+            return false;
+        }
+        final var c = work.constraints().get(constraintIndex);
+        work.replaceConstraint(constraintIndex,
+                new com.ovo.sablestopnow.sketch.Sketch.Constraint(c.kind(), c.operands(), value));
+        MODE.solve();
+        return true;
+    }
+    /**
+     * **右键**：循环锁定对齐方式 ✓（SolidWorks 的"右键锁定当前对齐/尺寸类型"✓）。
+     *
+     * <p>顺序：候选 0 → 候选 1 → … → **取消锁定**（回到自动捕捉 ✓）→ 候选 0 …
+     * 锁定时画面上已有锁定环 ✓（SketchHud 里 ✓ 读的是同一个 {@code lockedVariant} ✓）。
+     *
+     * @return true = 这次右键被草图消费了（调用方不要再当成"取消/返回"✗）
+     */
+    public static boolean rightClick() {
+        if (!MODE.active() || MODE.session() == null
+                || MODE.session().tool() != com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION) {
+            return false;
+        }
+        final var session = MODE.session();
+        final var work = session.working();
+        final var picked = session.selection();
+        if (work == null || picked.isEmpty() || picked.size() > 2) {
+            return false;
+        }
+        final var dim = com.ovo.sablestopnow.sketch.SketchMeasure.smartDimension(work, picked);
+        if (dim == null) {
+            return false;
+        }
+        final int count = com.ovo.sablestopnow.sketch.SketchMeasure.variants(work, dim).size();
+        if (count <= 1) {
+            return true; // 只有一种候选 ⇒ 右键无事可做，但仍消费掉 ✓ 免得被当成取消 ✗
+        }
+        int next = session.lockedVariant() + 1;
+        if (next >= count) {
+            next = -1; // 绕过一圈 ⇒ 回到自动捕捉 ✓
+        }
+        session.lockVariant(next);
+        com.ovo.sablestopnow.client.model.ModelMode.prompt(next < 0
+                ? "model.smart.unlocked" : "model.smart.locked");
+        return true;
+    }
+
     public static boolean click(final Minecraft mc) {
         if (!MODE.active()) {
             return false;
@@ -229,6 +313,26 @@ public final class SketchClient {
         // 我因此白白查了好几轮。失败的日志能定位失败，成功的日志才能确认成功。
         final var stageBefore = MODE.stage();
         // Ctrl 按下 = 多选增删。读键盘只能在客户端这一层做（SketchMode 不依赖 Minecraft）。
+        // ★ 智能尺寸工具：左键 = 在指针处**放置**当前预览到的候选 ✓（SolidWorks 的左键放置 ✓）
+        //   必须在这里拦 ✗ —— SketchMode 只管画图元、不知道"工具"这回事 ✓。
+        //   放置走 dimensionWith ✓ ⇒ 自带**过定义拦截**（同几何同种约束 ⇒ 改值而非新建 ✓✓）
+        if (MODE.session().tool() == com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION) {
+            final var session = MODE.session();
+            final var work = session.working();
+            final var picked = session.selection();
+            if (work != null && !picked.isEmpty() && picked.size() <= 2) {
+                final var cand = com.ovo.sablestopnow.sketch.SketchMeasure.preview(
+                        work, picked, session.hoverU(), session.hoverV(), session.lockedVariant());
+                if (cand != null) {
+                    final boolean placed = session.dimensionWith(
+                            cand.solverKind(), cand.value(), cand.vars());
+                    MODE.solve();
+                    com.ovo.sablestopnow.client.model.ModelMode.prompt(placed
+                            ? "model.measure.added" : "model.measure.not_lockable");
+                }
+            }
+            return true; // 消费掉 ✓ 不让草图模式再把它当成"落点"✗
+        }
         final boolean additive = net.minecraft.client.gui.screens.Screen.hasControlDown();
         final boolean consumed = MODE.click(localFrom, localDir, additive);
         diagPlaneClick(stageBefore, consumed, MODE.stage(), MODE.planes().size());
@@ -305,6 +409,18 @@ public final class SketchClient {
             return false;
         }
         SketchRenderer.setEditing(MODE.editingId());
+        // ★ **进入草稿自动正视该面** ✓（用户要求 ✓ / SolidWorks 的"正视于"✓）
+        //   视线方向 = 面法线的反向（从外面正对看进去 ✓）⇒ 反解 yaw/pitch ✓
+        //   Minecraft 约定：look = (−sin(yaw)·cos(pitch), −sin(pitch), cos(yaw)·cos(pitch))
+        //   ⇒ pitch = asin(−look.y) ✓  yaw = atan2(−look.x, look.z) ✓
+        final double lx = -normal.x;
+        final double ly = -normal.y;
+        final double lz = -normal.z;
+        final double pitchDeg = Math.toDegrees(Math.asin(Math.max(-1.0, Math.min(1.0, -ly))));
+        final double yawDeg = lx * lx + lz * lz < 1.0e-9
+                ? com.ovo.sablestopnow.client.model.ModelCamera.yaw() // 法线是 ±Y ⇒ yaw 保持原样 ✓
+                : Math.toDegrees(Math.atan2(-lx, lz));
+        com.ovo.sablestopnow.client.model.ModelCamera.alignTo((float) yawDeg, (float) pitchDeg);
         return true;
     }
 

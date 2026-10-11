@@ -159,6 +159,29 @@ public final class SketchMode {
             return;
         }
         snapAt = session.pickKeyPoint(uv.x, uv.y, pickTolerance);
+        if (snapAt == null) {
+            // ★ **MC 网格吸附** ✓（用户要求：该面的方块网格"顶点与网格线"都可吸附 ✓）
+            //   顺序与 SolidWorks 一致 ✓：先几何吸附（端点/中点/圆心 ✓ 上面已试 ✓）
+            //   拿不到才落到网格 ✓ ⇒ 不会把几何点抢走 ✗。
+            //   uv 的单位就是方块 ✓（子结构局部系 ✓）⇒ 整数格 = MC 方块格 ✓✓
+            // ⚠ 网格吸附的容差**必须夹住** ✗✓：离最近整数格点最远只有 0.5 格 ✓
+            //   ⇒ 若直接用拾取容差（跟相机距离走 ✓ 可能 >0.5 ✓）就会**到处都吸**✗
+            //      —— 网格变成磁铁、画不出非整数的尺寸 ✓（我那条第"远离格点不提示"的对偶断言
+            //      当场抓到过这个 ✗ ⇒ 现在夹到 1/3 格 ✓ 留出自由带 ✓）
+            final double gridTol = Math.min(pickTolerance, 1.0 / 3.0);
+            final double gu = Math.round(uv.x);
+            final double gv = Math.round(uv.y);
+            final double du = Math.abs(uv.x - gu);
+            final double dv = Math.abs(uv.y - gv);
+            if (du <= gridTol && dv <= gridTol) {
+                snapAt = new SketchSession.KeyPoint(gu, gv, SketchSession.KeyKind.GRID, null, -1, -1);
+            } else if (du <= gridTol) {
+                // 只吸附到**格线**（另一轴保持自由 ⇒ 可以沿格线滑动 ✓）
+                snapAt = new SketchSession.KeyPoint(gu, uv.y, SketchSession.KeyKind.GRID, null, -1, -1);
+            } else if (dv <= gridTol) {
+                snapAt = new SketchSession.KeyPoint(uv.x, gv, SketchSession.KeyKind.GRID, null, -1, -1);
+            }
+        }
         // 鼠标下的图元：**任何工具**都要高亮，不只是 SELECT。
         // SolidWorks 的手感是"指到哪就亮到哪"，玩家靠高亮确认自己会对齐到哪条线；
         // 只在 SELECT 下高亮的话，画线时完全没有反馈。

@@ -392,6 +392,49 @@ public final class Sketch {
     // ------------------------------------------------------------------
 
     /** 加一条约束。操作数是变量下标。 */
+    // ================= 辅助线（construction geometry ✓ SolidWorks 的构造几何 ✓）=============
+
+    /**
+     * 被标记为**辅助线**的图元 ✓（用"第一个变量下标"当身份 ✓）。
+     *
+     * <p>为什么不给 {@link Entity} 加字段 ✗✓：它是 record ✓ 加字段要改**所有**构造点 ✗
+     * 而变量下标在一条草图里**唯一标识一个图元** ✓（每个图元的变量是连续分配的 ✓）
+     * ⇒ 用 {@code Set<Integer>} 记身份最省事 ✓ 也不动序列化格式 ✓✓。
+     *
+     * <p>语义（与 SolidWorks 一致 ✓）：辅助线只作**参考/约束基准** ✓
+     * **不参与轮廓** ✗ ⇒ 拉伸/旋转不会把它算进面里 ✓（{@code SketchProfiles} 那边要跳过它 ✓）。
+     */
+    private final java.util.Set<Integer> construction = new java.util.HashSet<>();
+
+    /** 这条图元是不是辅助线 ✓。 */
+    public boolean isConstruction(final Entity entity) {
+        return entity != null && this.construction.contains(entity.vars()[0]);
+    }
+
+    /** 切换辅助线标记 ✓（UI 上的"构造几何"开关 ✓）。 */
+    public boolean toggleConstruction(final Entity entity) {
+        if (entity == null) {
+            return false;
+        }
+        final int key = entity.vars()[0];
+        if (!this.construction.remove(key)) {
+            this.construction.add(key);
+            return true;
+        }
+        return false;
+    }
+
+    /** 全部辅助线 ✓（渲染时画虚线/暗色 ✓ 轮廓计算时跳过 ✓）。 */
+    public java.util.List<Entity> constructionEntities() {
+        final java.util.List<Entity> out = new java.util.ArrayList<>();
+        for (final Entity e : entities()) {
+            if (this.construction.contains(e.vars()[0])) {
+                out.add(e);
+            }
+        }
+        return out;
+    }
+
     public Constraint addConstraint(final int kind, final double value, final int... operands) {
         final Constraint c = new Constraint(kind, operands, value);
         constraints.add(c);

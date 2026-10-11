@@ -100,6 +100,52 @@ public final class ModelInput {
         tickCameraDrag(window, mc, dx, dy);
         tickKeyboardMove(window, mc);
         tickModelDrag(window, mc, dx, dy);
+        tickSketchRightClick(window, mc);
+        tickDimLabelDrag(window, mc);
+    }
+
+    /** 正在拖动的尺寸标签（约束下标 ✓ -1 = 没在拖 ✓）。 */
+    private static int draggingDimLabel = -1;
+
+    /** 拖动尺寸标签：按住期间把指针的平面 uv 写成标签覆盖位置 ✓（松手结束 ✓）。 */
+    private static void tickDimLabelDrag(final long window, final Minecraft mc) {
+        final boolean down = GLFW.glfwGetMouseButton(window, GLFW.GLFW_MOUSE_BUTTON_LEFT)
+                == GLFW.GLFW_PRESS;
+        if (!down) {
+            draggingDimLabel = -1;
+            return;
+        }
+        if (draggingDimLabel < 0 || !com.ovo.sablestopnow.client.SketchClient.active()) {
+            return;
+        }
+        final double[] uv = com.ovo.sablestopnow.client.SketchClient.cursorUv();
+        if (uv != null) {
+            com.ovo.sablestopnow.client.SketchHud.setLabelOverride(
+                    draggingDimLabel, uv[0], uv[1]);
+        }
+    }
+
+    /** 右键是否按着（用来取**上升沿** ⇒ 按住不会连发 ✓）。 */
+    private static boolean sketchRightDown;
+
+    /**
+     * 草图里的**右键**：循环锁定智能尺寸的对齐方式 ✓（上升沿触发 ✓）。
+     *
+     * <p>为什么在这里轮询而不是收事件 ✗：本类其余输入（左键拖、中键转、WASD）都是轮询 GLFW ✓
+     * ⇒ 跟着同一套写法最不容易漏状态 ✓（混用两种风格迟早出现"按下没抬起"✗）。
+     */
+    private static void tickSketchRightClick(final long window, final Minecraft mc) {
+        final boolean down = GLFW.glfwGetMouseButton(window, GLFW.GLFW_MOUSE_BUTTON_RIGHT)
+                == GLFW.GLFW_PRESS;
+        if (down && !sketchRightDown) {
+            sketchRightDown = true;
+            if (com.ovo.sablestopnow.client.SketchClient.active()) {
+
+                com.ovo.sablestopnow.client.SketchClient.rightClick();
+            }
+        } else if (!down) {
+            sketchRightDown = false;
+        }
     }
 
     /** WASD/QE 的移动速度系数（格/秒，再乘以当前距离）。 */
@@ -357,11 +403,82 @@ public final class ModelInput {
 
     // ============ 选择 ============
 
+    // ================= 双击已放置尺寸 ⇒ 改值 ✓ ==========================================
+
+    private static long lastDimClickMs;
+    private static double lastDimClickX = Double.NaN;
+    private static double lastDimClickY = Double.NaN;
+
+    /**
+     * 双击**已放置尺寸** ⇒ 打开改值浮层 ✓。
+     *
+     * <p>命中走 {@code SketchHud.pickLabel(...)} ✓ —— 它登记的屏幕位置正是**画标签时**算出来的 ✓
+     * ⇒ "看到的"与"点得到的"必然一致 ✓（本项目已经栽过好几次"两处各算一次"的坑 ✓）。
+     *
+     * <p>从动/参考尺寸**不可改** ✗（SolidWorks 里参考尺寸是只读的 ✓ 灰 + 括号就是这个意思 ✓）。
+     */
+    private static boolean tryDimensionEdit(final Minecraft mc) {
+        final double mx = dimGuiX(mc);
+        final double my = dimGuiY(mc);
+        final long now = System.currentTimeMillis();
+        final boolean doubleClick = now - lastDimClickMs <= 250L
+                && Math.abs(mx - lastDimClickX) <= 4.0
+                && Math.abs(my - lastDimClickY) <= 4.0;
+        lastDimClickMs = now;
+        lastDimClickX = mx;
+        lastDimClickY = my;
+        if (!doubleClick) {
+            return false;
+        }
+        final var hit = com.ovo.sablestopnow.client.SketchHud.pickLabel(mx, my, 14.0);
+        if (hit == null || hit.constraintIndex() < 0 || !hit.driving()) {
+            return false; // 参考尺寸只读 ✓
+        }
+        final var session = com.ovo.sablestopnow.client.SketchClient.mode().session();
+        final var work = session == null ? null : session.working();
+        if (work == null) {
+            return false;
+        }
+        for (final var d : com.ovo.sablestopnow.sketch.SketchMeasure.existingDimensions(work)) {
+            if (d.constraintIndex() == hit.constraintIndex()) {
+                com.ovo.sablestopnow.client.SketchHud.openEdit(
+                        hit.constraintIndex(), d.labelKey(), d.value());
+                lastDimClickMs = 0L; // 三连击不再重复开 ✓
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static double dimGuiX(final Minecraft mc) {
+        return mc.mouseHandler.xpos() * mc.getWindow().getGuiScaledWidth()
+                / Math.max(1, mc.getWindow().getWidth());
+    }
+
+    private static double dimGuiY(final Minecraft mc) {
+        return mc.mouseHandler.ypos() * mc.getWindow().getGuiScaledHeight()
+                / Math.max(1, mc.getWindow().getHeight());
+    }
+
     private static void onLeftPress(final Minecraft mc) {
         // ⚠ 草图模式必须**最先**处理：草图里点的是基准面/草图平面，不是模型表面，
         // 所以不能走下面那套「先要求 hover 到某个面」的拾取。放在最前面还有一个原因 ——
         // 在草图环境里点到空处也不该顺手把视角转了或把选择清了。
         if (com.ovo.sablestopnow.client.SketchClient.active()) {
+            // ★ 双击**已放置尺寸** ⇒ 改值浮层 ✓（SolidWorks：双击尺寸数字弹框改值 ⇒ 几何实时驱动 ✓）
+            if (tryDimensionEdit(mc)) {
+                return;
+            }            // ★ 按在**已有尺寸标签**上 ⇒ 这次按下是"拖标签"✓ 不是"放置新尺寸"✗
+            if (com.ovo.sablestopnow.client.SketchClient.mode().session() != null
+                    && com.ovo.sablestopnow.client.SketchClient.mode().session().tool()
+                            == com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION) {
+                final var grab = com.ovo.sablestopnow.client.SketchHud.pickLabel(
+                        dimGuiX(mc), dimGuiY(mc), 14.0);
+                if (grab != null && grab.constraintIndex() >= 0 && grab.driving()) {
+                    draggingDimLabel = grab.constraintIndex();
+                    return; // 交给 tick 里的拖动处理 ✓ 不放置新尺寸 ✓
+                }
+            }
             // ⚠⚠ 顺序很关键：**先试方块面，再试基准板**。
             //
             // 反过来（先试板）的话，面这条路**永远轮不到** —— 三块基准板是按结构包围盒

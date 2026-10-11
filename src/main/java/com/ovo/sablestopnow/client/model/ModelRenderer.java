@@ -315,6 +315,12 @@ public final class ModelRenderer {
         if (hit == null || ref == null) {
             return;
         }
+        // ★ 进入草稿后**不再特地显示鼠标选中的面** ✓（用户要求 ✓）
+        //   理由 ✓：草图里鼠标是用来"画图元 / 标尺寸"的 ✓ 面也不是草图里要点选的东西 ✓
+        //   高亮面只会分散注意 ✓（选面只发生在**进入草图之前**那一下 ✓ 见 SketchClient.chooseFace ✓）。
+        if (com.ovo.sablestopnow.client.SketchClient.active()) {
+            return;
+        }
         final SubLevel sub = hit.body();
         final Pose3dc pose = MateTargeting.poseOf(sub);
         final Vector3dc scale = pose.scale();

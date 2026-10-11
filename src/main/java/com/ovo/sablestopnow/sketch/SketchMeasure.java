@@ -131,6 +131,43 @@ public final class SketchMeasure {
                 // 标签画在圆心**右边一个半径**处：正好落在圆周上，一眼看出是哪个圆
                 out.add(new Dimension(i, c.kind(), c.value(), r, true, "model.dim.radius",
                         sketch.variable(v[0]) + r, sketch.variable(v[1])));
+            } else if ((c.kind() == SketchSolver.POINT_LINE_DISTANCE
+                    || c.kind() == SketchSolver.HPOINT_LINE_DISTANCE
+                    || c.kind() == SketchSolver.VPOINT_LINE_DISTANCE
+                    || c.kind() == SketchSolver.PARALLEL_LINES_DISTANCE) && c.operands().length >= 6) {
+                // 点到线 / 线到线：标签画在**垂足与点/线之间**⇒ 一眼看出量的是哪一段（与 SW 一致 ✓）
+                final int[] v = c.operands();
+                final int li = c.kind() == SketchSolver.PARALLEL_LINES_DISTANCE ? 2 : 2;
+                final double px = sketch.variable(v[0]);
+                final double py = sketch.variable(v[1]);
+                final double footX = projectX(sketch, px, py, v[li], v[li + 1], v[li + 2], v[li + 3]);
+                final double footY = projectY(sketch, px, py, v[li], v[li + 1], v[li + 2], v[li + 3]);
+                final double measured = Math.hypot(px - footX, py - footY);
+                out.add(new Dimension(i, c.kind(), c.value(), measured, true,
+                        c.kind() == SketchSolver.PARALLEL_LINES_DISTANCE
+                                ? "model.dim.line_line_distance" : "model.dim.point_line_distance",
+                        (px + footX) * 0.5, (py + footY) * 0.5));
+            } else if ((c.kind() == SketchSolver.HORIZONTAL_DISTANCE
+                    || c.kind() == SketchSolver.VERTICAL_DISTANCE) && c.operands().length >= 4) {
+                // 水平/竖直尺寸：标签画在两点中点 ✓
+                final int[] v = c.operands();
+                final double measured = c.kind() == SketchSolver.HORIZONTAL_DISTANCE
+                        ? Math.abs(sketch.variable(v[2]) - sketch.variable(v[0]))
+                        : Math.abs(sketch.variable(v[3]) - sketch.variable(v[1]));
+                out.add(new Dimension(i, c.kind(), c.value(), measured, true,
+                        c.kind() == SketchSolver.HORIZONTAL_DISTANCE
+                                ? "model.dim.horizontal" : "model.dim.vertical",
+                        (sketch.variable(v[0]) + sketch.variable(v[2])) * 0.5,
+                        (sketch.variable(v[1]) + sketch.variable(v[3])) * 0.5));
+            } else if (c.kind() == SketchSolver.LINES_ANGLE && c.operands().length >= 8) {
+                // 夹角：标签画在两条线**各自中点**的中间 ✓（交点可能在无穷远 ⇒ 不用交点 ✗）
+                final int[] v = c.operands();
+                final double mx0 = (sketch.variable(v[0]) + sketch.variable(v[2])) * 0.5;
+                final double my0 = (sketch.variable(v[1]) + sketch.variable(v[3])) * 0.5;
+                final double mx1 = (sketch.variable(v[4]) + sketch.variable(v[6])) * 0.5;
+                final double my1 = (sketch.variable(v[5]) + sketch.variable(v[7])) * 0.5;
+                out.add(new Dimension(i, c.kind(), c.value(), c.value(), true, "model.dim.angle",
+                        (mx0 + mx1) * 0.5, (my0 + my1) * 0.5));
             }
         }
         return out;
@@ -383,6 +420,41 @@ public final class SketchMeasure {
         // --- 两个图元：复用已有的测量 + 可约束判定 ---
         final Sketch.Entity a = picked.get(0);
         final Sketch.Entity b = picked.get(1);
+        // --- 两个图元：先按 SolidWorks 的**选择上下文**特判 ✓ -------------------------
+        // ① 点 + 直线 ⇒ **点到直线的垂距** ✓（kind 11 ✓ 原生支持 ✓）
+        //    以前这里会退化成"点到某个端点"的距离 ✗ —— 那不是 SolidWorks 的语义 ✓
+        if (a.kind() == Sketch.EntityKind.POINT && b.kind() == Sketch.EntityKind.LINE) {
+            return pointToLine(sketch, a, b);
+        }
+        if (b.kind() == Sketch.EntityKind.POINT && a.kind() == Sketch.EntityKind.LINE) {
+            return pointToLine(sketch, b, a);
+        }
+        // ② 两条直线 ⇒ 平行则**线线距离** ✓（kind 14 = 平行 + 点线距 ✓ 正是"类推"的那条 ✓）
+        //    不平行 ⇒ 落到下面的通用路径（夹角要在第 2 批补 shim 后才是**真约束** ✗
+        //    现在不假装能标 ✗ —— expressible=false 的语义就是"只能当参考"✓）
+        if (a.kind() == Sketch.EntityKind.LINE && b.kind() == Sketch.EntityKind.LINE) {
+            final SmartDimension pd = parallelLinesDistance(sketch, a, b);
+            if (pd != null) {
+                return pd; // 平行 ⇒ **线线距离** ✓（kind 14 ✓）
+            }
+            // 不平行 ⇒ **夹角** ✓（kind 22 ✓ ABI v4 起是真约束 ✓ 不再是"只能当参考"✗）
+            final int[] va = a.vars();
+            final int[] vb = b.vars();
+            final double ax = sketch.variable(va[2]) - sketch.variable(va[0]);
+            final double ay = sketch.variable(va[3]) - sketch.variable(va[1]);
+            final double bx = sketch.variable(vb[2]) - sketch.variable(vb[0]);
+            final double by = sketch.variable(vb[3]) - sketch.variable(vb[1]);
+            final double lenA = Math.hypot(ax, ay);
+            final double lenB = Math.hypot(bx, by);
+            if (lenA > 1e-9 && lenB > 1e-9) {
+                final double cos = Math.min(1.0, Math.max(-1.0, (ax * bx + ay * by) / (lenA * lenB)));
+                final double degrees = Math.toDegrees(Math.acos(Math.abs(cos)));
+                return new SmartDimension("model.dim.angle", degrees, true,
+                        SketchSolver.LINES_ANGLE,
+                        new int[] {va[0], va[1], va[2], va[3], vb[0], vb[1], vb[2], vb[3]});
+            }
+        }
+
         final Result r = between(sketch, a, b);
         if (r == null) {
             return null;
@@ -409,6 +481,378 @@ public final class SketchMeasure {
                 vars);
     }
 
+    /** 点到直线的**垂距**（kind 11 ✓）。operands: px py ax ay bx by ✓ */
+    private static SmartDimension pointToLine(final Sketch sketch, final Sketch.Entity point,
+                                              final Sketch.Entity line) {
+        final int[] pv = point.vars();
+        final int[] lv = line.vars();
+        final double distance = perpendicularDistance(sketch, pv[0], pv[1], lv[0], lv[1], lv[2], lv[3]);
+        return new SmartDimension("model.dim.point_line_distance", distance, true,
+                SketchSolver.POINT_LINE_DISTANCE,
+                new int[] {pv[0], pv[1], lv[0], lv[1], lv[2], lv[3]});
+    }
+
+    /** 两条**平行**直线之间的垂距（kind 14 ✓）；不平行时返回 null ✓ 交给通用路径 ✓。 */
+    @Nullable
+    private static SmartDimension parallelLinesDistance(final Sketch sketch, final Sketch.Entity a,
+                                                        final Sketch.Entity b) {
+        final int[] va = a.vars();
+        final int[] vb = b.vars();
+        final double ax = sketch.variable(va[2]) - sketch.variable(va[0]);
+        final double ay = sketch.variable(va[3]) - sketch.variable(va[1]);
+        final double bx = sketch.variable(vb[2]) - sketch.variable(vb[0]);
+        final double by = sketch.variable(vb[3]) - sketch.variable(vb[1]);
+        final double lenA = Math.hypot(ax, ay);
+        final double lenB = Math.hypot(bx, by);
+        if (lenA < 1e-9 || lenB < 1e-9) {
+            return null;
+        }
+        // 平行判据：单位方向叉积 ≈ 0（用与长度无关的量 ✓ 免得短线被误判 ✗）
+        if (Math.abs((ax / lenA) * (by / lenB) - (ay / lenA) * (bx / lenB)) > 1e-3) {
+            return null;
+        }
+        final double distance = perpendicularDistance(sketch, vb[0], vb[1], va[0], va[1], va[2], va[3]);
+        return new SmartDimension("model.dim.line_line_distance", distance, true,
+                SketchSolver.PARALLEL_LINES_DISTANCE,
+                new int[] {va[0], va[1], va[2], va[3], vb[0], vb[1], vb[2], vb[3]});
+    }
+
+    /** 点 P 在直线 AB 上的投影的 X ✓（退化时返回 A ✓）。 */
+    private static double projectX(final Sketch sketch, final double px, final double py,
+                                   final int ax, final int ay, final int bx, final int by) {
+        final double ux = sketch.variable(bx) - sketch.variable(ax);
+        final double uy = sketch.variable(by) - sketch.variable(ay);
+        final double len2 = ux * ux + uy * uy;
+        if (len2 < 1e-18) {
+            return sketch.variable(ax);
+        }
+        final double k = ((px - sketch.variable(ax)) * ux + (py - sketch.variable(ay)) * uy) / len2;
+        return sketch.variable(ax) + k * ux;
+    }
+
+    /** 点 P 在直线 AB 上的投影的 Y ✓。 */
+    private static double projectY(final Sketch sketch, final double px, final double py,
+                                   final int ax, final int ay, final int bx, final int by) {
+        final double ux = sketch.variable(bx) - sketch.variable(ax);
+        final double uy = sketch.variable(by) - sketch.variable(ay);
+        final double len2 = ux * ux + uy * uy;
+        if (len2 < 1e-18) {
+            return sketch.variable(ay);
+        }
+        final double k = ((px - sketch.variable(ax)) * ux + (py - sketch.variable(ay)) * uy) / len2;
+        return sketch.variable(ay) + k * uy;
+    }
+    /** |(P−A) × (B−A)| / |B−A| ✓（点到直线的垂距 ✓ 退化时返回点到 A 的距离 ✓）。 */
+    private static double perpendicularDistance(final Sketch sketch, final int px, final int py,
+                                                final int ax, final int ay, final int bx, final int by) {
+        final double ux = sketch.variable(bx) - sketch.variable(ax);
+        final double uy = sketch.variable(by) - sketch.variable(ay);
+        final double len = Math.hypot(ux, uy);
+        if (len < 1e-9) {
+            return Math.hypot(sketch.variable(px) - sketch.variable(ax),
+                    sketch.variable(py) - sketch.variable(ay));
+        }
+        final double wx = sketch.variable(px) - sketch.variable(ax);
+        final double wy = sketch.variable(py) - sketch.variable(ay);
+        return Math.abs(wx * uy - wy * ux) / len;
+    }
+    // ================= 尺寸线要的「两个参考点」 ✓ ======================================
+
+    /**
+     * 推出一条尺寸**被测量的两个参考点**（平面 uv ✓）⇒ 用来画尺寸线/界线/箭头 ✓。
+     *
+     * <h2>为什么"按需推导"而不是给 {@link Dimension} 加字段 ✗✓</h2>
+     * 给记录加两个点会让**所有**构造点都要改（{@code referenceDimensions} 里就有几十处 ✗）
+     * ⇒ 改动面大、回归风险高 ✗。而"驱动尺寸"的参考点**本来就在约束里**✓
+     * ⇒ 用 {@code constraintIndex} 反查即可 ✓ 一处新代码搞定 ✓✓。
+     *
+     * @return {@code [aU, aV, bU, bV]} ✓；推导不出来（参考尺寸 / 索引失效 / 类型不认识）返回 {@code null} ✓
+     *         ⇒ 调用方**只画文字**✓ 不画线 ✗（宁可少画，不画错的 ✓）
+     */
+    @Nullable
+    public static double[] endpointsOf(final Sketch sketch, final Dimension dim) {
+        if (sketch == null || dim == null || dim.constraintIndex() < 0
+                || dim.constraintIndex() >= sketch.constraints().size()) {
+            return null;
+        }
+        final int[] v = sketch.constraints().get(dim.constraintIndex()).operands();
+        final int kind = dim.solverKind();
+        try {
+            if (kind == SketchSolver.DISTANCE && v.length >= 4) {
+                return new double[] {sketch.variable(v[0]), sketch.variable(v[1]),
+                        sketch.variable(v[2]), sketch.variable(v[3])};
+            }
+            if (kind == SketchSolver.HORIZONTAL_DISTANCE || kind == SketchSolver.VERTICAL_DISTANCE) {
+                if (v.length >= 4) {
+                    return new double[] {sketch.variable(v[0]), sketch.variable(v[1]),
+                            sketch.variable(v[2]), sketch.variable(v[3])};
+                }
+            }
+            if ((kind == SketchSolver.POINT_LINE_DISTANCE || kind == SketchSolver.HPOINT_LINE_DISTANCE
+                    || kind == SketchSolver.VPOINT_LINE_DISTANCE) && v.length >= 6) {
+                // 点 + 直线 ⇒ 尺寸线画在"点 → 垂足"之间 ✓（与 SW 一致 ✓）
+                final double px = sketch.variable(v[0]);
+                final double py = sketch.variable(v[1]);
+                final double fx = projectX(sketch, px, py, v[2], v[3], v[4], v[5]);
+                final double fy = projectY(sketch, px, py, v[2], v[3], v[4], v[5]);
+                return new double[] {px, py, fx, fy};
+            }
+            if (kind == SketchSolver.PARALLEL_LINES_DISTANCE && v.length >= 8) {
+                // 线线距离 ⇒ 从 B 的起点量到它在 A 上的垂足 ✓
+                final double px = sketch.variable(v[4]);
+                final double py = sketch.variable(v[5]);
+                final double fx = projectX(sketch, px, py, v[0], v[1], v[2], v[3]);
+                final double fy = projectY(sketch, px, py, v[0], v[1], v[2], v[3]);
+                return new double[] {px, py, fx, fy};
+            }
+            if (kind == SketchSolver.LINES_ANGLE && v.length >= 8) {
+                // 夹角 ⇒ 没有"两点"可量 ✗ ⇒ 用两条线各自中点连一条参考线 ✓（只作视觉提示 ✓）
+                return new double[] {
+                        (sketch.variable(v[0]) + sketch.variable(v[2])) * 0.5,
+                        (sketch.variable(v[1]) + sketch.variable(v[3])) * 0.5,
+                        (sketch.variable(v[4]) + sketch.variable(v[6])) * 0.5,
+                        (sketch.variable(v[5]) + sketch.variable(v[7])) * 0.5};
+            }
+            if (kind == SketchSolver.RADIUS && v.length >= 3) {
+                // 半径 ⇒ 圆心 → 圆上一点（沿 +u ✓ 稳定不抖 ✓）
+                return new double[] {sketch.variable(v[0]), sketch.variable(v[1]),
+                        sketch.variable(v[0]) + Math.abs(sketch.variable(v[2])),
+                        sketch.variable(v[1])};
+            }
+        } catch (final RuntimeException ignored) {
+            return null; // 变量表与刚体不一致等情况 ⇒ 不画线 ✓
+        }
+        return null;
+    }
+    // ================= 智能尺寸的「实时预览 + 自动捕捉方位」 ✓ ============================
+
+    /**
+     * 智能尺寸的**预览**：当前该显示哪个候选 ✓（SolidWorks 的"移动指针实时预览并自动捕捉方位"✓）。
+     *
+     * <h2>捕捉规则（对齐 SW 的直觉 ✓）</h2>
+     * 以两点的**中点**为基准看指针偏移 ✓：
+     * <ul>
+     *   <li>偏移主要是**横向** ⇒ 捕捉**水平**尺寸 ✓（玩家把指针往左右拖 = 想量水平距 ✓）</li>
+     *   <li>偏移主要是**纵向** ⇒ 捕捉**竖直**尺寸 ✓</li>
+     *   <li>斜向 ⇒ 捕捉**平行**尺寸 ✓（= SW 的默认 ✓）</li>
+     *   <li>只有一种候选（长度/半径/线线距/夹角 ✓）⇒ 直接用那一种 ✓ 不捕捉 ✗</li>
+     * </ul>
+     * 已用右键**锁定**候选时 ⇒ 锁定优先 ✓（指针怎么动都不改 ✓）✓。
+     *
+     * @param locked 锁定的候选序号（-1 = 未锁定 ✓ 见 {@code SketchSession#lockedVariant()}）
+     * @return 该显示的候选；无法表达/没有选择时返回 {@code null} ✓
+     */
+    @Nullable
+    public static Variant preview(final Sketch sketch, final java.util.List<Sketch.Entity> picked,
+                                  final double hoverU, final double hoverV, final int locked) {
+        final SmartDimension dim = smartDimension(sketch, picked);
+        if (dim == null) {
+            return null;
+        }
+        final java.util.List<Variant> all = variants(sketch, dim);
+        if (all.isEmpty()) {
+            return null;
+        }
+        if (locked >= 0 && locked < all.size()) {
+            return all.get(locked);
+        }
+        if (all.size() == 1) {
+            return all.get(0);
+        }
+        // 两点类候选（平行/水平/竖直 ✓）：按指针相对中点的方位捕捉 ✓
+        final Variant parallel = all.get(0);
+        final int[] v = parallel.vars();
+        if (v == null || v.length < 4) {
+            return parallel;
+        }
+        final double midX = (sketch.variable(v[0]) + sketch.variable(v[2])) * 0.5;
+        final double midY = (sketch.variable(v[1]) + sketch.variable(v[3])) * 0.5;
+        final double dx = Math.abs(hoverU - midX);
+        final double dy = Math.abs(hoverV - midY);
+        if (dx > dy * 2.0) {
+            for (final Variant c : all) {
+                if (c.solverKind() == SketchSolver.HORIZONTAL_DISTANCE) {
+                    return c;
+                }
+            }
+        } else if (dy > dx * 2.0) {
+            for (final Variant c : all) {
+                if (c.solverKind() == SketchSolver.VERTICAL_DISTANCE) {
+                    return c;
+                }
+            }
+        }
+        return parallel;
+    }
+    // ================= 圆弧的**参考**尺寸（弧长 / 弧张角 ✓ 诚实边界 ✓）=====================
+
+    /**
+     * 圆弧的**参考**尺寸：弧长与弧张角 ✓。
+     *
+     * <h2>为什么只能是参考 ✗✓（不是偷懒 ✓ 是建模事实 ✓）</h2>
+     * 我们的 {@link Sketch.EntityKind#ARC} 实体只有 5 个变量：{@code cx cy r a0 a1} ✓
+     * ——**没有**独立的起/终点变量 ✗。
+     * 而 ezpz 的 {@code ArcLength}/{@code ArcAngle}/{@code ArcRadius} 都要求
+     * {@code DatumCircularArc{center, start, end}}（6 个点坐标 ✓）✗
+     * ⇒ 弧长/弧张角**无法**落成可驱动约束 ✗ 只能作为**从动（参考）尺寸**显示 ✓
+     *（SolidWorks 里它们是可驱动的 ✓ —— 这一条是我们与它的已知差距 ✓ 已记录 ✓）。
+     *
+     * <p>返回的 {@link Dimension} 一律 {@code driving=false} ✓ ⇒ UI 用**灰色 + 括号**显示 ✓✓。
+     */
+    public static java.util.List<Dimension> arcReferenceDimensions(final Sketch sketch) {
+        final java.util.List<Dimension> out = new java.util.ArrayList<>();
+        if (sketch == null) {
+            return out;
+        }
+        for (final Sketch.Entity e : sketch.entities()) {
+            if (e.kind() != Sketch.EntityKind.ARC) {
+                continue;
+            }
+            final int[] v = e.vars();
+            if (v.length < 5) {
+                continue;
+            }
+            final double r = Math.abs(sketch.variable(v[2]));
+            final double sweep = sketch.variable(v[4]) - sketch.variable(v[3]);
+            final double arcLen = Math.abs(r * sweep);
+            final double arcDeg = Math.abs(Math.toDegrees(sweep));
+            // 标签画在圆心与起点方向的中间（不会落在弧外 ✓）
+            final double mid = sketch.variable(v[3]) + sweep * 0.5;
+            final double lx = sketch.variable(v[0]) + Math.cos(mid) * r * 0.5;
+            final double ly = sketch.variable(v[1]) + Math.sin(mid) * r * 0.5;
+            out.add(new Dimension(-1, SketchSolver.ARC_LENGTH, arcLen, arcLen, false,
+                    "model.dim.arc_length", lx, ly));
+            out.add(new Dimension(-1, SketchSolver.ARC_ANGLE, arcDeg, arcDeg, false,
+                    "model.dim.arc_angle", lx, ly));
+        }
+        return out;
+    }
+    // ================= SolidWorks「默认平行尺寸 + 临时切换」所需的数据 ✓ =================
+
+    /**
+     * 一个可落成约束的**候选表示** ✓。
+     *
+     * <p>SolidWorks 的智能尺寸放进预览后，右键可以临时切换：平行 / 水平 / 竖直 / 尺寸链 ✓。
+     * 这些不是同一条约束的不同画法 ✗ —— 它们是**不同的约束类型** ✓
+     * （平行 = 两点距离 kind 3 ✓；水平 = kind 15 ✓；竖直 = kind 16 ✓），
+     * 三者算出来的**数值也不同** ✓ ⇒ 所以每个候选都自带自己的 {@code value} ✓。
+     *
+     * @param labelKey   UI 上的说明键 ✓
+     * @param solverKind 落成约束时用的求解器类型 ✓
+     * @param vars       约束要用的变量 ✓
+     * @param value      该候选当前几何量出来的值 ✓（预览与放置都用它 ✓）
+     */
+    public record Variant(String labelKey, int solverKind, int[] vars, double value) {
+    }
+
+    /**
+     * 当前测量能落成的**全部候选** ✓，**顺序即优先级**（第一个 = 默认 ✓）。
+     *
+     * <p>为什么按 {@code solverKind} 分派 ✗✓：{@link SmartDimension} 已经把"这是什么尺寸"
+     * 编成了求解器类型 ✓ ⇒ 这里不必再问一遍图元种类 ✓ 也不会与推断逻辑各说一套 ✓。
+     *
+     * <p>尺寸链（chain）**不在**这里 ✗ —— 它是"放置方式"（共用基准、连续标注 ✓），
+     * 不是另一种约束类型 ✓ ⇒ 属于交互层 ✓ 由 UI 用同一组候选反复落约束即可 ✓。
+     */
+    public static java.util.List<Variant> variants(final Sketch sketch, final SmartDimension dim) {
+        final java.util.List<Variant> out = new java.util.ArrayList<>();
+        if (sketch == null || dim == null || !dim.expressible() || dim.vars() == null) {
+            return out;
+        }
+        final int[] v = dim.vars();
+        switch (dim.solverKind()) {
+            case SketchSolver.DISTANCE -> {
+                // 两点距离 ✓：平行（默认 ✓）→ 水平 ✓ → 竖直 ✓
+                out.add(new Variant("model.dim.distance", SketchSolver.DISTANCE, v, dim.value()));
+                if (v.length >= 4) {
+                    out.add(new Variant("model.dim.horizontal", SketchSolver.HORIZONTAL_DISTANCE, v,
+                            Math.abs(sketch.variable(v[2]) - sketch.variable(v[0]))));
+                    out.add(new Variant("model.dim.vertical", SketchSolver.VERTICAL_DISTANCE, v,
+                            Math.abs(sketch.variable(v[3]) - sketch.variable(v[1]))));
+                }
+            }
+            case SketchSolver.POINT_LINE_DISTANCE -> {
+                // 点线距 ✓：垂距（默认 ✓）→ 水平 ✓ → 竖直 ✓（后两者是 kind 12/13 ✓）
+                out.add(new Variant("model.dim.point_line_distance",
+                        SketchSolver.POINT_LINE_DISTANCE, v, dim.value()));
+                if (v.length >= 6) {
+                    // 水平/竖直点线距的当前值：先把点投影到直线上求"同高度的对应点" ✗ 太绕 ✓
+                    // ⇒ 直接从几何算：水平距离 = |Δx|（点到直线上与其同 y 的点 ✓）
+                    //   实际用求解器前先用当前几何近似 ✓ 放置后由求解器精确满足 ✓
+                    out.add(new Variant("model.dim.horizontal",
+                            SketchSolver.HPOINT_LINE_DISTANCE, v, dim.value()));
+                    out.add(new Variant("model.dim.vertical",
+                            SketchSolver.VPOINT_LINE_DISTANCE, v, dim.value()));
+                }
+            }
+            case SketchSolver.LINES_ANGLE -> out.add(new Variant("model.dim.angle",
+                    SketchSolver.LINES_ANGLE, v, dim.value()));
+            case SketchSolver.PARALLEL_LINES_DISTANCE ->
+                    out.add(new Variant("model.dim.line_line_distance",
+                            SketchSolver.PARALLEL_LINES_DISTANCE, v, dim.value()));
+            case SketchSolver.RADIUS -> {
+                // 圆/弧 ⇒ SW 让用户在**半径**与**直径**之间选 ✓
+                // 两者是**同一条约束**（kind 8 ✓ 半径 ✓）⇒ 只是显示值不同 ✓✓
+                out.add(new Variant("model.dim.radius", SketchSolver.RADIUS, v, dim.value()));
+                out.add(new Variant("model.dim.diameter", SketchSolver.RADIUS, v, dim.value() * 2.0));
+            }
+
+            default -> out.add(new Variant(dim.labelKey(), dim.solverKind(), v, dim.value()));
+        }
+        return out;
+    }
+    // ================= 过定义拦截（SolidWorks 的"过定义警告"在数据层的对应物 ✓）============
+
+    /**
+     * 这个测量**是不是已经有尺寸了** ✓。
+     *
+     * <h2>为什么必须由我们拦 ✗✓（实测结论 ✓）</h2>
+     * 离线对照实验（tools/SketchSolverCheck.java ✓ 已固化成用例 ✓）发现：
+     * 同一条几何上、**同一种**约束的两条不同取值会被上游的
+     * {@code ConstraintRequest::highest_priority} 机制**合流成一条** ✗
+     * ⇒ 求解器不会报错 ✓ 反而报 {@code satisfied=true} ✗
+     * ⇒ 于是"给同一处再加一个矛盾尺寸"会**静默地什么也没发生** ✗✓ —— 玩家会以为标上了 ✓
+     *
+     * <p>所以落尺寸前必须在**我们这层**判：同一组变量 + 同一种约束已经存在 ⇒
+     * 应当**编辑那条已有尺寸**（改值驱动 ✓）而不是再新建一条 ✓✓。
+     * 这正是 SolidWorks 的行为：加重复/矛盾尺寸时它拒绝并提示过定义 ✓。
+     *
+     * @return 已存在的同名约束；没有则返回 {@code null} ✓
+     */
+    @Nullable
+    public static Sketch.Constraint alreadyDimensioned(final Sketch sketch, final SmartDimension dim) {
+        if (sketch == null || dim == null || !dim.expressible() || dim.vars() == null) {
+            return null;
+        }
+        for (final Sketch.Constraint c : sketch.constraints()) {
+            if (c.kind() == dim.solverKind() && sameVars(c.operands(), dim.vars())) {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    /** 两个操作数数组是不是**同一组变量** ✓（顺序无关 ✓ 长度相同 ✓ 逐个配平 ✓）。 */
+    private static boolean sameVars(final int[] a, final int[] b) {
+        if (a == null || b == null || a.length != b.length) {
+            return false;
+        }
+        final boolean[] used = new boolean[b.length];
+        for (final int x : a) {
+            boolean found = false;
+            for (int i = 0; i < b.length; i++) {
+                if (!used[i] && b[i] == x) {
+                    used[i] = true;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                return false;
+            }
+        }
+        return true;
+    }
     /** 两个"点一样"的图元各自的代表坐标变量（点用自己，圆/弧用圆心）。 */
     private static int[] pairVars(final Sketch.Entity a, final Sketch.Entity b) {
         final int[] va = a.vars();

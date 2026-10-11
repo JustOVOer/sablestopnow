@@ -86,10 +86,13 @@ AGENTS.md
 /native/**/target/
 
 ### ezpz-wasm：第三方 WASM 工具包（参考用 ✓ 与 Java 构建无关 ✗ 不上传 ✓）
-/tools/ezpz-wasm/
 ### native 编译产物：不入库 ✓ ⇒ 使用者"手动放入"才启用碰撞 ✓（见 native/README）
 /src/main/resources/sablestopnow/native/*.dll
 
 ### native/：只保留我们自己的说明 ✓ 第三方源码与二进制一律不入库 ✗（版权 ✓）
 /native/**
 !/native/README.md
+
+### ezpz shim：**我们自己写的** C-ABI shim ✓ 必须随仓库分发（改它才能改约束集 ✓）
+### 只忽略 Rust 编译产物 ✓
+/tools/ezpz-wasm/target/

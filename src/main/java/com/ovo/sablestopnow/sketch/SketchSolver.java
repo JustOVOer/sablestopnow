@@ -48,7 +48,7 @@ import java.util.Locale;
 public final class SketchSolver implements AutoCloseable {
 
     /** 必须与 Rust 侧 {@code ABI_VERSION} 一致；不一致说明 .dll/.so 是旧的。 */
-    public static final int EXPECTED_ABI_VERSION = 2;
+    public static final int EXPECTED_ABI_VERSION = 4;
 
     /** 资源目录前缀。库文件按平台命名，例如 {@code ezpz_windows-x86_64.dll}。 */
     public static final String RESOURCE_DIR = "/sablestopnow/sketch/";
@@ -70,6 +70,42 @@ public final class SketchSolver implements AutoCloseable {
     public static final int MIDPOINT = 7;
     /** 圆半径。操作数 {@code cx cy r}，带常量。 */
     public static final int RADIUS = 8;
+    // ---- ABI v3 新增（见 tools/ezpz-wasm/src/lib.rs 的 kind 表 ✓）------------------------
+    /** 两线平行 ✓（ezpz `lines_parallel` ✓）。operands: a0x a0y a1x a1y b0x b0y b1x b1y */
+    public static final int PARALLEL = 9;
+    /** 两线垂直 ✓（`lines_perpendicular` ✓）operands 同 PARALLEL */
+    public static final int PERPENDICULAR = 10;
+    /** 点到直线垂距 ✓（`PointLineDistance` ✓）operands: px py ax ay bx by + const */
+    public static final int POINT_LINE_DISTANCE = 11;
+    /** 点到直线的**水平**距离 ✓ operands 同 11 + const */
+    public static final int HPOINT_LINE_DISTANCE = 12;
+    /** 点到直线的**竖直**距离 ✓ operands 同 11 + const */
+    public static final int VPOINT_LINE_DISTANCE = 13;
+    /** 两线平行 + 给定垂距 ✓（`parallel_lines_distance` ✓ **展开成两条约束** ✓）operands: 8 + const */
+    public static final int PARALLEL_LINES_DISTANCE = 14;
+    /** 两点水平距离 ✓（`HorizontalDistance` ✓ 水平尺寸/尺寸链 ✓）operands: ax ay bx by + const */
+    public static final int HORIZONTAL_DISTANCE = 15;
+    /** 两点竖直距离 ✓（`VerticalDistance` ✓）operands 同 15 + const */
+    public static final int VERTICAL_DISTANCE = 16;
+    /** 两点关于直线对称 ✓（`Symmetric` ✓）operands: ax ay bx by px py qx qy */
+    public static final int SYMMETRIC = 17;
+    /** 两个标量相等（例如等半径 ✓）operands: s0 s1 */
+    public static final int SCALAR_EQUAL = 18;
+    // ---- ABI v4 新增（圆弧 / 夹角 / 相切 ✓ 见 shim 的 kind 表 ✓）--------------------------
+    /** 圆弧半径 ✓ operands: cx cy sx sy ex ey + const */
+    public static final int ARC_RADIUS = 19;
+    /** 圆弧弧长 ✓ operands 同 19 + const */
+    public static final int ARC_LENGTH = 20;
+    /** 圆弧张角 ✓（const 单位 = **度** ✓）operands 同 19 + const */
+    public static final int ARC_ANGLE = 21;
+    /** 两线夹角 ✓（const 单位 = **度** ✓）operands: a0x..b1y (8) + const */
+    public static final int LINES_ANGLE = 22;
+    /** 线与圆相切 ✓ operands: ax ay bx by cx cy r */
+    public static final int LINE_TANGENT_CIRCLE = 23;
+    /** 两圆相切 ✓ operands: c0x c0y r0 c1x c1y r1 */
+    public static final int CIRCLE_TANGENT_CIRCLE = 24;
+    /** 三点夹角 ✓（const 单位 = **度** ✓）operands: px py qx qy rx ry + const */
+    public static final int POINTS_AT_ANGLE = 25;
 
     /**
      * 这种约束是否吃一个常量。
@@ -359,6 +395,154 @@ public final class SketchSolver implements AutoCloseable {
         }
 
         /** 圆的半径为 {@code radius}。 */
+        // ---- ABI v3 新增的 builder（kind 9-18 ✓ 与 shim 的 kind 表一一对应 ✓）---------
+
+        /** 两线平行（kind 9）。 */
+        public Program parallel(final int a0x, final int a0y, final int a1x, final int a1y,
+                                final int b0x, final int b0y, final int b1x, final int b1y) {
+            ops.add(PARALLEL);
+            addAll(a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y);
+            return this;
+        }
+
+        /** 两线垂直（kind 10）。 */
+        public Program perpendicular(final int a0x, final int a0y, final int a1x, final int a1y,
+                                     final int b0x, final int b0y, final int b1x, final int b1y) {
+            ops.add(PERPENDICULAR);
+            addAll(a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y);
+            return this;
+        }
+
+        /** 点到直线的（垂直）距离（kind 11）。 */
+        public Program pointLineDistance(final int px, final int py, final int ax, final int ay,
+                                         final int bx, final int by, final double distance) {
+            ops.add(POINT_LINE_DISTANCE);
+            addAll(px, py, ax, ay, bx, by);
+            consts.add(distance);
+            return this;
+        }
+
+        /** 点到直线的水平距离（kind 12）。 */
+        public Program hPointLineDistance(final int px, final int py, final int ax, final int ay,
+                                          final int bx, final int by, final double distance) {
+            ops.add(HPOINT_LINE_DISTANCE);
+            addAll(px, py, ax, ay, bx, by);
+            consts.add(distance);
+            return this;
+        }
+
+        /** 点到直线的竖直距离（kind 13）。 */
+        public Program vPointLineDistance(final int px, final int py, final int ax, final int ay,
+                                          final int bx, final int by, final double distance) {
+            ops.add(VPOINT_LINE_DISTANCE);
+            addAll(px, py, ax, ay, bx, by);
+            consts.add(distance);
+            return this;
+        }
+
+        /** 两线平行 + 给定垂距（kind 14 ✓ 展开成"平行 + 点线距"两条 ✓ 智能尺寸的线线距离 ✓）。 */
+        public Program parallelLinesDistance(final int a0x, final int a0y, final int a1x, final int a1y,
+                                             final int b0x, final int b0y, final int b1x, final int b1y,
+                                             final double distance) {
+            ops.add(PARALLEL_LINES_DISTANCE);
+            addAll(a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y);
+            consts.add(distance);
+            return this;
+        }
+
+        /** 两点水平距离（kind 15 ✓ 水平尺寸/尺寸链 ✓）。 */
+        public Program horizontalDistance(final int ax, final int ay, final int bx, final int by,
+                                          final double distance) {
+            ops.add(HORIZONTAL_DISTANCE);
+            addAll(ax, ay, bx, by);
+            consts.add(distance);
+            return this;
+        }
+
+        /** 两点竖直距离（kind 16 ✓ 竖直尺寸/尺寸链 ✓）。 */
+        public Program verticalDistance(final int ax, final int ay, final int bx, final int by,
+                                        final double distance) {
+            ops.add(VERTICAL_DISTANCE);
+            addAll(ax, ay, bx, by);
+            consts.add(distance);
+            return this;
+        }
+
+        /** 两点关于直线对称（kind 17）。 */
+        public Program symmetric(final int ax, final int ay, final int bx, final int by,
+                                 final int px, final int py, final int qx, final int qy) {
+            ops.add(SYMMETRIC);
+            addAll(ax, ay, bx, by, px, py, qx, qy);
+            return this;
+        }
+
+        /** 两个标量相等（kind 18 ✓ 等半径 ✓）。 */
+        public Program scalarEqual(final int s0, final int s1) {
+            ops.add(SCALAR_EQUAL);
+            addAll(s0, s1);
+            return this;
+        }
+        /** 圆弧半径（kind 19）。operands: cx cy sx sy ex ey */
+        public Program arcRadius(final int cx, final int cy, final int sx, final int sy,
+                                 final int ex, final int ey, final double radius) {
+            ops.add(ARC_RADIUS);
+            addAll(cx, cy, sx, sy, ex, ey);
+            consts.add(radius);
+            return this;
+        }
+
+        /** 圆弧弧长（kind 20）。operands 同 arcRadius */
+        public Program arcLength(final int cx, final int cy, final int sx, final int sy,
+                                 final int ex, final int ey, final double length) {
+            ops.add(ARC_LENGTH);
+            addAll(cx, cy, sx, sy, ex, ey);
+            consts.add(length);
+            return this;
+        }
+
+        /** 圆弧张角（kind 21 ✓ 单位：**度**）。operands 同 arcRadius */
+        public Program arcAngle(final int cx, final int cy, final int sx, final int sy,
+                                final int ex, final int ey, final double degrees) {
+            ops.add(ARC_ANGLE);
+            addAll(cx, cy, sx, sy, ex, ey);
+            consts.add(degrees);
+            return this;
+        }
+
+        /** 两线夹角（kind 22 ✓ 单位：**度** ✓ 智能尺寸"不平行两线"用 ✓）。 */
+        public Program linesAngle(final int a0x, final int a0y, final int a1x, final int a1y,
+                                  final int b0x, final int b0y, final int b1x, final int b1y,
+                                  final double degrees) {
+            ops.add(LINES_ANGLE);
+            addAll(a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y);
+            consts.add(degrees);
+            return this;
+        }
+
+        /** 线与圆相切（kind 23）。operands: ax ay bx by cx cy r */
+        public Program lineTangentCircle(final int ax, final int ay, final int bx, final int by,
+                                        final int cx, final int cy, final int r) {
+            ops.add(LINE_TANGENT_CIRCLE);
+            addAll(ax, ay, bx, by, cx, cy, r);
+            return this;
+        }
+
+        /** 两圆相切（kind 24）。operands: c0x c0y r0 c1x c1y r1 */
+        public Program circleTangentCircle(final int c0x, final int c0y, final int r0,
+                                          final int c1x, final int c1y, final int r1) {
+            ops.add(CIRCLE_TANGENT_CIRCLE);
+            addAll(c0x, c0y, r0, c1x, c1y, r1);
+            return this;
+        }
+
+        /** 三点夹角（kind 25 ✓ 单位：**度**）。operands: px py qx qy rx ry（角在 q ✓） */
+        public Program pointsAtAngle(final int px, final int py, final int qx, final int qy,
+                                     final int rx, final int ry, final double degrees) {
+            ops.add(POINTS_AT_ANGLE);
+            addAll(px, py, qx, qy, rx, ry);
+            consts.add(degrees);
+            return this;
+        }
         public Program radius(final int cx, final int cy, final int r, final double radius) {
             ops.add(RADIUS);
             addAll(cx, cy, r);

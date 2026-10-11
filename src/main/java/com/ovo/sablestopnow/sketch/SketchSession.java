@@ -39,6 +39,8 @@ public final class SketchSession {
 
     /** 绘制工具。 */
     public enum Tool {
+        /** 智能尺寸（对齐 SolidWorks 的 Smart Dimension ✓）。ABI v4 起可落成真约束 ✓。 */
+        DIMENSION,
         /** 只选择，不画东西。 */
         SELECT,
         /** 直线：两次点击。 */
@@ -75,6 +77,18 @@ public final class SketchSession {
     @Nullable
     private Sketch.Entity selectedEntity;
 
+    /**
+     * 智能尺寸工具：**锁定的候选序号** ✓（-1 = 没锁 ⇒ 跟随"离指针最近"的候选自动捕捉 ✓）。
+     *
+     * <p>SolidWorks 里右键可以锁定对齐方式（平行/水平/竖直 ✓）✓ 锁定后移动指针方位不再变 ✓
+     * ⇒ 数据上就是一个"锁定索引"✓ 由 UI 写入 ✓ 由预览读取 ✓。
+     */
+    private int lockedVariant = -1;
+
+    /** 智能尺寸工具：当前指针位置（草图 uv ✓ 由 UI 每帧推入 ✓ 供预览与捕捉用 ✓）。 */
+    private double hoverU;
+    private double hoverV;
+
     /** 起点吸附到谁了（画完图元时据此加约束）。 */
     @Nullable
     private KeyPoint pendingSnap;
@@ -90,6 +104,113 @@ public final class SketchSession {
     /** 正在编辑的草图（{@link Stage#EDITING} 时非空）。 */
     public Sketch working() {
         return working;
+    }
+
+    /** 锁定的候选序号；-1 表示未锁定（跟随自动捕捉）✓。 */
+    public int lockedVariant() {
+        return this.lockedVariant;
+    }
+
+    /** 锁定到某个候选（右键锁定 ✓）；传 -1 取消锁定 ✓。 */
+    public void lockVariant(final int index) {
+        this.lockedVariant = index;
+    }
+
+    /** 取消锁定（换选择/换工具时调用 ✓）。 */
+    public void clearVariantLock() {
+        this.lockedVariant = -1;
+    }
+
+    public double hoverU() {
+        return this.hoverU;
+    }
+
+    public double hoverV() {
+        return this.hoverV;
+    }
+
+    /** 由 UI 每帧推入指针的草图坐标 ✓。 */
+    public void setHover(final double u, final double v) {
+        this.hoverU = u;
+        this.hoverV = v;
+    }
+
+    /**
+     * **通用落约束**：按"智能尺寸推出来的那个候选"落一条约束 ✓（含过定义拦截 ✓）。
+     *
+     * <h2>为什么要有这个通用入口 ✗✓</h2>
+     * 以前的 {@code dimensionEntity}/{@code dimensionBetween} 只会落 {@code DISTANCE} 与 {@code RADIUS} ✗
+     * ⇒ ABI v4 新增的十几种（点线距 / 线线距 / 水平竖直 / 夹角 / 弧 … ✓）**没有落地的路** ✗。
+     * 有了它 ⇒ 面板只需把"当前候选"交给它 ✓ 不必为每种尺寸写一条分支 ✓✓。
+     *
+     * <h2>过定义拦截 ✓（SolidWorks 的"过定义警告"✓）</h2>
+     * 同几何 + 同种约束已存在 ⇒ **不新建** ✗ 而是**改掉那一条的值** ✓✓（= 编辑已有尺寸 ✓）。
+     * 依据 ✓：离线实测发现上游会把"同几何同种约束"的不同取值合流成一条 ✗
+     * ⇒ 再塞一条会被**静默忽略** ✗ ⇒ 玩家以为标上了 ✓ 所以必须我们拦 ✓。
+     *
+     * @param kind  {@link SketchSolver} 的约束类型 ✓
+     * @param value 目标值 ✓（角度类单位为**度** ✓）
+     * @param vars  该约束的变量表 ✓（与 shim 的 kind 表一致 ✓）
+     * @return true = 落成了（新建或改值 ✓）；false = 没动（不可表达 / 参数不对 ✓）
+     */
+    public boolean dimensionWith(final int kind, final double value, final int[] vars) {
+        if (this.working == null || vars == null || vars.length == 0 || kind == 0) {
+            return false;
+        }
+        // ① 已有同几何同种约束 ⇒ 改它的值（编辑已有尺寸 ✓ 而不是新建 ✗）
+        for (int i = 0; i < this.working.constraints().size(); i++) {
+            final Sketch.Constraint c = this.working.constraints().get(i);
+            if (c.kind() != kind || c.operands().length != vars.length) {
+                continue;
+            }
+            if (sameOperands(c.operands(), vars)) {
+                // 注意 ✓ replaceConstraint 返回 void ✗ 而 solve() 不在 Sketch 上 ✗
+                // ⇒ 这里只改值 ✓ 求解交给上层（UI 落完后统一 mode.solve() ✓ 与既有流程一致 ✓）
+                this.working.replaceConstraint(i, new Sketch.Constraint(kind, vars.clone(), value));
+                return true;
+            }
+        }
+        // ② 没有 ⇒ 新建 ✓
+        this.working.addConstraint(kind, value, vars.clone());
+        return true;
+    }
+
+    /** 两组变量是不是同一组（顺序无关 ✓）。 */
+    private static boolean sameOperands(final int[] a, final int[] b) {
+        if (a.length != b.length) {
+            return false;
+        }
+        final boolean[] used = new boolean[b.length];
+        for (final int x : a) {
+            boolean found = false;
+            for (int i = 0; i < b.length; i++) {
+                if (!used[i] && b[i] == x) {
+                    used[i] = true;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * **从动（参考）尺寸模式** ✓（SolidWorks：驱动尺寸可以勾成"从动"✓ 只显示、不驱动几何 ✓）。
+     *
+     * <p>语义落地 ✓：开启时"标注"**不落约束** ✗；若该测量**已经有**约束 ⇒ **删掉它** ✓
+     * ⇒ 于是它退成 {@code referenceDimensions} 里的参考尺寸 ✓ 灰 + 括号 ✓✓（不需要新数据结构 ✓）。
+     */
+    private boolean referenceMode;
+
+    public boolean referenceMode() {
+        return this.referenceMode;
+    }
+
+    public void setReferenceMode(final boolean value) {
+        this.referenceMode = value;
     }
 
     public Tool tool() {
@@ -114,6 +235,7 @@ public final class SketchSession {
         this.body = body;
         this.working = null;
         this.tool = Tool.SELECT;
+        this.clearVariantLock();
         this.pending.clear();
         this.stage = Stage.CHOOSING_PLANE;
     }
@@ -133,6 +255,7 @@ public final class SketchSession {
         this.working = new Sketch(UUID.randomUUID(), body, name,
                 new SketchPlane(origin, plane.axisU(), plane.axisV()));
         this.tool = Tool.SELECT;
+        this.clearVariantLock();
         this.pending.clear();
         this.stage = Stage.EDITING;
         return this.working;
@@ -143,6 +266,7 @@ public final class SketchSession {
         this.body = sketch.body();
         this.working = sketch;
         this.tool = Tool.SELECT;
+        this.clearVariantLock();
         this.pending.clear();
         this.stage = Stage.EDITING;
     }
@@ -661,7 +785,9 @@ public final class SketchSession {
         /** 线段中点。 */
         MIDPOINT("model.sketch.snap.midpoint"),
         /** 圆心。 */
-        CENTER("model.sketch.snap.center");
+        CENTER("model.sketch.snap.center"),
+        /** 该面的 Minecraft 方块网格（顶点 / 格线 ✓ 用户要求 ✓）。 */
+        GRID("model.sketch.snap.grid");
 
         private final String labelKey;
 

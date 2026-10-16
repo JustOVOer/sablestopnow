@@ -570,6 +570,55 @@ public final class SketchMeasure {
      *         ⇒ 调用方**只画文字**✓ 不画线 ✗（宁可少画，不画错的 ✓）
      */
     @Nullable
+    /**
+     * 由「约束种类 + 操作数」直接推导**显示参考点**（两个端点 ✓）—— **预览**用 ✓。
+     *
+     * <p>为什么另写一个 ✗✓：`endpointsOf` 需要一条**已经存在的约束**（要从 constraintIndex 取操作数 ✗）
+     * 而预览时约束**还没落下** ⇒ 只能从候选的 kind+vars 推 ✓。
+     * 这里逻辑与 `endpointsOf` 对齐 ✓ 但**不改动它**（它已被离线断言覆盖 ✓ 动它风险更大 ✗）。
+     *
+     * @return {@code {au, av, bu, bv}}；无法推导时返回 {@code null} ✓（宁可只画文字 ✗ 不画错 ✓）
+     */
+    public static double[] endpointsOfVars(final Sketch sketch, final int kind, final int[] v) {
+        if (sketch == null || v == null) {
+            return null;
+        }
+        if ((kind == SketchSolver.DISTANCE || kind == SketchSolver.HORIZONTAL_DISTANCE
+                || kind == SketchSolver.VERTICAL_DISTANCE) && v.length >= 4) {
+            return new double[] {sketch.variable(v[0]), sketch.variable(v[1]),
+                    sketch.variable(v[2]), sketch.variable(v[3])};
+        }
+        if ((kind == SketchSolver.POINT_LINE_DISTANCE || kind == SketchSolver.HPOINT_LINE_DISTANCE
+                || kind == SketchSolver.VPOINT_LINE_DISTANCE) && v.length >= 6) {
+            final double px = sketch.variable(v[0]);
+            final double py = sketch.variable(v[1]);
+            return new double[] {px, py,
+                    projectX(sketch, px, py, v[2], v[3], v[4], v[5]),
+                    projectY(sketch, px, py, v[2], v[3], v[4], v[5])};
+        }
+        if (kind == SketchSolver.PARALLEL_LINES_DISTANCE && v.length >= 8) {
+            final double px = sketch.variable(v[4]);
+            final double py = sketch.variable(v[5]);
+            return new double[] {px, py,
+                    projectX(sketch, px, py, v[0], v[1], v[2], v[3]),
+                    projectY(sketch, px, py, v[0], v[1], v[2], v[3])};
+        }
+        if (kind == SketchSolver.RADIUS && v.length >= 3) {
+            final double ccx = sketch.variable(v[0]);
+            final double ccy = sketch.variable(v[1]);
+            final double rr = Math.abs(sketch.variable(v[2]));
+            return new double[] {ccx, ccy - rr, ccx, ccy + rr};
+        }
+        if (kind == SketchSolver.LINES_ANGLE && v.length >= 8) {
+            return new double[] {
+                    (sketch.variable(v[0]) + sketch.variable(v[2])) * 0.5,
+                    (sketch.variable(v[1]) + sketch.variable(v[3])) * 0.5,
+                    (sketch.variable(v[4]) + sketch.variable(v[6])) * 0.5,
+                    (sketch.variable(v[5]) + sketch.variable(v[7])) * 0.5};
+        }
+        return null;
+    }
+
     public static double[] endpointsOf(final Sketch sketch, final Dimension dim) {
         if (sketch == null || dim == null || dim.constraintIndex() < 0
                 || dim.constraintIndex() >= sketch.constraints().size()) {
@@ -752,6 +801,27 @@ public final class SketchMeasure {
      * @param value      该候选当前几何量出来的值 ✓（预览与放置都用它 ✓）
      */
     public record Variant(String labelKey, int solverKind, int[] vars, double value) {
+    }
+
+    /**
+     * **显示值 → 约束值** 的换算 ✓。
+     *
+     * <p>为什么必须有它 ✗✓：「直径」候选的显示值是 2r ✓ 但底层约束只有 **半径**(kind 8) ✓
+     * 若把 2r 当半径写进约束 ✗ ⇒ 求解器要求"半径 = 2r"✗ ⇒ 圆弧一旦有重合约束就**无解** ✗
+     * —— 这正是用户实测的"圆弧直径始终无法求解"✓。
+     */
+    public static double solverValue(final Variant v) {
+        if (v == null) {
+            return 0.0;
+        }
+        return v.labelKey() != null && v.labelKey().contains("diameter")
+                ? v.value() * 0.5 : v.value();
+    }
+
+    /** 反向换算 ✓：约束值(半径) → 显示值(直径时 ×2 ✓)，供改值框回填 ✓。 */
+    public static double displayValue(final String labelKey, final double solverValue) {
+        return labelKey != null && labelKey.contains("diameter")
+                ? solverValue * 2.0 : solverValue;
     }
 
     /**

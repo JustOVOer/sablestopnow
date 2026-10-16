@@ -382,7 +382,8 @@ public final class SketchClient {
                             String.format(java.util.Locale.ROOT, "%.4f", cand.value()),
                             cand.vars() == null ? -1 : cand.vars().length, cand.labelKey());
                     final boolean placed = session.dimensionWith(
-                            cand.solverKind(), cand.value(), cand.vars());
+                            cand.solverKind(), com.ovo.sablestopnow.sketch.SketchMeasure.solverValue(cand),
+                                    cand.vars()); // ★ 直径候选以**半径**落约束 ✓（否则圆弧无解 ✗）
                     MODE.solve();
                     logSolve("place-after", cand.solverKind(), cand.value(),
                             cand.vars() == null ? -1 : cand.vars().length);
@@ -399,7 +400,7 @@ public final class SketchClient {
                         //     表现正是用户实测的"线线距离确定后几何没有改变"✗）
                         final int ci = session.dimensionIndexOf(cand.solverKind(), cand.vars());
                         if (ci >= 0) {
-                            com.ovo.sablestopnow.client.SketchHud.openEdit(ci, cand.labelKey(), cand.value());
+                            SketchHud.openEdit(ci, cand.labelKey(), cand.value()); // 改值框回填**显示值**（直径时是 2r ✓）
                         }
                 }
             }

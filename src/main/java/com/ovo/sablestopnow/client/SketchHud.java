@@ -112,6 +112,10 @@ public final class SketchHud {
     /** 正在编辑的约束下标（-1 = 没在编辑 ✓）。 */
     private static int editConstraint = -1;
 
+    /** 当前改值框对应的尺寸类型键 ✓（用来把"直径"的输入换算回半径 ✓）。 */
+    @Nullable
+    private static String editLabelKey;
+
     /** 打开改值浮层 ✓（由 ModelInput 双击命中后调用 ✓）。 */
     /** 关掉改值浮层 ✓（退出草图 / 取消草图时必须调用 ✓ 否则输入会被我们自己挡住 ✓）。 */
     public static void closeEdit() {
@@ -130,6 +134,7 @@ public final class SketchHud {
                                 final double value) {
         Ui.close(EDIT_LAYER); // 先关旧的 ✓ 重建最省心 ✓（不残留上一次的状态 ✗）
         editConstraint = constraintIndex;
+        editLabelKey = labelKey; // ★ 记住类型键 ✓（"直径"的输入要换算回半径 ✓）
         final UiLayer layer = Ui.open(UiLayer.of(EDIT_LAYER));
         layer.hud = true;
         layer.consumeInput = true;   // 要能收键盘 ✓ 否则输入不进文本框 ✗
@@ -191,7 +196,12 @@ public final class SketchHud {
         } catch (final NumberFormatException bad) {
             return; // 解析不了就留在框里让玩家改 ✓ 不关层 ✗
         }
-        com.ovo.sablestopnow.client.SketchClient.applyDimensionValue(index, value);
+        // ★ 「直径」的输入是**显示值(2r)** ✓ ⇒ 写约束前必须换算回**半径(r)** ✓
+        //   否则会把 2r 当半径 ⇒ 圆弧若带重合约束就**无解** ✗（用户实测："直径始终无法求解"✓）
+        final double solverValue = editLabelKey != null && editLabelKey.contains("diameter")
+                ? value * 0.5 : value;
+        editLabelKey = null;
+        com.ovo.sablestopnow.client.SketchClient.applyDimensionValue(index, solverValue);
         Ui.close(EDIT_LAYER);
     }
 
@@ -467,6 +477,35 @@ public final class SketchHud {
         // ★ 需求 (4)「悬停可标注实体时**光标变化**」✓
         //   做法 ✓：在**指针本体位置**画一个标注光标**准星** ✓（CAD 里的尺寸光标 ✓）
         //   为什么不动系统指针 ✗：GLFW 指针由 Minecraft 每帧接管 ✓ 强改会闪烁甚至消失 ✗
+        // ★ 需求 (4) ✓：预览也**沿用已放置尺寸的画法** ✓（界线 + 尺寸线 + V 形箭头 ✓ 不是只有文字 ✗）
+        //   实现 ✓：与别的覆盖层同一套路 —— 找子结构 ✓ 用 endpointsOfVars 推参考点 ✓ 画半透明尺寸 ✓
+        dev.ryanhcode.sable.sublevel.ClientSubLevel psub = null;
+        if (mc.level != null
+                && dev.ryanhcode.sable.api.sublevel.SubLevelContainer.getContainer(mc.level)
+                instanceof final dev.ryanhcode.sable.api.sublevel.ClientSubLevelContainer pc) {
+            for (final dev.ryanhcode.sable.sublevel.ClientSubLevel s : pc.getAllSubLevels()) {
+                if (s.getUniqueId().equals(working.body())) {
+                    psub = s;
+                }
+            }
+        }
+        final double[] pends = com.ovo.sablestopnow.sketch.SketchMeasure
+                .endpointsOfVars(working, shown.solverKind(), shown.vars());
+        if (psub != null && pends != null) {
+            final org.joml.Vector3d ptmp = new org.joml.Vector3d();
+            final double[] psa = project(working, psub, pends[0], pends[1], mc, ptmp);
+            final double[] psb = project(working, psub, pends[2], pends[3], mc, ptmp);
+            if (psa != null && psb != null) {
+                final int pArgb = session.lockedVariant() >= 0 ? 0xEEFFCC55 : 0x99FFCC55;
+                final double tX = guiX(mc) + OFFSET_X;
+                final double tY = guiY(mc) + OFFSET_Y;
+                extLine(g, psa[0], psa[1], tX, tY, pArgb);
+                extLine(g, psb[0], psb[1], tX, tY, pArgb);
+                dimArrow(g, psa[0], psa[1], psb[0], psb[1], pArgb);
+                dimArrow(g, psb[0], psb[1], psa[0], psa[1], pArgb);
+            }
+        }
+
         final int curX = guiX(mc);
         final int curY = guiY(mc);
         final int curArgb = session.lockedVariant() >= 0 ? 0xEEFFCC55 : 0xAAFFCC55;

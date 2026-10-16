@@ -257,6 +257,8 @@ public final class SketchHud {
         drawConstraintGlyphs(event.getGuiGraphics(), mc);
         // ★ 需求 (4)：左栏候选按钮随**指针预览**实时联动 ✓（只改 toggled ✓ 不重建 ✓）
         com.ovo.sablestopnow.client.model.ModelUi.syncSmartCandidateToggles();
+        // ★ 草图 → 树 的高亮同步 ✓（用户要求"草图和右侧树状图联动" ✓ 反方向 ✓）
+        com.ovo.sablestopnow.client.model.ModelUi.syncSketchTreeHighlight();
         // 辅助线用**虚线**画一遍 ✓（SolidWorks 的构造几何就是虚线 ✓ 创建方式与直线一致 ✓）
         // 不参与轮廓/拉伸 ✓（SketchProfiles ×2 + Extrude ×1 已跳过 ✓）
         drawConstructionOverlay(event.getGuiGraphics(), mc);

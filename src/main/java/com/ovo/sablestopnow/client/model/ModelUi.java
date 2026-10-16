@@ -998,7 +998,10 @@ public final class ModelUi {
         panel.fraction(0.24f, 92, 150);
         panel.layout = Layouts.vbox(3, 3);
 
+        // ★ 记住当前这棵树 ✓：草图里选中图元后要**反查**对应节点并高亮 ✓
+        //   （用户要求"草图和右侧树状图联动" ✓ —— 树 → 图形区已做 ✓，这是反方向 ✓）
         final TreeView view = new TreeView();
+        activeTree = view;
         view.prefH = Widget.FILL;
         view.rowH = 12;
         view.indent = 7;
@@ -1682,6 +1685,44 @@ public final class ModelUi {
                 item.expanded = remembered;
             }
             applyRememberedExpansion(item.children);
+        }
+    }
+
+    /** 当前这棵树 ✓（为"草图选中 ⇒ 树里高亮"提供反查入口 ✓ 与 syncSmartCandidateToggles 同一套路 ✓）。 */
+    @Nullable
+    private static TreeView activeTree;
+
+    /**
+     * **草图 → 树**的高亮同步 ✓（每帧调用 ✓ 只改 highlight/selected ✓ 不重建树 ✗）。
+     *
+     * <p>为什么不能靠"改变签名触发重建" ✗✓：草图选择的身份进签名会让面板**每帧重建**，
+     * 输入焦点会被反复夺走（改值框里就没法打字了 ✓ 这个坑踩过 ✓）。
+     * 所以走"每帧轻量改动已有控件"的路子 ✓ —— 与智能尺寸候选开关是同一招 ✓。
+     */
+    public static void syncSketchTreeHighlight() {
+        final TreeView tree = activeTree;
+        if (tree == null) {
+            return;
+        }
+        // ⚠ 用两层判空 ✗✓：active() 为真时 session() 通常非 null ✓，但**不保证**（进入/退出的那一帧）✓
+        //   —— 每帧调用的小函数绝不能因为一次竞态就把渲染线程打崩 ✓
+        final var sess = com.ovo.sablestopnow.client.SketchClient.active()
+                ? com.ovo.sablestopnow.client.SketchClient.mode().session() : null;
+        final var sketch = sess == null ? null : sess.working();
+        final java.util.UUID wanted = sketch == null ? null : sketch.id();
+        for (final TreeView.TreeItem root : tree.roots()) {
+            markSketchRow(root, wanted);
+        }
+    }
+
+    private static void markSketchRow(final TreeView.TreeItem item, final java.util.UUID wanted) {
+        boolean want = false;
+        if (wanted != null && item.data instanceof com.ovo.sablestopnow.sketch.Sketch s) {
+            want = wanted.equals(s.id());
+        }
+        item.highlight = want;
+        for (final TreeView.TreeItem child : item.children) {
+            markSketchRow(child, wanted);
         }
     }
 

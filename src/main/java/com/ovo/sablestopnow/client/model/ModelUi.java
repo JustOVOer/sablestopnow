@@ -1005,6 +1005,13 @@ public final class ModelUi {
             // ⚠ 树上的四种选择是**互斥**的。以前只有「耦合」之间互清，施力点的选择会一直留着，
             // 于是左栏被钉死在施力点编辑器上：点模型、点配合都不换内容
             //（用户实测反馈「左侧栏未跟随树状图的选择而变化」）。
+            // ★ 用户要求：树里点**草图** ⇒ 图形区**高亮该草图** ✓（与"点模型/配合"同一套互斥选择 ✓）
+            //   复用渲染器现成的"正在编辑的草图 ⇒ 高亮"通道 ✓（SketchClient 进入编辑时用的也是它 ✓）
+            if (item.data instanceof com.ovo.sablestopnow.sketch.Sketch pickedSketch) {
+                com.ovo.sablestopnow.client.SketchRenderer.setEditing(pickedSketch.id());
+                refreshLeftPanel();
+                return;
+            }
             if (item.data instanceof UUID bodyId) {
                 // ⚠ **贴图面板必须是"可被别的选择顶掉"的**。以前它有最高优先级且没人清它，
                 //   于是"在贴图面板里点草图，左栏还是贴图"（用户实测反馈）。

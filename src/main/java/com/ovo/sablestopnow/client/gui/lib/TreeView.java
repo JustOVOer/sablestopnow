@@ -54,6 +54,9 @@ public class TreeView extends Container {
         public TreeItem child(final TreeItem child) {
             child.parent = this;
             children.add(child);
+            // ★ 用户要求：树**默认全折叠** ✓（字段默认是 true ✗ 于是每次打开都是全展开 ✗）
+            //   只有用户手动展开过的节点才保持展开 ✓（在会话内 ✓）
+            child.expanded = false;
             return this;
         }
 

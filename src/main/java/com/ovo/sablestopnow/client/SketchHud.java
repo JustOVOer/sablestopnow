@@ -694,7 +694,11 @@ public final class SketchHud {
         }
         final boolean uInt = Math.abs(kp.u() - Math.round(kp.u())) < 1.0e-6;
         final boolean vInt = Math.abs(kp.v() - Math.round(kp.v())) < 1.0e-6;
-        final double half = 32.0; // 半长（方块 ✓）
+        // ★ 用户实测反馈："网格吸附的线会挡住 GUI" ✗✓
+        //   根因就是这里的半长 32 格 ✗：投影后横跨整个画面，必然压在左右面板上 ✓
+        //   ⇒ 改成 **近处引导线**（±4 格 = 全长 8 格）✓：
+        //     贴着吸附点给方向指引 ✓ 又永远不会伸到画面边缘的面板里 ✓。
+        final double half = 4.0; // 半长（方块 ✓）近处引导 ✓ 不跨屏 ✓
         final org.joml.Vector3d tmp = new org.joml.Vector3d();
         final int argb = 0xCC66E0FF;
         if (uInt && !vInt) {

@@ -261,6 +261,10 @@ if (-not (Test-Path $solverSrc) -or -not (Test-Path $harnessSrc)) {
             ($paramDir + '\UvMapping.java'),
             ($paramDir + '\ArcLengthTable.java')
         )
+        # 再补一次 SketchMeasure.java（字符串拼接，避开本脚本里 Join-Path 间歇返回空的问题）
+        # 实锤：model 块报过 找不到符号 SketchMeasure，而它就在上面清单里 ——
+        # 空串被 javac 静默忽略，于是 文件没进编译 被读成 类不存在，方向被带偏。
+        $pureSketch += @(($sketchDir + '\SketchMeasure.java'))
         $jomlJar = Get-ChildItem (Join-Path $env:USERPROFILE '.gradle\caches\modules-2\files-2.1\org.joml') -Recurse -Filter 'joml-*.jar' -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -notmatch 'sources|javadoc' } | Select-Object -First 1
         # @Nullable comes from org.jetbrains.annotations; the lightweight classpath needs it too.

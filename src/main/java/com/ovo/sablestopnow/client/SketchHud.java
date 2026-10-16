@@ -409,7 +409,13 @@ public final class SketchHud {
                     // ★ 界线按参考图画 ✓：与几何**留小缝**（4px ✓）· **超出**尺寸线一小段（6px ✓）
                     //   （参考图 1/3/4 都明显超出 ✓ 我原来"贴到尺寸线就停"✗）
                     //   ⚠ 线线距离**不画界线** ✓（参考图 2 ✓ 两条线本身就是基准 ✓ 画了反而乱 ✗）
-                    final boolean skipExt = d.labelKey() != null && d.labelKey().contains("line_line");
+                    // ★ 需求 ③ 的圆弧专门情形 ✓（用户："标圆弧直径时界线没有和圆弧相切" ✗）
+                    //   SolidWorks 的直径/半径尺寸是**尺寸线穿过圆心、箭头直接落在圆周上** ✓
+                    //   ⇒ **不画界线** ✓（画了反而与圆周斜交 ⇒ 就是用户看到的问题 ✓）
+                    //   同理线线距离也不画 ✓（两条线自身即基准 ✓ 参考图 2 ✓）
+                    final String lk = d.labelKey() == null ? "" : d.labelKey();
+                    final boolean skipExt = lk.contains("line_line")
+                            || lk.contains("radius") || lk.contains("diameter");
                     if (!skipExt) {
                         // ★ 需求 ③：界线必须**垂直于图元**（用户："界线没有垂直于图元"✗）
                         //   原实现是"从测量点拉到尺寸线的**端点**"✗ ⇒ 斜线 ⇒ 看着不垂直 ✓

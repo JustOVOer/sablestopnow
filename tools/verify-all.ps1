@@ -277,8 +277,9 @@ if (-not (Test-Path $solverSrc) -or -not (Test-Path $harnessSrc)) {
             Remove-Item -Recurse -Force $modelOut -ErrorAction SilentlyContinue
             New-Item -ItemType Directory -Force -Path $modelOut | Out-Null
             $modelCp = $jomlJar.FullName + ';' + $jnaJar + ';' + $annJar.FullName
+            # model 块最容易"文件没进编译"；只打 15 行会把真正原因截掉（今天就被带偏过一次）⇒ 打 60 行
             & javac -encoding UTF-8 -nowarn -cp $modelCp -d $modelOut @pureSketch $solverSrc (Join-Path $PSScriptRoot 'SketchModelCheck.java') 2>&1 |
-                Select-Object -First 15 | ForEach-Object { Write-Host ('  ' + $_) }
+                Select-Object -First 60 | ForEach-Object { Write-Host ('  ' + $_) }
             if ($LASTEXITCODE -ne 0) {
                 Write-Host '  SKETCH_MODEL_CHECK=FAIL (compile)'
                 $failed.Add('sketch model harness failed to compile')

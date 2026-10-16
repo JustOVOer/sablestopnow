@@ -516,6 +516,8 @@
   "model.dim.edit_ok": "确定",
   "model.dim.unsatisfied": "该尺寸无法满足（求解器未收敛，几何已回滚）",
   "model.dim.edit_cancel": "取消",
+  "model.dim.edit_delete": "删除",
+  "model.dim.deleted": "已删除该尺寸及其约束",
   "model.smart.locked": "已锁定对齐方式（再次右键切换）",
   "model.smart.unlocked": "已取消锁定（回到自动捕捉）",
   "model.dim.horizontal": "水平",

@@ -453,6 +453,19 @@ public final class Sketch {
      * 是**按同一顺序**生成的，顺序一变两边都得跟着变，很容易只改一边。
      * 原位替换让顺序保持不变。
      */
+    /**
+     * **删掉一条约束** ✓（用户要求：改值框的「删除」= 删除该尺寸及其约束 ✓）。
+     *
+     * <p>只动约束表 ✓：几何（变量）留在原地 ✓ —— 这与 SolidWorks 一致
+     * （删掉尺寸后图形不会跳回去，只是重新变成欠约束 ✓）。
+     */
+    public void removeConstraint(final int index) {
+        if (index < 0 || index >= constraints.size()) {
+            return;
+        }
+        constraints.remove(index);
+    }
+
     public void replaceConstraint(final int index, final Constraint constraint) {
         constraints.set(index, constraint);
     }

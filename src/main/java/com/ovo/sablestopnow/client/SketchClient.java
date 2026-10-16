@@ -257,6 +257,25 @@ public final class SketchClient {
                 MODE.lastSolveError() == null ? "-" : MODE.lastSolveError());
     }
 
+    /**
+     * **删除一个尺寸（及其约束）** ✓ —— 改值框上「删除」按钮走这里 ✓。
+     *
+     * <p>用户要求："设置尺寸的 modify 框应该是确定和删除键，删除就是删除这个尺寸和相关约束" ✓。
+     * 几何保持在原地（只去掉约束 ✓ 与 SolidWorks 一致 ✓），随后再解一次以刷新显示 ✓。
+     */
+    public static boolean deleteDimension(final int constraintIndex) {
+        final var session = MODE.session();
+        final var work = session == null ? null : session.working();
+        if (work == null || constraintIndex < 0 || constraintIndex >= work.constraints().size()) {
+            return false;
+        }
+        work.removeConstraint(constraintIndex);
+        MODE.solve();
+        logSolve("delete-after", 0, 0.0, 0);
+        com.ovo.sablestopnow.client.model.ModelMode.prompt("model.dim.deleted");
+        return true;
+    }
+
     public static boolean applyDimensionValue(final int constraintIndex, final double value) {
         final var session = MODE.session();
         if (session == null) {

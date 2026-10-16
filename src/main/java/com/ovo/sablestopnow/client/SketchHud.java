@@ -177,7 +177,18 @@ public final class SketchHud {
         row.prefW = com.ovo.sablestopnow.client.gui.lib.Widget.FILL;
         row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
         row.add(new com.ovo.sablestopnow.client.gui.lib.Button(Component.translatable("model.dim.edit_ok"), () -> field.endEdit(true)));
-        row.add(new com.ovo.sablestopnow.client.gui.lib.Button(Component.translatable("model.dim.edit_cancel"), () -> Ui.close(EDIT_LAYER)));
+        // ★ 用户要求 ✓：第二个键从「取消」改成「**删除**」——
+        //   删除 = 删掉这个尺寸及其约束（几何留在原地 ✓ 只是重新变欠约束 ✓ 与 SolidWorks 一致 ✓）
+        row.add(new com.ovo.sablestopnow.client.gui.lib.Button(
+                Component.translatable("model.dim.edit_delete"), () -> {
+                    final int idx = editConstraint;
+                    editConstraint = -1;
+                    editLabelKey = null;
+                    if (idx >= 0) {
+                        com.ovo.sablestopnow.client.SketchClient.deleteDimension(idx);
+                    }
+                    Ui.close(EDIT_LAYER);
+                }));
         box.add(row);
         layer.root.add(box);
     }

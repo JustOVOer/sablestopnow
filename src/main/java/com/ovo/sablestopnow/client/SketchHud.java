@@ -411,8 +411,29 @@ public final class SketchHud {
                     //   ⚠ 线线距离**不画界线** ✓（参考图 2 ✓ 两条线本身就是基准 ✓ 画了反而乱 ✗）
                     final boolean skipExt = d.labelKey() != null && d.labelKey().contains("line_line");
                     if (!skipExt) {
-                        extLine(g, sa[0], sa[1], ax, ay, lineArgb);
-                        extLine(g, sb[0], sb[1], bx, by, lineArgb);
+                        // ★ 需求 ③：界线必须**垂直于图元**（用户："界线没有垂直于图元"✗）
+                        //   原实现是"从测量点拉到尺寸线的**端点**"✗ ⇒ 斜线 ⇒ 看着不垂直 ✓
+                        //   ⇒ 正确做法：把测量点**垂直投影**到尺寸线上，从测量点引到投影点 ✓
+                        //     几何端留 4px 缝 ✓ 尺寸线端超出 6px ✓（与预览、参考图同一套规则 ✓）
+                        final double dlx = bx - ax;
+                        final double dly = by - ay;
+                        final double dlen2 = dlx * dlx + dly * dly;
+                        if (dlen2 > 1.0e-6) {
+                            for (final double[] pt : new double[][] {sa, sb}) {
+                                final double t = ((pt[0] - ax) * dlx + (pt[1] - ay) * dly) / dlen2;
+                                final double fx = ax + t * dlx;
+                                final double fy = ay + t * dly;
+                                final double vx = fx - pt[0];
+                                final double vy = fy - pt[1];
+                                final double vl = Math.hypot(vx, vy);
+                                if (vl > 6.0) {
+                                    final double nnx = vx / vl;
+                                    final double nny = vy / vl;
+                                    extLine(g, pt[0] + nnx * 4.0, pt[1] + nny * 4.0,
+                                            fx + nnx * 6.0, fy + nny * 6.0, lineArgb);
+                                }
+                            }
+                        }
                     }
                     // 尺寸线本体 + 两端箭头（用统一库的矢量绘制 ✓ 不手写 fill ✗）
                     // ★ 箭头改成**开放式 V 形** ✓（参考图 1/2/3/4 全是这种 ✓ 我原来画的是实心圆点 ✗）

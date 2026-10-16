@@ -370,6 +370,24 @@ public final class SketchHud {
             if (screen == null || screen.length < 2) { // ★ 只要 2 个分量 ✓（projectToScreen 返回 {x,y} ✗ 无深度 ✓；
                 continue; // 在相机背后 / 投影失败 → 不画（否则文字会在屏幕上乱飘）
             }
+            // ★ 需求 ⑤：**角度尺寸走独立画法** ✓（用户：不能和线性尺寸一样 ✓）
+            //   依据 SolidWorks（docs/智能尺寸-design.md §6.3 ✓）：
+            //   尺寸线是**圆弧**（圆心 = 两线交点 ✓）、箭头沿弧**切向** ✓、
+            //   **尺寸界线就是构成角度的两个图元本身** ✓。
+            //   ⚠ 操作数要从**约束**取（`Dimension` 记录里没有 vars ✗ 只有 constraintIndex ✓）
+            // ★ 需求 ⑤：**角度尺寸走独立画法** ✓（用户：不能与线性尺寸同一套 ✓）
+            //
+            // ⚠ 踩坑记录 ✗✓：这里最初用了 `lineArgb`，但它在本行**之后**才定义 ⇒
+            //   javac 报的是"找不到符号"，读起来像"方法不存在"，很容易被带偏 ✗
+            //   ⇒ 颜色**就地算**（按驱动/从动 ✓ 与设计文档的配色表一致 ✓）。
+            if (d.labelKey() != null && d.labelKey().contains("angle")
+                    && d.constraintIndex() >= 0
+                    && d.constraintIndex() < working.constraints().size()) {
+                final int[] av = working.constraints().get(d.constraintIndex()).operands();
+                final int angArgb = d.driving() ? 0xFFE6E6E6 : 0xFF8C93A8;
+                drawAngularDimension(g, working, sub, mc, tmp, av, screen, angArgb);
+                continue; // 不再走下面那套线性画法 ✓
+            }
             // ---- 尺寸线（SolidWorks 的画法：线**穿过标签**，两端有界线与箭头 ✓）----
             // 参考点按需推导 ✓（推导不出就只画文字 ✓ 宁可少画不画错 ✓）
             // ★ 参考图 3/4 ✓：尺寸线**放不下文字**时 ⇒ 文字移到线**外侧** ✓（默认沿线的方向 ✓）
@@ -766,6 +784,112 @@ public final class SketchHud {
      * <p>只画"穿过吸附点、沿被吸附的那一轴"的一段 ✓（不是无限长 ✓）——
      * 长度取当前子结构在该轴上的尺寸 ✓ 够用且不会画到世界外面去 ✓。
      */
+    /** 平面 uv → 屏幕 ✓（角度尺寸画法自用 ✓ 与主循环同一条投影链 ✓）。 */
+    @Nullable
+    private static double[] projectUv(final com.ovo.sablestopnow.sketch.Sketch work,
+                                      final dev.ryanhcode.sable.sublevel.ClientSubLevel sub,
+                                      final Minecraft mc, final org.joml.Vector3d tmp,
+                                      final double u, final double v) {
+        final org.joml.Vector3d local = work.plane().toLocal(u, v);
+        final org.joml.Vector3d world = sub.renderPose().transformPosition(local, tmp);
+        final double[] s = com.ovo.sablestopnow.client.model.ModelCamera.projectToScreen(
+                new net.minecraft.world.phys.Vec3(world.x, world.y, world.z), mc);
+        return s == null || s.length < 2 ? null : s;
+    }
+
+    /**
+     * **角度尺寸**的画法 ✓（对齐 SolidWorks ✓ 见 docs/智能尺寸-design.md §6.3）。
+     *
+     * <p>尺寸线是一段**圆弧**（圆心 = 构成角度的两条线的交点 ✓）；
+     * 箭头画在弧两端、方向沿**切向** ✓；**尺寸界线就是那两条线本身**（延伸出弧一点 ✓）。
+     * 弧半径取"交点到标签的距离" ✓ ⇒ 天然满足"预览跟随鼠标 / 位置可拖动" ✓。
+     *
+     * @param v 约束操作数：两条线各 4 个（a0x a0y a1x a1y b0x b0y b1x b1y ✓）
+     */
+    private static void drawAngularDimension(final net.minecraft.client.gui.GuiGraphics g,
+                                             final com.ovo.sablestopnow.sketch.Sketch work,
+                                             final dev.ryanhcode.sable.sublevel.ClientSubLevel sub,
+                                             final Minecraft mc, final org.joml.Vector3d tmp,
+                                             final int[] v, final double[] labelScreen,
+                                             final int argb) {
+        if (v == null || v.length < 8) {
+            return;
+        }
+        final double[] la = projectUv(work, sub, mc, tmp, work.variable(v[0]), work.variable(v[1]));
+        final double[] lb = projectUv(work, sub, mc, tmp, work.variable(v[2]), work.variable(v[3]));
+        final double[] ma = projectUv(work, sub, mc, tmp, work.variable(v[4]), work.variable(v[5]));
+        final double[] mb = projectUv(work, sub, mc, tmp, work.variable(v[6]), work.variable(v[7]));
+        if (la == null || lb == null || ma == null || mb == null) {
+            return;
+        }
+        final double d1x = lb[0] - la[0];
+        final double d1y = lb[1] - la[1];
+        final double d2x = mb[0] - ma[0];
+        final double d2y = mb[1] - ma[1];
+        final double den = d1x * d2y - d1y * d2x;
+        double ox;
+        double oy;
+        if (Math.abs(den) < 1.0e-6) {
+            // 平行 ⇒ 没有尖点：退化为两条线中点的中点 ✓（宁可画得朴素 ✗ 不画错 ✓）
+            ox = ((la[0] + lb[0]) + (ma[0] + mb[0])) * 0.25;
+            oy = ((la[1] + lb[1]) + (ma[1] + mb[1])) * 0.25;
+        } else {
+            final double t = ((ma[0] - la[0]) * d2y - (ma[1] - la[1]) * d2x) / den;
+            ox = la[0] + d1x * t;
+            oy = la[1] + d1y * t;
+        }
+        // 弧半径 = 交点到标签的距离 ✓（于是拖标签 / 动鼠标 ⇒ 弧半径跟着变 ✓）
+        final double r = Math.max(18.0, Math.min(
+                Math.hypot(labelScreen[0] - ox, labelScreen[1] - oy), 400.0));
+        // 取**远离交点**的那一端定方向 ✓（线可能从交点往外画 ✓）
+        double a1 = Math.atan2(la[1] - oy, la[0] - ox);
+        if (Math.hypot(lb[0] - ox, lb[1] - oy) > Math.hypot(la[0] - ox, la[1] - oy)) {
+            a1 = Math.atan2(lb[1] - oy, lb[0] - ox);
+        }
+        double a2 = Math.atan2(ma[1] - oy, ma[0] - ox);
+        if (Math.hypot(mb[0] - ox, mb[1] - oy) > Math.hypot(ma[0] - ox, ma[1] - oy)) {
+            a2 = Math.atan2(mb[1] - oy, mb[0] - ox);
+        }
+        double sweep = a2 - a1;
+        while (sweep > Math.PI) {
+            sweep -= 2.0 * Math.PI;
+        }
+        while (sweep < -Math.PI) {
+            sweep += 2.0 * Math.PI;
+        }
+        // 界线 = 两条线**自身**（延伸出弧外 10px ✓ 与 SolirdWorks 一致 ✓）
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ox, oy,
+                ox + Math.cos(a1) * (r + 10.0), oy + Math.sin(a1) * (r + 10.0), 1.0f, argb);
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ox, oy,
+                ox + Math.cos(a2) * (r + 10.0), oy + Math.sin(a2) * (r + 10.0), 1.0f, argb);
+        // 弧线：折线逼近（24 段 ✓ 看不出是折线 ✓）
+        final int steps = 24;
+        double px = ox + Math.cos(a1) * r;
+        double py = oy + Math.sin(a1) * r;
+        for (int i = 1; i <= steps; i++) {
+            final double a = a1 + sweep * i / steps;
+            final double nx = ox + Math.cos(a) * r;
+            final double ny = oy + Math.sin(a) * r;
+            com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, px, py, nx, ny, 1.0f, argb);
+            px = nx;
+            py = ny;
+        }
+        // 箭头：沿**切向**（弧两端各一个 ✓ 不是线性尺寸那种 V 形 ✓）
+        final double dir = sweep >= 0.0 ? 1.0 : -1.0;
+        for (final double aEnd : new double[] {a1, a2}) {
+            final double ex = ox + Math.cos(aEnd) * r;
+            final double ey = oy + Math.sin(aEnd) * r;
+            final double tx = -Math.sin(aEnd) * dir * 12.0;
+            final double ty = Math.cos(aEnd) * dir * 12.0;
+            final double inx = Math.cos(aEnd) * 3.5;
+            final double iny = Math.sin(aEnd) * 3.5;
+            com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ex, ey,
+                    ex + tx + inx, ey + ty + iny, 1.2f, argb);
+            com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ex, ey,
+                    ex + tx - inx, ey + ty - iny, 1.2f, argb);
+        }
+    }
+
     private static void drawSnapOverlay(final net.minecraft.client.gui.GuiGraphics g,
                                         final Minecraft mc) {
         if (!SketchClient.active() || mc.level == null) {

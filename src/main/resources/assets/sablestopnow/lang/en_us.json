@@ -530,6 +530,7 @@
   "model.dim.reference": "%1$s %2$s (reference)",
   "model.dim.distance": "Distance",
   "model.relation.vertical": "Vertical",
+  "model.relation.tangent": "Tangent",
   "model.measure.point_point": "点到点",
   "model.measure.point_line": "点到线",
   "model.measure.parallel_lines": "平行线间距",

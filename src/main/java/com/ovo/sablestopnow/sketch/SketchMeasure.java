@@ -301,6 +301,47 @@ public final class SketchMeasure {
                 out.add(new ImpliedRelation(SketchSolver.VERTICAL, v, "model.relation.vertical"));
             }
         }
+        // ★ **直线 ↔ 圆/圆弧 的相切** ✓（用户实测反馈："选择直线和圆弧后添加约束时没有相切按键" ✗）
+        //
+        // 判定 ✓：直线到**圆心**的垂距 ≈ 半径 ⇒ 已经相切 ✓ ⇒ 给一个"一键补上相切"的入口 ✓。
+        // 约束用 kind 23（LINE_TANGENT_CIRCLE ✓ 操作数 a0x a0y a1x a1y cx cy r = **7 个** ✓
+        //   与 SketchSolver.operandCount(23) 及 Rust 侧 operand_count() 一致 ✓）；
+        // 它**不吃常量** ✓（Rust 侧 takes_const 不含 23 ✓）⇒ 不会把后面的常量挤错位 ✓。
+        for (final Sketch.Entity line : sketch.entities()) {
+            if (line.kind() != Sketch.EntityKind.LINE) {
+                continue;
+            }
+            final int[] lv = line.vars();
+            final double ax = sketch.variable(lv[0]);
+            final double ay = sketch.variable(lv[1]);
+            final double bx = sketch.variable(lv[2]);
+            final double by = sketch.variable(lv[3]);
+            final double len = Math.hypot(bx - ax, by - ay);
+            if (len < 1.0e-9) {
+                continue;
+            }
+            for (final Sketch.Entity curve : sketch.entities()) {
+                if (curve.kind() != Sketch.EntityKind.CIRCLE
+                        && curve.kind() != Sketch.EntityKind.ARC) {
+                    continue;
+                }
+                final int[] cv = curve.vars();
+                final double cx = sketch.variable(cv[0]);
+                final double cy = sketch.variable(cv[1]);
+                final double r = Math.abs(sketch.variable(cv[2]));
+                // 点到直线（无限长）的垂距 ✓
+                final double dist = Math.abs((by - ay) * (cx - ax) - (bx - ax) * (cy - ay)) / len;
+                if (Math.abs(dist - r) > TANGENT_TOLERANCE) {
+                    continue;
+                }
+                final int[] vars = {lv[0], lv[1], lv[2], lv[3], cv[0], cv[1], cv[2]};
+                if (hasSameKindAndOperands(constraints, SketchSolver.LINE_TANGENT_CIRCLE, vars)) {
+                    continue; // 已经加过 ⇒ 不重复（重复会让求解器报冗余、界面标红 ✗）
+                }
+                out.add(new ImpliedRelation(SketchSolver.LINE_TANGENT_CIRCLE, vars,
+                        "model.relation.tangent"));
+            }
+        }
         // 等长：两条线段长度在容差内相等
         final java.util.List<Sketch.Entity> lines = new java.util.ArrayList<>();
         for (final Sketch.Entity e : sketch.entities()) {
@@ -334,6 +375,34 @@ public final class SketchMeasure {
     private static double lengthTolerance(final double angleToleranceDeg, final double length) {
         // 把"角度容差"换算成一个粗略的长度比例容差（1° 约 1.7%）
         return length * angleToleranceDeg * 0.0175;
+    }
+
+    /** 相切判定的容差（平面单位 = 格 ✓）：直线到**圆心**的垂距与半径之差在此以内 ⇒ 视为已相切 ✓。 */
+    private static final double TANGENT_TOLERANCE = 0.02;
+
+    /**
+     * 是否已经存在"**同种类 + 同操作数**"的约束 ✓。
+     *
+     * <p>为什么要查 ✗✓：重复添加同一条约束会让求解器报冗余，我们的冗余检测会把它标红，
+     * 玩家会以为是出错 ✓（`impliedRelations` 的既有约定：已有同种约束就跳过 ✓）。
+     */
+    private static boolean hasSameKindAndOperands(final java.util.List<Sketch.Constraint> constraints,
+                                                 final int kind, final int[] vars) {
+        for (final Sketch.Constraint c : constraints) {
+            if (c.kind() != kind || c.operands().length != vars.length) {
+                continue;
+            }
+            boolean same = true;
+            for (int i = 0; i < vars.length; i++) {
+                if (c.operands()[i] != vars[i]) {
+                    same = false;
+                }
+            }
+            if (same) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean hasDirectional(final java.util.List<Sketch.Constraint> constraints,

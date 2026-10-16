@@ -533,6 +533,7 @@
   "model.dim.reference": "%1$s %2$s（未约束）",
   "model.dim.distance": "距离",
   "model.relation.vertical": "竖直",
+  "model.relation.tangent": "相切",
   "model.measure.point_point": "点到点",
   "model.measure.point_line": "点到线",
   "model.measure.parallel_lines": "平行线间距",

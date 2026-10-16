@@ -607,7 +607,8 @@ public final class SketchRenderer {
                     // 点画成一个小十字（单纯一个点是看不见的）
                     final Vec3 c = world(cameraPos, renderPose, sketch,
                             sketch.variable(v[0]), sketch.variable(v[1]));
-                    final double t = 0.06;
+                    // ★ 画大一点 ✓（原来是 0.06 ⇒ 12cm 的小十字 ✓ 太难点中 ✓ 用户反馈 ✓）
+                    final double t = 0.10;
                     line(vc, pose, c.add(-t, 0, 0), c.add(t, 0, 0), entityColor);
                     line(vc, pose, c.add(0, -t, 0), c.add(0, t, 0), entityColor);
                     lines += 2;

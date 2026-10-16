@@ -607,7 +607,10 @@ public final class SketchSession {
         for (final Sketch.Entity entity : working.entities()) {
             final int[] e = entity.vars();
             final double distance = switch (entity.kind()) {
-                case POINT -> Math.hypot(u - working.variable(e[0]), v - working.variable(e[1]));
+                // ★ 点比线/圆**更难点中** ✓（它只有一个位置 ✓ 没有"沿线"的方向可利用 ✓）
+                //   ⇒ 给它更大的命中容差 ✓（用户反馈："点也要能像线一样被选中" ✓）
+                case POINT -> Math.hypot(u - working.variable(e[0]), v - working.variable(e[1]))
+                        * 0.75;
                 case LINE -> distanceToSegment(u, v,
                         working.variable(e[0]), working.variable(e[1]),
                         working.variable(e[2]), working.variable(e[3]));

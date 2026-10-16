@@ -141,12 +141,24 @@ public final class SketchSolver implements AutoCloseable {
 
     /** 这种约束需要几个操作数（变量下标）。与 Rust 侧 {@code operand_count()} 一致。 */
     public static int operandCount(final int kind) {
+        // ★★ 必须与 Rust 侧 operand_count() **逐项一致** ✓✓
+        //
+        // 以前这里只列了 1~8 ✗，其余种类会走到 default **抛异常** ✗：
+        // 任何用到 9~25（平行/垂直/点线距/距离/夹角/相切/圆弧三兄弟…）的代码路径调用它都会崩，
+        // 而且"未知种类"这个说法会把人往错方向带（种类其实是有的 ✓）。
         return switch (kind) {
-            case FIXED -> 1;
-            case COINCIDENT, DISTANCE, HORIZONTAL, VERTICAL -> 4;
-            case EQUAL_LEN -> 8;
-            case MIDPOINT -> 6;
-            case RADIUS -> 3;
+            case FIXED -> 1;                                               // 1
+            case COINCIDENT, DISTANCE, HORIZONTAL, VERTICAL -> 4;          // 2 | 3 | 4 | 5
+            case EQUAL_LEN, PARALLEL, PERPENDICULAR -> 8;                  // 6 | 9 | 10
+            case MIDPOINT -> 6;                                            // 7
+            case RADIUS -> 3;                                              // 8
+            case POINT_LINE_DISTANCE, HPOINT_LINE_DISTANCE,
+                 VPOINT_LINE_DISTANCE, ARC_RADIUS, ARC_LENGTH, ARC_ANGLE,
+                 CIRCLE_TANGENT_CIRCLE, POINTS_AT_ANGLE -> 6;              // 11 | 12 | 13 | 19 | 20 | 21 | 24 | 25
+            case PARALLEL_LINES_DISTANCE, SYMMETRIC, LINES_ANGLE -> 8;     // 14 | 17 | 22
+            case HORIZONTAL_DISTANCE, VERTICAL_DISTANCE -> 4;              // 15 | 16
+            case SCALAR_EQUAL -> 2;                                        // 18
+            case LINE_TANGENT_CIRCLE -> 7;                                 // 23
             default -> throw new IllegalArgumentException("未知的约束种类 " + kind);
         };
     }

@@ -392,6 +392,18 @@ public final class SketchModelCheck {
             check(SketchSolver.takesConstant(kind) == expected,
                     "takesConstant(" + kind + ") 必须与 Rust 侧 takes_const 一致（期望 " + expected + "）");
         }
+        // ★★ 同类的另一半：**操作数个数**也必须逐项一致 ✓✓
+        //   Java 侧 operandCount 错了 ⇒ op 与变量下标整体错位 ⇒ 求解器要么越界拒绝、要么解出乱七八糟的结果 ✗。
+        //   期望值抄自 tools/ezpz-wasm/src/lib.rs 的 operand_count()（kind ⇒ 变量下标个数）：
+        //   1→1, 2→4, 3→4, 4→4, 5→4, 6→8, 7→6, 8→3, 9→8, 10→8, 11→6, 12→6, 13→6,
+        //   14→8, 15→4, 16→4, 17→8, 18→2, 19→6, 20→6, 21→6, 22→8, 23→7, 24→6, 25→6
+        final int[] operandCounts = {1, 4, 4, 4, 4, 8, 6, 3, 8, 8, 6, 6, 6,
+                8, 4, 4, 8, 2, 6, 6, 6, 8, 7, 6, 6};
+        for (int kind = 1; kind <= 25; kind++) {
+            check(SketchSolver.operandCount(kind) == operandCounts[kind - 1],
+                    "operandCount(" + kind + ") 必须与 Rust 侧 operand_count 一致（期望 "
+                            + operandCounts[kind - 1] + "，实际 " + SketchSolver.operandCount(kind) + "）");
+        }
         for (final int kind : new int[] {SketchSolver.FIXED, SketchSolver.COINCIDENT,
                 SketchSolver.DISTANCE, SketchSolver.HORIZONTAL, SketchSolver.VERTICAL,
                 SketchSolver.EQUAL_LEN, SketchSolver.MIDPOINT, SketchSolver.RADIUS}) {

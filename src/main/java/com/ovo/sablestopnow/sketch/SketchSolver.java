@@ -108,6 +108,18 @@ public final class SketchSolver implements AutoCloseable {
     public static final int POINTS_AT_ANGLE = 25;
 
     /**
+     * **点落在圆弧上**（ABI 扩展 ✓ 2026-10 增加 ✓）。
+     *
+     * <p>操作数 = 圆弧 6 个（圆心 xy + 起点 xy + 终点 xy）+ 点 2 个 ✓；**不吃常量** ✓。
+     *
+     * <p>为什么要它 ✗✓：我们的圆弧只存 `圆心/半径/起角/止角` ⇒ **端点不是独立变量** ✗，
+     * 于是"端点吸到圆弧端点 ⇒ 加 COINCIDENT"这条路径**没有可挂的变量**，只能跳过 ✓
+     * ⇒ 用户实测"吸附即约束没生效"（他正是从圆弧端点向圆心连辅助线 ✓）。
+     * 上游本来就有 `PointArcCoincident(圆弧, 点)` ⇒ shim 暴露出来即可 ✓。
+     */
+    public static final int POINT_ARC_COINCIDENT = 26;
+
+    /**
      * 这种约束是否吃一个常量。
      *
      * <p>⚠ 必须与 Rust 侧 {@code takes_const()} 完全一致。
@@ -159,6 +171,7 @@ public final class SketchSolver implements AutoCloseable {
             case HORIZONTAL_DISTANCE, VERTICAL_DISTANCE -> 4;              // 15 | 16
             case SCALAR_EQUAL -> 2;                                        // 18
             case LINE_TANGENT_CIRCLE -> 7;                                 // 23
+            case POINT_ARC_COINCIDENT -> 8;                                // 26（圆弧 6 + 点 2 ✓）
             default -> throw new IllegalArgumentException("未知的约束种类 " + kind);
         };
     }

@@ -222,6 +222,7 @@ fn operand_count(kind: i32) -> Option<usize> {
         23 => Some(7), // LINE_TANGENT_CIRCLE  ax ay bx by cx cy r
         24 => Some(6), // CIRCLE_TANGENT_CIRCLE c0x c0y r0 c1x c1y r1
         25 => Some(6), // POINTS_AT_ANGLE  px py qx qy rx ry
+        26 => Some(8), // POINT_ARC_COINCIDENT cx cy sx sy ex ey px py
         _ => None,
     }
 }
@@ -450,6 +451,10 @@ pub unsafe extern "C" fn sketch_solve(
                 circle(&ids, ops[0], ops[1], ops[2]),
                 circle(&ids, ops[3], ops[4], ops[5]),
                 CircleSide::Undefined,
+            ),
+            26 => Constraint::PointArcCoincident(
+                arc(&ids, ops[0], ops[1], ops[2], ops[3], ops[4], ops[5]),
+                point(&ids, ops[6], ops[7]),
             ),
             25 => Constraint::PointsAtAngle(
                 point(&ids, ops[0], ops[1]),

@@ -413,8 +413,9 @@ public final class SketchModelCheck {
         // 于是 Java 侧少发常量、Rust 侧却要常量 ⇒ 实机报 "constraint constants exhausted" ✗。
         // 期望值抄自 tools/ezpz-wasm/src/lib.rs 的 takes_const()：
         //   matches!(kind, 1 | 3 | 8 | 11 | 12 | 13 | 14 | 15 | 16 | 19 | 20 | 21 | 22 | 25)
+        // 26 = POINT_ARC_COINCIDENT（不外带常量 ✓ 与 Rust 侧一致 ✓）
         final int[] constKinds = {1, 3, 8, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 25};
-        for (int kind = 1; kind <= 25; kind++) {
+        for (int kind = 1; kind <= 26; kind++) {
             boolean expected = false;
             for (final int k : constKinds) {
                 if (k == kind) {
@@ -430,8 +431,8 @@ public final class SketchModelCheck {
         //   1→1, 2→4, 3→4, 4→4, 5→4, 6→8, 7→6, 8→3, 9→8, 10→8, 11→6, 12→6, 13→6,
         //   14→8, 15→4, 16→4, 17→8, 18→2, 19→6, 20→6, 21→6, 22→8, 23→7, 24→6, 25→6
         final int[] operandCounts = {1, 4, 4, 4, 4, 8, 6, 3, 8, 8, 6, 6, 6,
-                8, 4, 4, 8, 2, 6, 6, 6, 8, 7, 6, 6};
-        for (int kind = 1; kind <= 25; kind++) {
+                8, 4, 4, 8, 2, 6, 6, 6, 8, 7, 6, 6, 8};
+        for (int kind = 1; kind <= 26; kind++) {
             check(SketchSolver.operandCount(kind) == operandCounts[kind - 1],
                     "operandCount(" + kind + ") 必须与 Rust 侧 operand_count 一致（期望 "
                             + operandCounts[kind - 1] + "，实际 " + SketchSolver.operandCount(kind) + "）");

@@ -444,8 +444,16 @@ public final class SketchSolver implements AutoCloseable {
         public Program parallelLinesDistance(final int a0x, final int a0y, final int a1x, final int a1y,
                                              final int b0x, final int b0y, final int b1x, final int b1y,
                                              final double distance) {
-            ops.add(PARALLEL_LINES_DISTANCE);
+            // ★ **自己"类推"组合**（目标 (2) 要求 ✓）：平行 + "线一起点到线二的距离" ✓
+            //
+            // ⚠ 为什么不再用上游那条 kind 14（parallel_lines_distance）✗✓：
+            //   离线复现（tools/SketchSolverCheck 的 lineDistanceWithPinnedLengths）证明
+            //   它对"固定一条线、另一条自由、距离 8"解出的是 **0.667** ✗（期望 8）✗
+            //   而下面这个组合解出 **精确 8** ✓（同一用例 ✓）⇒ 用户报的"线线距离无法求解"根因在此 ✓
+            ops.add(PARALLEL);
             addAll(a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y);
+            ops.add(POINT_LINE_DISTANCE);
+            addAll(a0x, a0y, b0x, b0y, b1x, b1y);
             consts.add(distance);
             return this;
         }

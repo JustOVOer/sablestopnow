@@ -375,6 +375,23 @@ public final class SketchModelCheck {
                 && !SketchSolver.takesConstant(SketchSolver.COINCIDENT)
                 && !SketchSolver.takesConstant(SketchSolver.EQUAL_LEN)
                 && !SketchSolver.takesConstant(SketchSolver.MIDPOINT), "不吃常量的种类");
+        // ★★ **完整对照表**（防"少发常量 ⇒ constants exhausted"这类错误再溜过去）✓✓
+        //
+        // 以前这里只抽查了 1/3/8 与 2/4/5/6/7 ✗ ⇒ 11~16 / 19~22 / 25 漏在两边都不管的地带，
+        // 于是 Java 侧少发常量、Rust 侧却要常量 ⇒ 实机报 "constraint constants exhausted" ✗。
+        // 期望值抄自 tools/ezpz-wasm/src/lib.rs 的 takes_const()：
+        //   matches!(kind, 1 | 3 | 8 | 11 | 12 | 13 | 14 | 15 | 16 | 19 | 20 | 21 | 22 | 25)
+        final int[] constKinds = {1, 3, 8, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 25};
+        for (int kind = 1; kind <= 25; kind++) {
+            boolean expected = false;
+            for (final int k : constKinds) {
+                if (k == kind) {
+                    expected = true;
+                }
+            }
+            check(SketchSolver.takesConstant(kind) == expected,
+                    "takesConstant(" + kind + ") 必须与 Rust 侧 takes_const 一致（期望 " + expected + "）");
+        }
         for (final int kind : new int[] {SketchSolver.FIXED, SketchSolver.COINCIDENT,
                 SketchSolver.DISTANCE, SketchSolver.HORIZONTAL, SketchSolver.VERTICAL,
                 SketchSolver.EQUAL_LEN, SketchSolver.MIDPOINT, SketchSolver.RADIUS}) {

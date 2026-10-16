@@ -158,10 +158,20 @@ public final class SketchHud {
         layer.size(net.minecraft.client.Minecraft.getInstance().getWindow().getGuiScaledWidth(),
                 net.minecraft.client.Minecraft.getInstance().getWindow().getGuiScaledHeight());
         layer.root.layout = Layouts.absolute();
-        box.x = clamp((int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() + 14, 6,
+        // ★★ 真因 ✓✓：`Layouts.absolute()` **不读子控件的 x/y** ✗ —— 它把每个孩子直接按
+        //   "父内容区原点 + 外边距" 摆放：
+        //       child.x = parent.innerX() + child.marginLeft;
+        //       child.y = parent.innerY() + child.marginTop;
+        //   ⇒ 我原来写 box.x/box.y **完全无效** ✗，浮层就落在图层左上角（= 屏幕左上角 ✓）
+        //     —— 这正是用户两次反馈"改值框跑到左上角"的原因 ✓（上次我误判成"图层没有尺寸"✗）
+        //   ⇒ 正确做法：把位置写进 **marginLeft / marginTop** ✓（absolute() 唯一认的字段 ✓）。
+        box.marginLeft = clamp((int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() + 14, 6,
                 Math.max(6, layer.root.w - box.minW - 6));
-        box.y = clamp((int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() + 10, 6,
+        box.marginTop = clamp((int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() + 10, 6,
                 Math.max(6, layer.root.h - box.minH - 6));
+        // 保留 x/y 赋值无害（别的布局可能用得到 ✓），但位置以 margin 为准 ✓
+        box.x = box.marginLeft;
+        box.y = box.marginTop;
         box.add(new Label(Component.translatable(labelKey)).color(0xFFFFCC55));
         // 数值输入 ✓：numeric() + 打开就全选 ✓（照 ModelCouplingUi 的既有用法 ✓）
         final com.ovo.sablestopnow.client.gui.lib.TextField field =

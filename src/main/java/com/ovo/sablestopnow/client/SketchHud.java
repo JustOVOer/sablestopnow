@@ -497,12 +497,35 @@ public final class SketchHud {
             final double[] psb = project(working, psub, pends[2], pends[3], mc, ptmp);
             if (psa != null && psb != null) {
                 final int pArgb = session.lockedVariant() >= 0 ? 0xEEFFCC55 : 0x99FFCC55;
-                final double tX = guiX(mc) + OFFSET_X;
-                final double tY = guiY(mc) + OFFSET_Y;
-                extLine(g, psa[0], psa[1], tX, tY, pArgb);
-                extLine(g, psb[0], psb[1], tX, tY, pArgb);
-                dimArrow(g, psa[0], psa[1], psb[0], psb[1], pArgb);
-                dimArrow(g, psb[0], psb[1], psa[0], psa[1], pArgb);
+                // ★ 用户要求：**预览要和落下去的尺寸长得一模一样** ✓
+                //   （原话："用白色线段加中间断开的箭头显示的方式" ✓）
+                //   ⇒ 不再"拉一条线到指针" ✗，改用**已放置尺寸**那套画法：
+                //     ① 尺寸线两段、**中间在标签处断开** ✓ ② 两端开放式 V 形箭头 ✓
+                //     ③ 两端各一小段界线（沿尺寸线方向略超出 ✓ 与已放置尺寸同一观感 ✓）
+                final double ddx = psb[0] - psa[0];
+                final double ddy = psb[1] - psa[1];
+                final double dlen = Math.hypot(ddx, ddy);
+                if (dlen > 1.0e-6) {
+                    final double ux = ddx / dlen;
+                    final double uy = ddy / dlen;
+                    final double gap = 19.0; // 与 drawDimensionLabels 同一档 ✓
+                    // 断开处偏向**指针所在的那一端**（文字就画在指针旁 ⇒ 断口要跟着它 ✓）
+                    final boolean labelAtA = guiX(mc) + OFFSET_X < (psa[0] + psb[0]) * 0.5;
+                    final double midX = labelAtA ? psa[0] + ux * gap * 0.5 : psb[0] - ux * gap * 0.5;
+                    final double midY = labelAtA ? psa[1] + uy * gap * 0.5 : psb[1] - uy * gap * 0.5;
+                    com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
+                            psa[0], psa[1], midX - ux * gap * 0.5, midY - uy * gap * 0.5,
+                            1.0f, pArgb);
+                    com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
+                            midX + ux * gap * 0.5, midY + uy * gap * 0.5, psb[0], psb[1],
+                            1.0f, pArgb);
+                    dimArrow(g, psa[0], psa[1], psb[0], psb[1], pArgb);
+                    dimArrow(g, psb[0], psb[1], psa[0], psa[1], pArgb);
+                    extLine(g, psa[0] - ux * 3.0, psa[1] - uy * 3.0,
+                            psa[0] + ux * 9.0, psa[1] + uy * 9.0, pArgb);
+                    extLine(g, psb[0] + ux * 3.0, psb[1] + uy * 3.0,
+                            psb[0] - ux * 9.0, psb[1] - uy * 9.0, pArgb);
+                }
             }
         }
 

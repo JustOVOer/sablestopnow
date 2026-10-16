@@ -532,22 +532,49 @@ public final class SketchHud {
                     final double ux = ddx / dlen;
                     final double uy = ddy / dlen;
                     final double gap = 19.0; // 与 drawDimensionLabels 同一档 ✓
-                    // 断开处偏向**指针所在的那一端**（文字就画在指针旁 ⇒ 断口要跟着它 ✓）
-                    final boolean labelAtA = guiX(mc) + OFFSET_X < (psa[0] + psb[0]) * 0.5;
-                    final double midX = labelAtA ? psa[0] + ux * gap * 0.5 : psb[0] - ux * gap * 0.5;
-                    final double midY = labelAtA ? psa[1] + uy * gap * 0.5 : psb[1] - uy * gap * 0.5;
+                    // ★ 需求 ②：**预览要跟着鼠标走** ✓（用户："没有跟着鼠标" ✗）
+                    //   做法与 SolidWorks 一致 ✓：把整条尺寸线沿**垂直于自身**的方向平移到指针处 ✓，
+                    //   断口（文字位置）则跟着指针**在尺寸线方向上的投影** ✓
+                    //   ⇒ 指针往哪拖，尺寸线就摆到哪、文字跟到哪 ✓ 松手落下的位置就是看到的那个 ✓
+                    final double curX = guiX(mc) + OFFSET_X;
+                    final double curY = guiY(mc) + OFFSET_Y;
+                    final double midBaseX = (psa[0] + psb[0]) * 0.5;
+                    final double midBaseY = (psa[1] + psb[1]) * 0.5;
+                    final double relX = curX - midBaseX;
+                    final double relY = curY - midBaseY;
+                    // 沿尺寸线方向的投影（决定断口/文字位置 ✓）与垂直方向的偏移（决定尺寸线摆哪 ✓）
+                    final double along = relX * ux + relY * uy;
+                    final double perpX = relX - along * ux;
+                    final double perpY = relY - along * uy;
+                    final double offX = perpX;
+                    final double offY = perpY;
+                    // 平移后的两端与断口 ✓
+                    final double paX = psa[0] + offX;
+                    final double paY = psa[1] + offY;
+                    final double pbX = psb[0] + offX;
+                    final double pbY = psb[1] + offY;
+                    final double midX = midBaseX + offX + ux * along;
+                    final double midY = midBaseY + offY + uy * along;
                     com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
-                            psa[0], psa[1], midX - ux * gap * 0.5, midY - uy * gap * 0.5,
+                            paX, paY, midX - ux * gap * 0.5, midY - uy * gap * 0.5,
                             1.0f, pArgb);
                     com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
-                            midX + ux * gap * 0.5, midY + uy * gap * 0.5, psb[0], psb[1],
+                            midX + ux * gap * 0.5, midY + uy * gap * 0.5, pbX, pbY,
                             1.0f, pArgb);
-                    dimArrow(g, psa[0], psa[1], psb[0], psb[1], pArgb);
-                    dimArrow(g, psb[0], psb[1], psa[0], psa[1], pArgb);
-                    extLine(g, psa[0] - ux * 3.0, psa[1] - uy * 3.0,
-                            psa[0] + ux * 9.0, psa[1] + uy * 9.0, pArgb);
-                    extLine(g, psb[0] + ux * 3.0, psb[1] + uy * 3.0,
-                            psb[0] - ux * 9.0, psb[1] - uy * 9.0, pArgb);
+                    dimArrow(g, paX, paY, pbX, pbY, pArgb);
+                    dimArrow(g, pbX, pbY, paX, paY, pArgb);
+                    // ★ 需求 ③：界线要**垂直于图元**（= 沿"测量点 → 尺寸线"的方向引出 ✓）
+                    //   原实现把界线画在**尺寸线方向上**（3px→9px ✗）⇒ 看起来是"顺着线"而非"引出" ✗
+                    //   现在：从测量点出发、垂直于尺寸线走到平移后的尺寸线 ✓
+                    //   几何端留 4px 缝 ✓ 尺寸线端超出 6px ✓（与已放置尺寸同一套规则 ✓）
+                    if (Math.hypot(offX, offY) > 6.0) {
+                        final double nx = offX / Math.hypot(offX, offY);
+                        final double ny = offY / Math.hypot(offX, offY);
+                        extLine(g, psa[0] + nx * 4.0, psa[1] + ny * 4.0,
+                                paX + nx * 6.0, paY + ny * 6.0, pArgb);
+                        extLine(g, psb[0] + nx * 4.0, psb[1] + ny * 4.0,
+                                pbX + nx * 6.0, pbY + ny * 6.0, pArgb);
+                    }
                 }
             }
         }

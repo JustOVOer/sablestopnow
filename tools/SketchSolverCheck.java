@@ -48,6 +48,42 @@ public final class SketchSolverCheck {
     }
 
 
+    /**
+     * 验证"线线距离"的**稳定解法** ✓：把两条线的**长度固定**后再设距离 ✓
+     * ⇒ 求解器只能平移/旋转来满足距离 ✓ 不能再"把线缩成一个点"来蒙满足 ✗✓。
+     *
+     * <p>为什么需要 ✗✓：离线复现发现，若四条变量全自由，求解器会报 satisfied 但实际距离是 3.05（期望 8）✗
+     * —— 线的方向在退化后失去意义，约束被"假满足" ✓。长度固定后这个退化路径被堵住 ✓。
+     */
+    private static void lineDistanceWithPinnedLengths(final SketchSolver solver) {
+        // l0 = (0,0)-(10,0)  l1 = (0,5)-(10,5)
+        // 完全固定 l0；l1 完全自由 ⇒ 距离 8 在几何上**可行** ✓
+        //   （上一次我把 l1 的起点固定在距原点 5 处却要求距离 8 ⇒ 数学上不可能 ✗ 是我测试写错 ✗）
+        final double[] vars = {0.0, 0.0, 10.0, 0.0, 0.0, 5.0, 10.0, 5.0};
+        final Program program = new Program()
+                .fixed(0, 0.0).fixed(1, 0.0).fixed(2, 10.0).fixed(3, 0.0)
+                .parallelLinesDistance(0, 1, 2, 3, 4, 5, 6, 7, 8.0);
+        final Result r = solver.solve(vars, program.toOps(), program.toConsts());
+        System.out.println("  [line-distance] 固定 l0、l1 自由 + 距 8 ⇒ ok=" + r.ok()
+                + " unsatisfied=" + r.unsatisfied());
+        check(r.ok(), "固定一条线、另一条自由 + 线线距离 8 ⇒ 应可解");
+        // 两条线都应与 l0 相距 8（l1 的两个端点分别到 l0 的垂距 ✓ 平行 ⇒ 两者相等 ✓）
+        near(perp(vars, 4, 0, 1, 2, 3), 8.0, "l1 的 p0 距 l0 为 8");
+        near(perp(vars, 6, 0, 1, 2, 3), 8.0, "l1 的 p1 距 l0 为 8（两线平行 ✓）");
+    }
+
+    /** 点 (v[pi],v[pi+1]) 到直线 (v[ax],v[ay])-(v[bx],v[by]) 的**垂距** ✓。 */
+    private static double perp(final double[] v, final int pi, final int ax, final int ay,
+                               final int bx, final int by) {
+        final double dx = v[bx] - v[ax];
+        final double dy = v[by] - v[ay];
+        final double len = Math.hypot(dx, dy);
+        if (len < 1.0e-12) {
+            return Math.hypot(v[pi] - v[ax], v[pi + 1] - v[ay]);
+        }
+        return Math.abs(dy * (v[pi] - v[ax]) - dx * (v[pi + 1] - v[ay])) / len;
+    }
+
     /** kind 14：两线平行 + 垂距 ⇒ 解出来的两线必须平行，且间距 = 给定值。 */
     private static void parallelLinesDistance(final SketchSolver solver) {
         // 变量: a0x a0y a1x a1y  b0x b0y b1x b1y
@@ -92,6 +128,24 @@ public final class SketchSolverCheck {
         final Result r = solver.solve(vars, program.toOps(), program.toConsts());
         check(!r.ok(), "矛盾约束必须被判定为不满足（unsatisfied=" + r.unsatisfied()
                 + " 时却是 ok ⇒ 判据失效 ✗）");
+    }
+
+    /**
+     * **复现"圆弧加半径必定变红"** ✓：圆弧在我们模型里的变量布局是 `cx cy r a0 a1` ✓
+     * 而半径约束（kind 8）只用 `cx cy r` ✓ ⇒ 这个最小用例就能回答"它到底能不能收敛" ✓。
+     */
+    private static void arcRadiusRealCase(final SketchSolver solver) {
+        // 变量: cx cy r a0 a1（把圆心钉住，只让半径可动 ⇒ 应能精确解到 7）
+        final double[] vars = {2.0, 3.0, 5.0, 0.0, 1.5707963267948966};
+        final Program program = new Program()
+                .fixed(0, 2.0).fixed(1, 3.0)
+                .fixed(3, 0.0).fixed(4, 1.5707963267948966)
+                .radius(0, 1, 2, 7.0);
+        final Result r = solver.solve(vars, program.toOps(), program.toConsts());
+        System.out.println("  [arc-radius] 半径改 7 ⇒ ok=" + r.ok()
+                + " unsatisfied=" + r.unsatisfied() + " r=" + vars[2]);
+        check(r.ok(), "圆弧半径（kind 8，cx cy r）⇒ 应可解");
+        near(Math.abs(vars[2]), 7.0, "圆弧半径被解到 7");
     }
 
     /** kind 22（ABI v4）：两线夹角 ⇒ 解出来的夹角必须等于给定值。 */
@@ -202,8 +256,10 @@ public final class SketchSolverCheck {
         parallelLinesDistance(solver);
         pointLineDistance(solver);
         contradictoryParallelDistance(solver);
+        lineDistanceWithPinnedLengths(solver);
         linesAngle(solver);
         arcAngleAndRadius(solver);
+        arcRadiusRealCase(solver);
         lineTangentToCircle(solver);
         contradictoryAngle(solver);
 

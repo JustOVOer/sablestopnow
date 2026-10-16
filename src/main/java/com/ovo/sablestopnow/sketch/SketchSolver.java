@@ -117,7 +117,26 @@ public final class SketchSolver implements AutoCloseable {
      * （这个坑真的踩过：矩形草图的宽塌成 0、高变成 3，就是常量数组错位造成的。）
      */
     public static boolean takesConstant(final int kind) {
-        return kind == FIXED || kind == DISTANCE || kind == RADIUS;
+        // ★★ 必须与 Rust 侧 takes_const() **逐项一致** ✓✓
+        //
+        // 曾经这里只写了 FIXED | DISTANCE | RADIUS（1 | 3 | 8）✗，而 Rust 侧认
+        //   1 | 3 | 8 | 11 | 12 | 13 | 14 | 15 | 16 | 19 | 20 | 21 | 22 | 25
+        // ⇒ 凡是 11~16 / 19~22 / 25 的约束，Java 侧**少发一个常量** ✗
+        // ⇒ 求解器解码到一半常量就用光，报
+        //    "草图求解器拒绝了输入（约束常量不够用）：constraint constants exhausted"
+        // （用户实机在「单条线的竖直距离」(kind 16) 上撞到 ✓；同类问题还会让常量**整体错位**，
+        //   表现为"解成功了但尺寸用到了别的约束的值" ✓）
+        return switch (kind) {
+            case FIXED, DISTANCE, RADIUS,                                   // 1 | 3 | 8
+                 POINT_LINE_DISTANCE, HPOINT_LINE_DISTANCE,
+                 VPOINT_LINE_DISTANCE,                                      // 11 | 12 | 13
+                 PARALLEL_LINES_DISTANCE,                                   // 14
+                 HORIZONTAL_DISTANCE, VERTICAL_DISTANCE,                    // 15 | 16
+                 ARC_RADIUS, ARC_LENGTH, ARC_ANGLE,                         // 19 | 20 | 21
+                 LINES_ANGLE,                                               // 22
+                 POINTS_AT_ANGLE -> true;                                   // 25
+            default -> false;
+        };
     }
 
     /** 这种约束需要几个操作数（变量下标）。与 Rust 侧 {@code operand_count()} 一致。 */

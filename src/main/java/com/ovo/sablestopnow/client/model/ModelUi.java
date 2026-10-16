@@ -638,9 +638,11 @@ public final class ModelUi {
         final var existing = com.ovo.sablestopnow.sketch.SketchMeasure.existingDimensions(live);
         final var refs = com.ovo.sablestopnow.sketch.SketchMeasure.referenceDimensions(live);
         final var relations = com.ovo.sablestopnow.sketch.SketchMeasure.impliedRelations(live, 1.0);
-        if (existing.isEmpty() && refs.isEmpty() && relations.isEmpty()) {
-            return;
-        }
+        // ★ **不要**因为"现在还没有任何尺寸"就整块不建 ✗✓（用户实测反馈：
+        //   "草图界面不显示智能尺寸按键，只有选择图元后才显示" ✗）
+        //   原因就是这里原先直接 return ⇒ 全新草图（无尺寸/无参考/无关系）连**入口按钮**都没有 ✓
+        //   ⇒ 现在照常建区块（列表为空时下面自然什么都不多显示 ✓），入口**始终可见** ✓。
+        //   注：下面 existing/refs/relations 为空时各自的分支都不会加东西 ✓，所以没有副作用 ✓。
         body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
         body.add(new Label(Component.translatable("model.dim.title")).color(0xFF8FA0D8));        // ★ **显眼入口** ✓：工具行折成两行后「智能尺寸」可能在第二行不好找 ✗（用户实测反馈）
         //   这里再给一个**整行**按钮 ✓（面板行是 FILL 宽 ✓ 一眼就能看到 ✓）

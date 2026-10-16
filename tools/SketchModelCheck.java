@@ -56,10 +56,18 @@ public final class SketchModelCheck {
                 java.util.UUID.randomUUID(), "tangent-no", plane);
         miss.addLine(0.0, 0.0, 10.0, 0.0);
         miss.addCircle(5.0, 6.0, 2.0); // 明显不相切 ✓
+        // ★ 用户要求（实测反馈"目前仍然没有相切约束选项"）：**只要选中 直线+圆/圆弧，
+        //   就必须提供相切按钮** ⇒ 不相切时也要给（点了由求解器拉成相切 ✓）。
+        //   注意：这**不是**放宽断言 ✗ —— 语义从"已经成立的关系"改成"可执行的约束入口" ✓，
+        //   所以下面断言的是**更强**的行为：不相切时也必须出现，且操作数正确 ✓。
+        boolean offeredWhenApart = false;
         for (final SketchMeasure.ImpliedRelation rel : SketchMeasure.impliedRelations(miss, 1.0)) {
-            check(rel.solverKind() != SketchSolver.LINE_TANGENT_CIRCLE,
-                    "不相切的 直线+圆 ⇒ 不该建议相切（补上会求解失败 ✗）");
+            if (rel.solverKind() == SketchSolver.LINE_TANGENT_CIRCLE) {
+                offeredWhenApart = true;
+                check(rel.vars().length == 7, "相切约束应有 7 个操作数（不相切时也一样 ✓）");
+            }
         }
+        check(offeredWhenApart, "不相切的 直线+圆 ⇒ 也要提供相切按钮（用户要求 ✓）");
     }
 
     private static void check(final boolean condition, final String label) {
@@ -1135,6 +1143,21 @@ public final class SketchModelCheck {
         check(rad != null && rad.kind() == SketchSolver.RADIUS, "圆的尺寸是 RADIUS");
         check(rad != null && rad.operands().length == 3, "RADIUS 有 3 个操作数");
 
+        // --- 弧：标半径（⚠ 弧**没有半径变量** ⇒ 走 ARC_RADIUS / 6 个操作数）---
+        final Sketch.Entity arcDim = k.addArc(0, 0, 5, 0, Math.PI / 2);
+        final Sketch.Constraint arad = s.addDimension(arcDim, 7.0);
+        check(arad != null && arad.kind() == SketchSolver.ARC_RADIUS,
+                "弧的尺寸是 ARC_RADIUS（kind 19）—— 不能用 RADIUS（它要一个半径变量 ✗）");
+        check(arad != null && arad.operands().length == 6,
+                "ARC_RADIUS 有 6 个操作数（圆心 xy + 起点 xy + 终点 xy）");
+        final int[] adv = arcDim.vars();
+        check(arad != null && java.util.Arrays.equals(arad.operands(), adv),
+                "ARC_RADIUS 的操作数按顺序就是弧的 6 个变量");
+        check(arad != null && SketchSolver.takesConstant(arad.kind()),
+                "ARC_RADIUS 吃一个常量（半径值）—— 否则常量表会错位");
+        // 现算半径必须与几何一致（不是把尺寸值当成变量存下来）
+        near(k.arcRadius(arcDim), 5.0, "弧的现算半径仍然是 5（尺寸只是约束，不是变量）");
+
         // --- 点：标不了 ---
         final Sketch.Entity point = k.addPoint(1, 1);
         check(s.addDimension(point, 1.0) == null, "点标不了尺寸");
@@ -1142,6 +1165,7 @@ public final class SketchModelCheck {
         // --- 认领：每个图元只认自己的尺寸 ---
         check(s.dimensionsOf(line).size() == 1, "线段认领 1 个尺寸");
         check(s.dimensionsOf(circle).size() == 1, "圆认领 1 个尺寸");
+        check(s.dimensionsOf(arcDim).size() == 1, "弧认领 1 个尺寸（ARC_RADIUS 也认领得到）");
         check(s.dimensionsOf(point).isEmpty(), "点没有尺寸");
 
         // --- 改数值：原位替换，顺序不能变 ---
@@ -2835,12 +2859,24 @@ public final class SketchModelCheck {
         final Sketch.Entity arc = k.addArc(0, 0, 2, 0, Math.PI / 2);
         final int[] v = arc.vars();
         check(arc.kind() == Sketch.EntityKind.ARC, "图元种类是 ARC");
-        check(v.length == 5, "圆弧占 5 个变量");
+        // ★ 布局 = 圆心 + 起点 + 终点（6 个）✓ 半径与起止角**不是变量** ✓
+        check(v.length == 6, "圆弧占 6 个变量（圆心 + 起点 + 终点）");
         near(k.variable(v[0]), 0.0, "圆心 x");
         near(k.variable(v[1]), 0.0, "圆心 y");
-        near(k.variable(v[2]), 2.0, "半径");
-        near(k.variable(v[3]), 0.0, "起始角");
-        near(k.variable(v[4]), Math.PI / 2, "终止角");
+        near(k.variable(v[2]), 2.0, "起点 u（半径 2、起始角 0 ⇒ cos0·2）");
+        near(k.variable(v[3]), 0.0, "起点 v");
+        near(k.variable(v[4]), 0.0, "终点 u（90° ⇒ cos(π/2)·2）");
+        near(k.variable(v[5]), 2.0, "终点 v");
+        // 半径/起止角一律**现算** —— 这就是新布局的全部意义：
+        //   r = hypot(sx−cx, sy−cy)、a0/a1 = atan2(端点 − 圆心)
+        near(k.arcRadius(arc), 2.0, "半径 = hypot(起点 − 圆心)");
+        near(k.arcStart(arc), 0.0, "起始角 = atan2(起点 − 圆心)");
+        near(k.arcEnd(arc), Math.PI / 2, "终止角 = atan2(终点 − 圆心)");
+        near(k.arcSweep(arc), Math.PI / 2, "扫角 = a0 → a1 逆时针（90°）");
+        // 半径取非负：圆心 → 起点的 hypot 不可能是负的（旧布局要 Math.abs ✓ 现在天然成立 ✓）
+        final Sketch.Entity negArc = k.addArc(10, 10, -3, 0, Math.PI / 2);
+        near(k.arcRadius(negArc), 3.0, "负半径的输入法也得到**非负**半径（hypot 恒 ≥ 0）");
+        assertArcHasNoRadiusVariable(k, negArc);
 
         // --- 端点 ---
         final double[][] ends = k.arcEndpoints(arc);
@@ -2885,9 +2921,17 @@ public final class SketchModelCheck {
         final Sketch.Entity made = s.working().entities().get(0);
         check(made.kind() == Sketch.EntityKind.ARC, "造出来的确实是 ARC");
         final int[] mv = made.vars();
-        near(s.working().variable(mv[2]), 3.0, "半径 = 圆心到起点的距离");
-        near(s.working().variable(mv[3]), 0.0, "起始角 0");
-        near(s.working().variable(mv[4]), Math.PI / 2, "终止角 90°");
+        check(mv.length == 6, "会话造出来的弧同样是 6 个变量（圆心 + 起点 + 终点）");
+        near(s.working().variable(mv[2]), 3.0, "起点 u = 3（半径 = 圆心到起点的距离 = 3）");
+        near(s.working().variable(mv[3]), 0.0, "起点 v = 0");
+        near(s.working().variable(mv[4]), 0.0, "终点 u = 0（90° 方向）");
+        near(s.working().variable(mv[5]), 3.0, "终点 v = 3");
+        // ⚠ 玩家点终点的**距离被忽略**（终点只指方向 ✓ 与旧行为一致 ✓）：
+        //   半径由**起点**定 ⇒ 终点被投到半径 3 的圆上（不是玩家点的 (0,3) 距离 3 的巧合以外）
+        near(s.working().arcRadius(made), 3.0, "现算半径 = 3");
+        near(s.working().arcStart(made), 0.0, "现算起始角 0");
+        near(s.working().arcEnd(made), Math.PI / 2, "现算终止角 90°");
+        near(s.working().arcSweep(made), Math.PI / 2, "现算扫角 90°");
 
         // --- 终点压在圆心上 → 定不出方向，但半径有效，弧仍然造得出来（角度退化） ---
         final com.ovo.sablestopnow.sketch.SketchSession deg = editing();
@@ -2896,6 +2940,9 @@ public final class SketchModelCheck {
         deg.click(2.0, 0.0);
         deg.click(0.0, 0.0); // 终点 = 圆心
         check(deg.working().entities().size() == 1, "终点压在圆心上也造得出一段弧（角度退化）");
+        // 终点方向定不出来（atan2(0,0) = 0）⇒ 扫角归一成**整圈**（sweep 的既定语义，不是 0）
+        near(deg.working().arcSweep(deg.working().entities().get(0)), 2 * Math.PI,
+                "终点压在圆心 ⇒ 扫角成整圈 2π（起止角相同在弧语义里就是整圈）");
 
         // --- 起点压在圆心上 → 半径 0，造不出来（不抛异常） ---
         final com.ovo.sablestopnow.sketch.SketchSession zero = editing();
@@ -2905,6 +2952,43 @@ public final class SketchModelCheck {
         zero.click(2.0, 1.0);
         check(zero.working().entities().isEmpty(), "半径 0 → 不造弧（也不抛）");
         check(zero.pendingPoints().isEmpty(), "半径 0 之后待定点也要清掉");
+    }
+
+    /**
+     * 布局不变式：圆弧**没有**半径/起止角变量 —— 动端点坐标，半径与角度必须**跟着变**。
+     *
+     * <p>这条比"数一数有 6 个变量"强得多：它证明这两个量是**算出来的**，
+     * 而不是"碰巧存了 6 个数"（旧布局 {@code cx cy r a0 a1} 下把终点角改成 90°，
+     * 半径纹丝不动 ⇒ 这条断言会**当场失败** ✗）。
+     *
+     * <p>改完**原样复原**那 6 个变量：调用方后面还要用这段弧做几何断言。
+     */
+    private static void assertArcHasNoRadiusVariable(final Sketch k, final Sketch.Entity arc) {
+        final int[] v = arc.vars();
+        final double[] before = new double[6];
+        for (int i = 0; i < 6; i++) {
+            before[i] = k.variable(v[i]);
+        }
+        final double cx = before[0];
+        final double cy = before[1];
+        final double r0 = k.arcRadius(arc);
+        final double a0 = k.arcStart(arc);
+        // ① 起点沿半径方向推远一倍 ⇒ 半径翻倍（半径是算的）
+        k.setVariable(v[2], cx + (before[2] - cx) * 2.0);
+        k.setVariable(v[3], cy + (before[3] - cy) * 2.0);
+        near(k.arcRadius(arc), r0 * 2.0, "改起点坐标 ⇒ 半径**跟着变**（算出来的，不是存的）");
+        near(k.arcStart(arc), a0, "沿半径方向推远不改变方向角");
+        // ② 终点换个方向 ⇒ 终止角跟着变（角度也是算的）
+        final double rNow = k.arcRadius(arc);
+        k.setVariable(v[4], cx);
+        k.setVariable(v[5], cy + rNow);
+        near(k.arcEnd(arc), Math.PI / 2, "改终点坐标 ⇒ 终止角**跟着变**");
+        // 复原
+        for (int i = 0; i < 6; i++) {
+            k.setVariable(v[i], before[i]);
+        }
+        near(k.arcRadius(arc), r0, "复原后半径回到原值（不影响后面的断言）");
+        near(k.arcStart(arc), a0, "复原后起始角回到原值");
     }
 
     /**
@@ -3346,8 +3430,10 @@ public final class SketchModelCheck {
         pick.click(0.0, 5.0);   // 终点 → 90°
         final Sketch pk = pick.working();
         final Sketch.Entity pkArc = pk.entities().get(0);
+        final int[] pkAv = pkArc.vars();
 
-        // 弧的起点 (5,0)：应当吸到一个关键点，且它**没有变量**（只吸附、不产生约束）
+        // 弧的起点 (5,0)：应当吸到一个关键点；⚠ 新布局下端点**就是变量**
+        //   ⇒ px/py 必须给出 (sx, sy) 的下标 ⇒ 吸附才能落成真约束
         final com.ovo.sablestopnow.sketch.SketchSession.KeyPoint atStart =
                 pick.pickKeyPoint(5.05, 0.05, 0.5);
         check(atStart != null, "弧起点附近能吸到关键点");
@@ -3356,15 +3442,17 @@ public final class SketchModelCheck {
             near(atStart.v(), 0.0, "吸到的是弧起点的 v");
             check(atStart.kind() == com.ovo.sablestopnow.sketch.SketchSession.KeyKind.ENDPOINT,
                     "分类是端点");
-            check(atStart.px() < 0 && atStart.py() < 0,
-                    "弧端点**没有变量**（px/py = -1）→ 只吸附位置，不产生约束");
+            check(atStart.px() == pkAv[2] && atStart.py() == pkAv[3],
+                    "弧端点**就是变量** ⇒ 吸到的下标正好是 (sx, sy)（以前是 -1 ⇒ 只吸位置 ✗）");
         }
 
-        // 弧的终点 (0,5)
+        // 弧的终点 (0,5)：同样要给出 (ex, ey) 的下标
         final com.ovo.sablestopnow.sketch.SketchSession.KeyPoint atEnd =
                 pick.pickKeyPoint(0.05, 5.05, 0.5);
         check(atEnd != null && Math.abs(atEnd.u()) < 1.0e-9 && Math.abs(atEnd.v() - 5.0) < 1.0e-9,
                 "弧终点附近能吸到 (0,5)");
+        check(atEnd != null && atEnd.px() == pkAv[4] && atEnd.py() == pkAv[5],
+                "吸到终点时给的下标是 (ex, ey)");
 
         // 弧的圆心：**有**变量 → 能产生真正的重合约束
         final com.ovo.sablestopnow.sketch.SketchSession.KeyPoint atCentre =
@@ -3385,9 +3473,16 @@ public final class SketchModelCheck {
         snapLine.click(0.0, 5.0);
         final Sketch sl = snapLine.working();
         final int slBefore = sl.constraints().size();
-        // 把弧端点记成"上次吸到的"（模拟 click 路径里的 snap），再画一条线
+        // 把弧端点记成"上次吸到的"（这就是 click 路径里真实走的那一步：
+        //   UI 先把鼠标位置过一遍 snap() ✓ 再拿吸附后的坐标调 click() ✓）
+        //   ⚠ 以前这里**只写了注释、没真的调 snap()** ⇒ 下面那条"没有坏约束"的断言**恒真**
+        //     （什么都没记下来 ⇒ 什么约束都不会加 ⇒ 永远是"没问题"）。
+        //     现在显式调，断言才真的压在吸附落约束这条路径上。
+        final double[] snappedUv = snapLine.snap(5.02, 0.01, 0.5);
+        check(Math.abs(snappedUv[0] - 5.0) < 1.0e-9 && Math.abs(snappedUv[1]) < 1.0e-9,
+                "snap() 把落点吸到了弧起点 (5,0)");
         snapLine.setTool(com.ovo.sablestopnow.sketch.SketchSession.Tool.LINE);
-        snapLine.click(5.02, 0.01);  // 起点吸到弧起点
+        snapLine.click(snappedUv[0], snappedUv[1]); // 起点吸到弧起点
         snapLine.click(9.0, 0.0);    // 随便画到右边
         boolean noBogus = true;
         for (final Sketch.Constraint c : sl.constraints()) {
@@ -3401,6 +3496,33 @@ public final class SketchModelCheck {
         check(noBogus, "吸到弧端点后**没有**产生带非法下标的约束（否则求解会整张失败）");
         check(sl.constraints().size() >= slBefore, "约束数没减少");
         check(pk.constraints().size() == constraintsBefore, "（另一张草图的约束数不受影响）");
+
+        // ★ 加强（新布局才做得到）：吸附**真的落成了约束** ——
+        //   新线的起点变量与弧起点变量之间必须有一条 COINCIDENT。
+        //   旧布局下弧端点没有变量 ⇒ 这里只吸了坐标、什么都没落 ✗（用户实测报过这条）。
+        final Sketch.Entity slLine = sl.entities().get(sl.entities().size() - 1);
+        final int[] slLv = slLine.vars();
+        final int[] slArcV = sl.entities().get(0).vars();
+        boolean boundToArcStart = false;
+        for (final Sketch.Constraint c : sl.constraints()) {
+            if (c.kind() != SketchSolver.COINCIDENT) {
+                continue;
+            }
+            final int[] o = c.operands();
+            if (o.length < 4) {
+                continue;
+            }
+            final boolean forward = o[0] == slLv[0] && o[1] == slLv[1]
+                    && o[2] == slArcV[2] && o[3] == slArcV[3];
+            final boolean backward = o[0] == slArcV[2] && o[1] == slArcV[3]
+                    && o[2] == slLv[0] && o[3] == slLv[1];
+            if (forward || backward) {
+                boundToArcStart = true;
+            }
+        }
+        check(boundToArcStart,
+                "吸到弧端点 ⇒ 落成**真的 COINCIDENT**（新线的起点变量 ↔ 弧的 (sx,sy) 变量）"
+                        + "—— 这就是「吸附即约束」；旧布局下弧端点没有变量，做不到");
 
         // --- 反向：只画一段**开**弧 → 不成环 ---
         final Sketch open = new Sketch(java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
@@ -5440,9 +5562,13 @@ public final class SketchModelCheck {
                 k.entities().get(k.entities().size() - 1);
         check(arc.kind() == Sketch.EntityKind.ARC, "画出了圆弧");
         final int[] av = arc.vars();
-        // 原弧的两个端点
-        final double[] e0 = k.arcPoint(arc, k.variable(av[3]));
-        final double[] e1 = k.arcPoint(arc, k.variable(av[4]));
+        check(av.length == 6, "弧是 6 个变量（圆心 + 起点 + 终点）");
+        // 原弧的两个端点（端点是**变量** ⇒ 直接读，不绕 arcPoint 的约定）
+        final double[][] aEnds = k.arcEndpoints(arc);
+        check(aEnds != null, "拿得到原弧的端点");
+        final double aR = k.arcRadius(arc);
+        final double aA0 = k.arcStart(arc);
+        final double aA1 = k.arcEnd(arc);
         s.clearSelection();
         s.toggleEntity(arc);
         eq(s.mirrorSelection(axis), 1, "镜像圆弧");
@@ -5455,19 +5581,36 @@ public final class SketchModelCheck {
         near(k.variable(mav[0]), -k.variable(av[0]),
                 "镜像弧的圆心 x = 原圆心 x 的镜像", 1.0e-9);
         near(k.variable(mav[1]), k.variable(av[1]), "圆心 y 不变", 1.0e-9);
-        near(Math.abs(k.variable(mav[2])), Math.abs(k.variable(av[2])), "半径不变", 1.0e-9);
+        near(k.arcRadius(marc), aR, "半径不变（半径是现算的：hypot(起点 − 圆心)）", 1.0e-9);
         // ② 角度关系：a' = 2θ − a（θ 是**轴**的方向角，不是圆弧自己的）。
         final int[] axisVars = axis.vars();
         final double theta = Math.atan2(
                 k.variable(axisVars[3]) - k.variable(axisVars[1]),
                 k.variable(axisVars[2]) - k.variable(axisVars[0]));
-        double expectedA0 = 2.0 * theta - k.variable(av[4]);
-        double expectedA1 = 2.0 * theta - k.variable(av[3]);
-        // 角的比较一律归一化到 (−π, π]
-        final double d0 = normalizeAngle(k.variable(mav[3]) - expectedA0);
-        final double d1 = normalizeAngle(k.variable(mav[4]) - expectedA1);
+        // 交叉换：新**起点**角 = 2θ − 原**终点**角，新**终点**角 = 2θ − 原**起点**角
+        final double expectedA0 = 2.0 * theta - aA1;
+        final double expectedA1 = 2.0 * theta - aA0;
+        final double d0 = normalizeAngle(k.arcStart(marc) - expectedA0);
+        final double d1 = normalizeAngle(k.arcEnd(marc) - expectedA1);
         near(d0, 0.0, "镜像弧起点角 = 2θ − 原**终点**角（交叉换）", 1.0e-6);
         near(d1, 0.0, "镜像弧终点角 = 2θ − 原**起点**角（交叉换）", 1.0e-6);
+        // ③ 端点坐标就是各自的镜像（起点 ← 原终点的镜像，终点 ← 原起点的镜像）
+        final double avx = k.variable(axisVars[2]) - k.variable(axisVars[0]);
+        final double avy = k.variable(axisVars[3]) - k.variable(axisVars[1]);
+        final double alen2 = avx * avx + avy * avy;
+        final double[] mmStart = reflectPoint(aEnds[1][0], aEnds[1][1],
+                k.variable(axisVars[0]), k.variable(axisVars[1]), avx, avy, alen2);
+        final double[] mmEnd = reflectPoint(aEnds[0][0], aEnds[0][1],
+                k.variable(axisVars[0]), k.variable(axisVars[1]), avx, avy, alen2);
+        near(k.variable(mav[2]), mmStart[0], "新起点 u = 原**终点**的镜像 u", 1.0e-9);
+        near(k.variable(mav[3]), mmStart[1], "新起点 v = 原**终点**的镜像 v", 1.0e-9);
+        near(k.variable(mav[4]), mmEnd[0], "新终点 u = 原**起点**的镜像 u", 1.0e-9);
+        near(k.variable(mav[5]), mmEnd[1], "新终点 v = 原**起点**的镜像 v", 1.0e-9);
+        // 镜像弧的半径也必须等于"起点到圆心"的距离（不是照抄旧半径变量 ⇒ 根本没有半径变量）
+        near(k.arcRadius(marc),
+                Math.hypot(k.variable(mav[2]) - k.variable(mav[0]),
+                        k.variable(mav[3]) - k.variable(mav[1])),
+                "镜像弧半径 = hypot(它的起点 − 它的圆心)", 1.0e-9);
 
         // --- 不该镜像轴自己 ---
         s.clearSelection();
@@ -5722,6 +5865,23 @@ public final class SketchModelCheck {
             x += 2.0 * Math.PI;
         }
         return x;
+    }
+
+    /**
+     * 点关于直线（过 A、方向 {@code (dx,dy)}）的镜像 —— 与 {@code SketchSession.reflect} 同一公式。
+     *
+     * <p>在检查里**独立重写一遍**是刻意的：拿被测代码自己的私有实现去验它自己，
+     * 等于把自己的假设当成事实（镜像那条测试的注释里已经写过这个教训）。
+     */
+    private static double[] reflectPoint(final double px, final double py,
+                                         final double ax, final double ay,
+                                         final double dx, final double dy, final double len2) {
+        final double wx = px - ax;
+        final double wy = py - ay;
+        final double t = (wx * dx + wy * dy) / len2;
+        final double projX = ax + t * dx;
+        final double projY = ay + t * dy;
+        return new double[] {2.0 * projX - px, 2.0 * projY - py};
     }
 
     /**

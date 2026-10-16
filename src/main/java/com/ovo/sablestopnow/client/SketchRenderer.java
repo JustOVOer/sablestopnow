@@ -617,7 +617,8 @@ public final class SketchRenderer {
                         entityColor);
                 case ARC -> {
                     // 弧用折线近似。段数按扫角缩放：一小段弧给它 48 段纯属浪费。
-                    final double sweep = Sketch.sweep(sketch.variable(v[3]), sketch.variable(v[4]));
+                    // ⚠ 扫角**现算**（弧存的是圆心 + 起点 + 终点 ✓ 半径/角度不是变量 ✓）
+                    final double sweep = sketch.arcSweep(entity);
                     final int segments = Math.max(4,
                             (int) Math.ceil(CIRCLE_SEGMENTS * sweep / (2.0 * Math.PI)));
                     Vec3 prev = null;

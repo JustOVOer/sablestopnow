@@ -37,16 +37,26 @@ public final class Sketch {
         /** 圆：3 个变量 (cx, cy, r)。 */
         CIRCLE(3),
         /**
-         * 圆弧：5 个变量 (cx, cy, r, a0, a1)，角度用**弧度**。
+         * 圆弧：6 个变量 (cx, cy, sx, sy, ex, ey) —— **圆心 + 起点 + 终点**。
          *
-         * <p>与 {@link #CIRCLE} 共享前三个变量（圆心 + 半径），所以"改半径"那套约束
-         * （{@code SketchSolver.RADIUS}）对圆弧直接可用，不必再造一种约束。
+         * <p>半径与起止角**不存**，按需从这六个坐标算出来（{@link Sketch#arcRadius} /
+         * {@link Sketch#arcStart} / {@link Sketch#arcEnd}）：
+         * <ul>
+         *   <li>{@code r  = hypot(sx − cx, sy − cy)}（恒非负）</li>
+         *   <li>{@code a0 = atan2(sy − cy, sx − cx)}</li>
+         *   <li>{@code a1 = atan2(ey − cy, ex − cx)}</li>
+         * </ul>
          *
-         * <p>⚠ 圆弧从 {@code a0} 沿**逆时针**扫到 {@code a1}，扫过的角度可能大于 π
+         * <p>端点因此是**独立变量**（不再是"由圆心/半径/两个角推出来的从属量"）：
+         * "弧端点和别的几何重合"终于能落成真约束，求解器侧的
+         * {@code ARC_RADIUS / ARC_LENGTH / ARC_ANGLE / POINT_ARC_COINCIDENT}
+         * 也正是按这 6 个操作数定义的。
+         *
+         * <p>⚠ 圆弧从起点沿**逆时针**扫到终点（见 {@link Sketch#sweep}），扫过的角度可能大于 π
          * （不像"两点定弧"有歧义）。这就是选"圆心+起点+终点"输入法的好处：
          * 表示唯一，不必靠"走哪边"来消歧义。
          */
-        ARC(5);
+        ARC(6);
 
         private final int varCount;
 
@@ -258,13 +268,33 @@ public final class Sketch {
     /**
      * 加一段圆弧：圆心 {@code (cx,cy)}、半径 {@code r}，从 {@code a0} **逆时针**扫到 {@code a1}（弧度）。
      *
+     * <p>⚠ 这个重载是**输入法**，不是存储布局：变量里存的是算出来的**起点/终点坐标**
+     * （{@code cx cy sx sy ex ey}），半径与角度随用随算 —— 见 {@link EntityKind#ARC}。
+     * 画弧时玩家点的就是"圆心 → 起点 → 终点"，所以这个入口保留着。
+     *
      * <p>{@code a1} 会自动规范化到 {@code a0} 之后的一圈之内（见 {@link #sweep}）：
      * 玩家点终点时算出来的角度可能比起点小（跨过 0 度），不规范化的话
-     * 圆弧会反着画、扫过 300 多度。
+     * 圆弧会反着画、扫过 300 多度。半径取绝对值（半径恒非负）。
      */
     public Entity addArc(final double cx, final double cy, final double r,
                          final double a0, final double a1) {
-        return addEntity(EntityKind.ARC, cx, cy, r, a0, a0 + sweep(a0, a1));
+        final double radius = Math.abs(r);
+        final double end = a0 + sweep(a0, a1); // 终点角规范化到 a0 之后的一圈之内
+        return addArcPoints(cx, cy,
+                cx + radius * Math.cos(a0), cy + radius * Math.sin(a0),
+                cx + radius * Math.cos(end), cy + radius * Math.sin(end));
+    }
+
+    /**
+     * 直接按**三个点**造一段圆弧：圆心、起点、终点（就是那 6 个变量本身）。
+     *
+     * <p>不做任何规范化/投影：三个点是什么就存什么。调用方负责给出"落在同一个圆上"的
+     * 起点与终点（否则半径按起点算、终点只提供方向，画出来会和存的终点有偏差）。
+     */
+    public Entity addArcPoints(final double cx, final double cy,
+                              final double sx, final double sy,
+                              final double ex, final double ey) {
+        return addEntity(EntityKind.ARC, cx, cy, sx, sy, ex, ey);
     }
 
     /**
@@ -280,6 +310,56 @@ public final class Sketch {
         return d;
     }
 
+    // ------------------------------------------------------------------
+    // 圆弧的**计算型**访问器（半径/起止角不存变量，一律现算）
+    // ------------------------------------------------------------------
+
+    /**
+     * 圆弧半径 {@code hypot(sx − cx, sy − cy)} —— **恒非负**（不比 {@code Math.abs} 差，
+     * 因为 hypot 本身就不可能是负的）。
+     *
+     * <p>取的是"圆心 → **起点**"的距离；终点只提供**方向**（{@link #arcEnd}）。
+     * 不是圆弧时返回 0（调用方本来就该先判 {@link #kind()}）。
+     */
+    public double arcRadius(final Entity arc) {
+        if (arc.kind() != EntityKind.ARC) {
+            return 0.0;
+        }
+        final int[] v = arc.vars();
+        return Math.hypot(variable(v[2]) - variable(v[0]), variable(v[3]) - variable(v[1]));
+    }
+
+    /** 圆弧起始角 {@code atan2(sy − cy, sx − cx)}（弧度）；不是圆弧时返回 0。 */
+    public double arcStart(final Entity arc) {
+        if (arc.kind() != EntityKind.ARC) {
+            return 0.0;
+        }
+        final int[] v = arc.vars();
+        return Math.atan2(variable(v[3]) - variable(v[1]), variable(v[2]) - variable(v[0]));
+    }
+
+    /** 圆弧终止角 {@code atan2(ey − cy, ex − cx)}（弧度）；不是圆弧时返回 0。 */
+    public double arcEnd(final Entity arc) {
+        if (arc.kind() != EntityKind.ARC) {
+            return 0.0;
+        }
+        final int[] v = arc.vars();
+        return Math.atan2(variable(v[5]) - variable(v[1]), variable(v[4]) - variable(v[0]));
+    }
+
+    /**
+     * 圆弧从起点**逆时针**扫到终点的正角度，范围 {@code (0, 2π]}；不是圆弧时返回 0。
+     *
+     * <p>⚠ 一律走 {@link #sweep}：这就是 {@link #addArc} 当初写进去的那条规则，
+     * 渲染 / 采样 / 拾取必须共用它，各写一份就会出现"预览是劣弧、松手是优弧"。
+     */
+    public double arcSweep(final Entity arc) {
+        if (arc.kind() != EntityKind.ARC) {
+            return 0.0;
+        }
+        return sweep(arcStart(arc), arcEnd(arc));
+    }
+
     /**
      * 圆弧上参数 {@code t ∈ [0,1]} 处的点。
      *
@@ -293,17 +373,29 @@ public final class Sketch {
         final int[] v = arc.vars();
         final double cx = variable(v[0]);
         final double cy = variable(v[1]);
-        final double r = Math.abs(variable(v[2]));
-        final double a = variable(v[3]) + sweep(variable(v[3]), variable(v[4])) * t;
+        final double r = arcRadius(arc);
+        final double a0 = arcStart(arc);
+        final double a = a0 + sweep(a0, arcEnd(arc)) * t;
         return new double[] {cx + r * Math.cos(a), cy + r * Math.sin(a)};
     }
 
-    /** 圆弧的两个端点 {@code {起点, 终点}}；不是圆弧则返回 null。 */
+    /**
+     * 圆弧的两个端点 {@code {起点, 终点}}；不是圆弧则返回 null。
+     *
+     * <p>直接给**存起来的那 4 个变量**（端点就是变量 ✓ 不做 cos/sin 往返）：
+     * 往返会引入 1e-16 级别的误差，而轮廓焊接（{@code SketchProfiles.findLoops}）
+     * 和吸附都按坐标相等认连接 —— 没必要在这里抖一下。
+     */
     @Nullable
     public double[][] arcEndpoints(final Entity arc) {
-        final double[] start = arcPoint(arc, 0.0);
-        final double[] end = arcPoint(arc, 1.0);
-        return start == null || end == null ? null : new double[][] {start, end};
+        if (arc.kind() != EntityKind.ARC) {
+            return null;
+        }
+        final int[] v = arc.vars();
+        return new double[][] {
+                {variable(v[2]), variable(v[3])},
+                {variable(v[4]), variable(v[5])},
+        };
     }
 
     /** 矩形 = 4 条线段首尾相接（返回顺序：下、右、上、左）。 */

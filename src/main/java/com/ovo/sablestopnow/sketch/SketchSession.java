@@ -428,8 +428,10 @@ public final class SketchSession {
         return switch (entity.kind()) {
             case LINE -> working.addConstraint(SketchSolver.DISTANCE, value, v[0], v[1], v[2], v[3]);
             case CIRCLE -> working.addConstraint(SketchSolver.RADIUS, value, v[0], v[1], v[2]);
-            // 圆弧的"尺寸"就是半径：前三个变量与圆一致，所以复用同一种 RADIUS 约束
-            case ARC -> working.addConstraint(SketchSolver.RADIUS, value, v[0], v[1], v[2]);
+            // 圆弧没有"半径变量"了（半径 = hypot(起点 − 圆心) ✓ 见 Sketch.EntityKind.ARC ✓）
+            // ⇒ 用求解器按 6 个操作数定义的 ARC_RADIUS（kind 19 ✓）✓
+            case ARC -> working.addConstraint(SketchSolver.ARC_RADIUS, value,
+                    v[0], v[1], v[2], v[3], v[4], v[5]);
             case POINT -> null;
         };
     }
@@ -468,7 +470,8 @@ public final class SketchSession {
      *
      * <ul>
      *   <li>直线 → 它两个端点之间的 {@code DISTANCE}（**恰好等于它的长度**，不是近似）</li>
-     *   <li>圆 / 弧 → {@code RADIUS}</li>
+     *   <li>圆 → {@code RADIUS}（kind 8，半径是个变量）；弧 → {@code ARC_RADIUS}
+     *       （kind 19，半径由圆心+起点算出来，没有半径变量）</li>
      *   <li>点 → 返回 false（点没有"尺寸"，它的位置由别的尺寸决定）</li>
      * </ul>
      *
@@ -491,11 +494,21 @@ public final class SketchSession {
                         v[0], v[1], v[2], v[3]);
                 return true;
             }
-            case CIRCLE, ARC -> {
+            case CIRCLE -> {
                 if (v.length < 3) {
                     return false;
                 }
                 working.addConstraint(SketchSolver.RADIUS, Math.abs(value), v[0], v[1], v[2]);
+                return true;
+            }
+            case ARC -> {
+                // 弧的"尺寸"仍然是半径 ✓ 但约束种类不同：弧没有半径变量 ✓
+                // ⇒ ARC_RADIUS（kind 19 ✓ 操作数 = 圆心 xy + 起点 xy + 终点 xy ✓）
+                if (v.length < 6) {
+                    return false;
+                }
+                working.addConstraint(SketchSolver.ARC_RADIUS, Math.abs(value),
+                        v[0], v[1], v[2], v[3], v[4], v[5]);
                 return true;
             }
             default -> {
@@ -753,9 +766,10 @@ public final class SketchSession {
      * 所以这里**一律新建变量**：镜像的结果是一份**独立的**副本。
      *
      * <h2>圆弧要特别处理</h2>
-     * 反射会**反转朝向**：原来的起点角 a0、终点角 a1 镜像后，终点会跑到起点前面去。
-     * 所以新圆弧是 {@code (2θ−a1, 2θ−a0)}——**两个角都要换**，只换一个的话
-     * 圆弧会变成"补弧"（画出去的那一段正好是反的）。
+     * 反射会**反转朝向**：原来的起点、终点镜像之后，从新起点逆时针走到新终点的那一段
+     * 正好是**补弧**。所以新圆弧的起点取**原终点**的镜像、终点取**原起点**的镜像
+     * （交叉换）——只换一个的话圆弧会画成反的那一段。
+     * 端点是独立变量（{@code sx sy ex ey}）⇒ 直接反射两个端点即可，不必再绕角度算。
      *
      * @param axisEntity 作为镜像轴的图元（必须是一条**直线**）；null 或不是直线时返回 0
      * @return 新建的图元数
@@ -777,8 +791,6 @@ public final class SketchSession {
         if (len2 < 1.0e-18) {
             return 0; // 轴退化成一点
         }
-        // 轴的方向角：镜像角度的基准
-        final double theta = Math.atan2(dy, dx);
         final java.util.List<Sketch.Entity> toMirror = new java.util.ArrayList<>(selection);
         int created = 0;
         for (final Sketch.Entity e : toMirror) {
@@ -810,13 +822,13 @@ public final class SketchSession {
                     final int[] v = e.vars();
                     final double[] c = reflect(working.variable(v[0]), working.variable(v[1]),
                             ax, ay, dx, dy, len2);
-                    final double r = Math.abs(working.variable(v[2]));
-                    final double a0 = working.variable(v[3]);
-                    final double a1 = working.variable(v[4]);
-                    // 角度关于轴的方向角做反射：a' = 2θ − a
-                    final double na0 = 2.0 * theta - a1;
-                    final double na1 = 2.0 * theta - a0;
-                    working.addArc(c[0], c[1], r, na0, na1);
+                    // 交叉换：新起点 ← 原**终点**的镜像，新终点 ← 原**起点**的镜像
+                    // （反射反转朝向，不换的话画出来的是补弧）
+                    final double[] ns = reflect(working.variable(v[4]), working.variable(v[5]),
+                            ax, ay, dx, dy, len2);
+                    final double[] ne = reflect(working.variable(v[2]), working.variable(v[3]),
+                            ax, ay, dx, dy, len2);
+                    working.addArcPoints(c[0], c[1], ns[0], ns[1], ne[0], ne[1]);
                     markConstructionIfDrawing(); // ★ 直接绘制辅助线 ✓（用户要求 ✓）
                     created++;
                 }
@@ -906,7 +918,7 @@ public final class SketchSession {
 
     /** 关键点的种类。吸附提示要靠它告诉玩家"吸到了什么"。 */
     public enum KeyKind {
-        /** 线段端点、独立点。 */
+        /** 线段端点、圆弧端点、独立点。 */
         ENDPOINT("model.sketch.snap.endpoint"),
         /** 线段中点。 */
         MIDPOINT("model.sketch.snap.midpoint"),
@@ -1020,19 +1032,19 @@ public final class SketchSession {
                         bestDistance = dc;
                         best = new KeyPoint(cx, cy, KeyKind.CENTER, entity, e[0], e[1]);
                     }
-                    // 两个端点：**没有自己的变量**（由圆心/半径/两个角推出来），
-                    // 所以 px/py 记 -1 → 只吸附位置、不产生约束
-                    // （constrainToSnap 里有 px() >= 0 的守卫，不会写出带 -1 的坏约束）。
-                    // ⚠ 这一点很重要：弧端点吸上之后，落笔坐标与弧端点**精确相等**，
-                    // findLoops 按坐标容差焊接就能认出连接 —— 这是"弧+直线围成封闭形状"能成立的前提。
-                    // 代价是它**不是硬约束**：之后别的求解可能把它们分开。
+                    // 两个端点：**也是独立变量** ✓（sx sy ex ey ✓ 见 Sketch.EntityKind.ARC ✓）
+                    // ⇒ 吸附之后能落成**真正的** COINCIDENT（constrainToSnap 的 px() >= 0 分支 ✓），
+                    // "吸附即约束"从此对弧端点同样成立 —— 以前端点是从属量（由圆心/半径/两个角推出），
+                    // 没有可挂的变量，只能吸位置不产生约束（用户实测报过"吸附即约束没生效"✓）。
                     final double[][] ends = working.arcEndpoints(entity);
+                    final int[][] endVars = {{e[2], e[3]}, {e[4], e[5]}};
                     if (ends != null) {
-                        for (final double[] p : ends) {
-                            final double d = Math.hypot(u - p[0], v - p[1]);
+                        for (int i = 0; i < ends.length; i++) {
+                            final double d = Math.hypot(u - ends[i][0], v - ends[i][1]);
                             if (d <= bestDistance) {
                                 bestDistance = d;
-                                best = new KeyPoint(p[0], p[1], KeyKind.ENDPOINT, entity, -1, -1);
+                                best = new KeyPoint(ends[i][0], ends[i][1], KeyKind.ENDPOINT,
+                                        entity, endVars[i][0], endVars[i][1]);
                             }
                         }
                     }

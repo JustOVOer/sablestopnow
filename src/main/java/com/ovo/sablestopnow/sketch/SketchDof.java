@@ -88,7 +88,8 @@ public final class SketchDof {
             case SketchSolver.COINCIDENT, SketchSolver.MIDPOINT -> 2;
             // 认不出的种类不产生残差行（等于没约束，见类注释的方向说明）
             case SketchSolver.FIXED, SketchSolver.DISTANCE, SketchSolver.HORIZONTAL,
-                 SketchSolver.VERTICAL, SketchSolver.EQUAL_LEN, SketchSolver.RADIUS -> 1;
+                 SketchSolver.VERTICAL, SketchSolver.EQUAL_LEN, SketchSolver.RADIUS,
+                 SketchSolver.ARC_RADIUS -> 1;
             default -> 0;
         };
     }
@@ -135,6 +136,8 @@ public final class SketchDof {
      *   <li>{@code VERTICAL(...)} → {@code bx−ax}</li>
      *   <li>{@code EQUAL_LEN(8)} → {@code |L1| − |L2|}</li>
      *   <li>{@code RADIUS(cx,cy,r)} → {@code |r| − c}</li>
+     *   <li>{@code ARC_RADIUS(cx,cy,sx,sy,ex,ey)} → {@code hypot(sx−cx, sy−cy) − c}
+     *       （弧半径不是变量 ⇒ 残差要用起点算出来 ✓ 与 {@code Sketch#arcRadius} 同一公式 ✓）</li>
      *   <li>{@code MIDPOINT(px,py,ax,ay,bx,by)} → 两行：{@code px−(ax+bx)/2}、{@code py−(ay+by)/2}</li>
      * </ul>
      */
@@ -158,6 +161,9 @@ public final class SketchDof {
                         Math.hypot(at(x, o, 2) - at(x, o, 0), at(x, o, 3) - at(x, o, 1))
                                 - Math.hypot(at(x, o, 6) - at(x, o, 4), at(x, o, 7) - at(x, o, 5));
                 case SketchSolver.RADIUS -> out[row++] = Math.abs(at(x, o, 2)) - c.value();
+                case SketchSolver.ARC_RADIUS -> out[row++] =
+                        Math.hypot(at(x, o, 2) - at(x, o, 0), at(x, o, 3) - at(x, o, 1))
+                                - c.value();
                 case SketchSolver.MIDPOINT -> {
                     out[row++] = at(x, o, 0) - (at(x, o, 2) + at(x, o, 4)) * 0.5;
                     out[row++] = at(x, o, 1) - (at(x, o, 3) + at(x, o, 5)) * 0.5;

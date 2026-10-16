@@ -131,6 +131,13 @@ public final class SketchMeasure {
                 // 标签画在圆心**右边一个半径**处：正好落在圆周上，一眼看出是哪个圆
                 out.add(new Dimension(i, c.kind(), c.value(), r, true, "model.dim.radius",
                         sketch.variable(v[0]) + r + 20.0, sketch.variable(v[1]))); // ★ 尺寸线移到圆外侧 ✓（参考图 3 ✓）
+            } else if (c.kind() == SketchSolver.ARC_RADIUS && c.operands().length >= 6) {
+                // 弧半径（kind 19 ✓ 6 个操作数 ✓）：半径不在变量里 ⇒ 由圆心+起点算 ✓
+                final int[] v = c.operands();
+                final double r = Math.hypot(sketch.variable(v[2]) - sketch.variable(v[0]),
+                        sketch.variable(v[3]) - sketch.variable(v[1]));
+                out.add(new Dimension(i, c.kind(), c.value(), r, true, "model.dim.radius",
+                        sketch.variable(v[0]) + r + 20.0, sketch.variable(v[1])));
             } else if ((c.kind() == SketchSolver.POINT_LINE_DISTANCE
                     || c.kind() == SketchSolver.HPOINT_LINE_DISTANCE
                     || c.kind() == SketchSolver.VPOINT_LINE_DISTANCE
@@ -204,19 +211,25 @@ public final class SketchMeasure {
                     out.add(new Dimension(-1, 0, len, len, false, "model.dim.length",
                             (ax + bx) * 0.5, (ay + by) * 0.5));
                 }
-                case CIRCLE, ARC -> {
+                case CIRCLE -> {
                     if (hasRadiusOn(constraints, v[2])) {
                         continue;
                     }
                     final double cx = sketch.variable(v[0]);
                     final double cy = sketch.variable(v[1]);
                     final double r = Math.abs(sketch.variable(v[2]));
-                    final boolean isCircle = e.kind() == Sketch.EntityKind.CIRCLE;
-                    // 圆按**直径**报（SolidWorks 的圆默认就是直径），弧按半径
-                    out.add(new Dimension(-1, 0,
-                            isCircle ? r * 2.0 : r, isCircle ? r * 2.0 : r, false,
-                            isCircle ? "model.dim.diameter" : "model.dim.radius",
-                            cx + r, cy));
+                    // 圆按**直径**报（SolidWorks 的圆默认就是直径）
+                    out.add(new Dimension(-1, 0, r * 2.0, r * 2.0, false,
+                            "model.dim.diameter", cx + r, cy));
+                }
+                case ARC -> {
+                    // 弧的半径不是变量 ⇒ 判"有没有标过"要看 ARC_RADIUS（kind 19）✓
+                    if (hasArcRadiusOn(constraints, v)) {
+                        continue;
+                    }
+                    final double r = sketch.arcRadius(e);
+                    out.add(new Dimension(-1, 0, r, r, false,
+                            "model.dim.radius", sketch.variable(v[0]) + r, sketch.variable(v[1])));
                 }
                 default -> {
                     // 点没有"尺寸"可言（它由位置约束决定），跳过
@@ -243,12 +256,45 @@ public final class SketchMeasure {
         return false;
     }
 
-    /** 半径变量上是否已经有 RADIUS 约束。 */
+    /** 半径变量上是否已经有 RADIUS 约束（圆）。 */
     private static boolean hasRadiusOn(final java.util.List<Sketch.Constraint> constraints,
                                        final int radiusVar) {
         for (final Sketch.Constraint c : constraints) {
             if (c.kind() == SketchSolver.RADIUS && c.operands().length >= 3
                     && c.operands()[2] == radiusVar) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 这段圆弧上是否已经有 ARC_RADIUS 约束（kind 19）。
+     *
+     * <p>认领依据是**整组 6 个操作数**（圆心 xy + 起点 xy + 终点 xy ✓）：弧没有半径变量可对，
+     * 只比"第一个下标"会把别的弧的尺寸也算进来。图元连续分配变量 ⇒ 整组相等才一定是它 ✓。
+     */
+    private static boolean hasArcRadiusOn(final java.util.List<Sketch.Constraint> constraints,
+                                         final int[] arcVars) {
+        if (arcVars.length < 6) {
+            return false;
+        }
+        for (final Sketch.Constraint c : constraints) {
+            if (c.kind() != SketchSolver.ARC_RADIUS) {
+                continue;
+            }
+            final int[] o = c.operands();
+            if (o.length < 6) {
+                continue;
+            }
+            boolean same = true;
+            for (int i = 0; i < 6; i++) {
+                if (o[i] != arcVars[i]) {
+                    same = false;
+                    break;
+                }
+            }
+            if (same) {
                 return true;
             }
         }
@@ -301,12 +347,18 @@ public final class SketchMeasure {
                 out.add(new ImpliedRelation(SketchSolver.VERTICAL, v, "model.relation.vertical"));
             }
         }
-        // ★ **直线 ↔ 圆/圆弧 的相切** ✓（用户实测反馈："选择直线和圆弧后添加约束时没有相切按键" ✗）
+        // ★ **直线 ↔ 圆 的相切** ✓（用户实测反馈："选择直线和圆后添加约束时没有相切按键" ✗）
         //
         // 判定 ✓：直线到**圆心**的垂距 ≈ 半径 ⇒ 已经相切 ✓ ⇒ 给一个"一键补上相切"的入口 ✓。
         // 约束用 kind 23（LINE_TANGENT_CIRCLE ✓ 操作数 a0x a0y a1x a1y cx cy r = **7 个** ✓
         //   与 SketchSolver.operandCount(23) 及 Rust 侧 operand_count() 一致 ✓）；
         // 它**不吃常量** ✓（Rust 侧 takes_const 不含 23 ✓）⇒ 不会把后面的常量挤错位 ✓。
+        //
+        // ⚠ **圆弧不再参与这条**：弧现在是"圆心 + 起点 + 终点"（6 个变量 ✓ 见 EntityKind.ARC ✓）
+        //   半径不是变量 ⇒ kind 23 要的 {@code r} 操作数**没有可传的东西** ✗
+        //   （Rust 侧 ABI v4 也没有"线 ↔ 弧相切"这一种 ✓ 只有 23 = 线 ↔ 圆 ✓）。
+        //   硬塞一个"最近的坐标"当半径会落成一条**语义完全不同**的假约束 ✗ 比不给还糟 ✗
+        //   ⇒ 弧只做相切判定不给按钮 ✓ 要相切请用圆（或者先给弧加重合/半径约束把几何定住）。
         for (final Sketch.Entity line : sketch.entities()) {
             if (line.kind() != Sketch.EntityKind.LINE) {
                 continue;
@@ -321,8 +373,7 @@ public final class SketchMeasure {
                 continue;
             }
             for (final Sketch.Entity curve : sketch.entities()) {
-                if (curve.kind() != Sketch.EntityKind.CIRCLE
-                        && curve.kind() != Sketch.EntityKind.ARC) {
+                if (curve.kind() != Sketch.EntityKind.CIRCLE) {
                     continue;
                 }
                 final int[] cv = curve.vars();
@@ -331,9 +382,13 @@ public final class SketchMeasure {
                 final double r = Math.abs(sketch.variable(cv[2]));
                 // 点到直线（无限长）的垂距 ✓
                 final double dist = Math.abs((by - ay) * (cx - ax) - (bx - ax) * (cy - ay)) / len;
-                if (Math.abs(dist - r) > TANGENT_TOLERANCE) {
-                    continue;
-                }
+                // ★ 用户要求（实测反馈）：**选中"直线 + 圆/圆弧"就应该有相切按钮** ✓
+                //   原实现只在"**已经**相切"（容差 0.02 内）时才提示 ✗ —— 结果就是
+                //   "目前仍然没有相切约束选项" ✓（他选的那对本来就还没相切 ✓）。
+                //   ⇒ 现在**无条件提供**：按钮点了由求解器把几何真的拉成相切 ✓；
+                //     已经相切的也照样提供（重复点会被下面的去重挡住 ✓ 不会加冗余约束 ✓）。
+                //   ⚠ `TANGENT_TOLERANCE` 保留：将来若要区分"已成立/待建立"可用它 ✓。
+                final boolean alreadyTangent = Math.abs(dist - r) <= TANGENT_TOLERANCE;
                 final int[] vars = {lv[0], lv[1], lv[2], lv[3], cv[0], cv[1], cv[2]};
                 if (hasSameKindAndOperands(constraints, SketchSolver.LINE_TANGENT_CIRCLE, vars)) {
                     continue; // 已经加过 ⇒ 不重复（重复会让求解器报冗余、界面标红 ✗）
@@ -481,8 +536,8 @@ public final class SketchMeasure {
                         Math.abs(sketch.variable(v[2])), true, SketchSolver.RADIUS,
                         new int[] {v[0], v[1], v[2]});
                 case ARC -> new SmartDimension("model.dim.radius",
-                        Math.abs(sketch.variable(v[2])), true, SketchSolver.RADIUS,
-                        new int[] {v[0], v[1], v[2]});
+                        sketch.arcRadius(e), true, SketchSolver.ARC_RADIUS,
+                        new int[] {v[0], v[1], v[2], v[3], v[4], v[5]});
                 case POINT -> null; // 单个点没有尺寸（它的位置由别的尺寸决定）
             };
         }
@@ -678,6 +733,14 @@ public final class SketchMeasure {
             final double rr = Math.abs(sketch.variable(v[2]));
             return new double[] {ccx, ccy - rr, ccx, ccy + rr};
         }
+        if (kind == SketchSolver.ARC_RADIUS && v.length >= 6) {
+            // 弧半径（kind 19 ✓）：半径由圆心+起点算 ✓ 极值点与圆一致 ✓
+            final double ccx = sketch.variable(v[0]);
+            final double ccy = sketch.variable(v[1]);
+            final double rr = Math.hypot(sketch.variable(v[2]) - ccx,
+                    sketch.variable(v[3]) - ccy);
+            return new double[] {ccx, ccy - rr, ccx, ccy + rr};
+        }
         if (kind == SketchSolver.LINES_ANGLE && v.length >= 8) {
             return new double[] {
                     (sketch.variable(v[0]) + sketch.variable(v[2])) * 0.5,
@@ -702,6 +765,14 @@ public final class SketchMeasure {
                 final double ccx = sketch.variable(v[0]);
                 final double ccy = sketch.variable(v[1]);
                 final double rr = Math.abs(sketch.variable(v[2]));
+                return new double[] {ccx, ccy - rr, ccx, ccy + rr};
+            }
+            if (kind == SketchSolver.ARC_RADIUS && v.length >= 6) {
+                // 弧半径（kind 19 ✓ 6 个操作数 ✓）：半径由圆心+起点算 ✓ 极值点与圆一致 ✓
+                final double ccx = sketch.variable(v[0]);
+                final double ccy = sketch.variable(v[1]);
+                final double rr = Math.hypot(sketch.variable(v[2]) - ccx,
+                        sketch.variable(v[3]) - ccy);
                 return new double[] {ccx, ccy - rr, ccx, ccy + rr};
             }
 
@@ -745,6 +816,14 @@ public final class SketchMeasure {
                 return new double[] {sketch.variable(v[0]), sketch.variable(v[1]),
                         sketch.variable(v[0]) + Math.abs(sketch.variable(v[2])),
                         sketch.variable(v[1])};
+            }
+            if (kind == SketchSolver.ARC_RADIUS && v.length >= 6) {
+                // 弧半径 ⇒ 圆心 → 圆上一点（沿 +u ✓ 与圆同一画法 ✓）
+                final double ccx = sketch.variable(v[0]);
+                final double ccy = sketch.variable(v[1]);
+                final double rr = Math.hypot(sketch.variable(v[2]) - ccx,
+                        sketch.variable(v[3]) - ccy);
+                return new double[] {ccx, ccy, ccx + rr, ccy};
             }
         } catch (final RuntimeException ignored) {
             return null; // 变量表与刚体不一致等情况 ⇒ 不画线 ✓
@@ -816,15 +895,20 @@ public final class SketchMeasure {
     /**
      * 圆弧的**参考**尺寸：弧长与弧张角 ✓。
      *
-     * <h2>为什么只能是参考 ✗✓（不是偷懒 ✓ 是建模事实 ✓）</h2>
-     * 我们的 {@link Sketch.EntityKind#ARC} 实体只有 5 个变量：{@code cx cy r a0 a1} ✓
-     * ——**没有**独立的起/终点变量 ✗。
-     * 而 ezpz 的 {@code ArcLength}/{@code ArcAngle}/{@code ArcRadius} 都要求
-     * {@code DatumCircularArc{center, start, end}}（6 个点坐标 ✓）✗
-     * ⇒ 弧长/弧张角**无法**落成可驱动约束 ✗ 只能作为**从动（参考）尺寸**显示 ✓
-     *（SolidWorks 里它们是可驱动的 ✓ —— 这一条是我们与它的已知差距 ✓ 已记录 ✓）。
+     * <h2>为什么现在是参考、但已经不再是"表达不了" ✗✓</h2>
+     * 以前 {@link Sketch.EntityKind#ARC} 只有 5 个变量 {@code cx cy r a0 a1} ✗ ——
+     * **没有**独立的起/终点变量 ✗，而 ezpz 的 {@code ArcLength}/{@code ArcAngle} 要的是
+     * {@code DatumCircularArc{center, start, end}}（6 个坐标 ✓）✗
+     * ⇒ 弧长/弧张角**无法**落成可驱动约束 ✗ 只能当参考尺寸显示 ✓。
      *
-     * <p>返回的 {@link Dimension} 一律 {@code driving=false} ✓ ⇒ UI 用**灰色 + 括号**显示 ✓✓。
+     * <p>⚠ 现在布局已经改成 {@code cx cy sx sy ex ey}（6 个 ✓ 见 {@code Sketch.EntityKind.ARC} ✓）
+     * ⇒ 求解器侧的 {@code ARC_LENGTH}(20) / {@code ARC_ANGLE}(21) 已经**吃得下**这 6 个操作数 ✓
+     * （{@code SketchSolver.operandCount} / Rust 侧 operand_count 都是 6 ✓）。
+     * 但"把它落成真约束"这条路**这次没有接**（要动 Dimension 的驱动路径 + UI 的改值/删除 ✓
+     * 属于另一件事 ✓）⇒ 这里仍然返回 {@code driving=false} ✓
+     * ⇒ UI 继续用**灰色 + 括号**显示 ✓ 不假装能驱动 ✗。
+     *
+     * <p>半径与起止角一律**现算**（{@code arcRadius} / {@code arcStart} / {@code arcEnd} ✓）。
      */
     public static java.util.List<Dimension> arcReferenceDimensions(final Sketch sketch) {
         final java.util.List<Dimension> out = new java.util.ArrayList<>();
@@ -836,15 +920,16 @@ public final class SketchMeasure {
                 continue;
             }
             final int[] v = e.vars();
-            if (v.length < 5) {
+            if (v.length < 6) {
                 continue;
             }
-            final double r = Math.abs(sketch.variable(v[2]));
-            final double sweep = sketch.variable(v[4]) - sketch.variable(v[3]);
+            final double r = sketch.arcRadius(e);
+            final double a0 = sketch.arcStart(e);
+            final double sweep = sketch.arcSweep(e);
             final double arcLen = Math.abs(r * sweep);
             final double arcDeg = Math.abs(Math.toDegrees(sweep));
             // 标签画在圆心与起点方向的中间（不会落在弧外 ✓）
-            final double mid = sketch.variable(v[3]) + sweep * 0.5;
+            final double mid = a0 + sweep * 0.5;
             final double lx = sketch.variable(v[0]) + Math.cos(mid) * r * 0.5;
             final double ly = sketch.variable(v[1]) + Math.sin(mid) * r * 0.5;
             out.add(new Dimension(-1, SketchSolver.ARC_LENGTH, arcLen, arcLen, false,
@@ -938,11 +1023,13 @@ public final class SketchMeasure {
             case SketchSolver.PARALLEL_LINES_DISTANCE ->
                     out.add(new Variant("model.dim.line_line_distance",
                             SketchSolver.PARALLEL_LINES_DISTANCE, v, dim.value()));
-            case SketchSolver.RADIUS -> {
+            case SketchSolver.RADIUS, SketchSolver.ARC_RADIUS -> {
                 // 圆/弧 ⇒ SW 让用户在**半径**与**直径**之间选 ✓
-                // 两者是**同一条约束**（kind 8 ✓ 半径 ✓）⇒ 只是显示值不同 ✓✓
-                out.add(new Variant("model.dim.radius", SketchSolver.RADIUS, v, dim.value()));
-                out.add(new Variant("model.dim.diameter", SketchSolver.RADIUS, v, dim.value() * 2.0));
+                // 两者是**同一条约束**（圆是 kind 8 / 弧是 kind 19 ✓）⇒ 只是显示值不同 ✓✓
+                // ⚠ 种类**原样传回**：弧的半径约束必须仍是 19（6 个操作数 ✓）
+                //   换成 8 会让求解器按"3 个操作数"去读 ⇒ 常量错位 ✗
+                out.add(new Variant("model.dim.radius", dim.solverKind(), v, dim.value()));
+                out.add(new Variant("model.dim.diameter", dim.solverKind(), v, dim.value() * 2.0));
             }
 
             default -> out.add(new Variant(dim.labelKey(), dim.solverKind(), v, dim.value()));
@@ -1146,10 +1233,11 @@ public final class SketchMeasure {
         };
     }
 
-    /** 图元如果有半径，取出它（圆的第三个变量 / 弧的第三个变量）；没有则 null。 */
+    /** 图元如果有半径，取出它（圆的第三个变量 / 弧由圆心+起点算）；没有则 null。 */
     private static Double radiusOf(final Sketch sketch, final Sketch.Entity entity) {
         return switch (entity.kind()) {
-            case CIRCLE, ARC -> Math.abs(sketch.variable(entity.vars()[2]));
+            case CIRCLE -> Math.abs(sketch.variable(entity.vars()[2]));
+            case ARC -> sketch.arcRadius(entity);
             case POINT, LINE -> null;
         };
     }

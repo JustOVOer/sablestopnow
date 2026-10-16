@@ -10,6 +10,7 @@
 //
 // 最后一行固定输出 SKETCH_MODEL_CHECK=OK checks=N failures=0 供脚本 grep。
 
+import com.ovo.sablestopnow.sketch.SketchMeasure;
 import com.ovo.sablestopnow.sketch.Sketch;
 import com.ovo.sablestopnow.sketch.SketchDatumPlanes;
 import com.ovo.sablestopnow.sketch.SketchPlane;
@@ -28,6 +29,37 @@ public final class SketchModelCheck {
     private static int failures;
 
     private SketchModelCheck() {
+    }
+
+    /**
+     * **相切关系只在该相切时才被建议** ✓（用户实测"直线+圆弧没有相切按键"的回归 ✓）。
+     *
+     * <p>反向同样重要 ✗✓：不相切却建议 ⇒ 玩家一键补上一条**不成立**的约束 ⇒ 求解器判不满足 ✓。
+     */
+    private static void tangentSuggestedOnlyWhenTangent() {
+        final SketchPlane plane = SketchPlane.base(SketchPlane.Base.FRONT,
+                new org.joml.Vector3d(0.0, 0.0, 0.0));
+        final Sketch hit = new Sketch(java.util.UUID.randomUUID(),
+                java.util.UUID.randomUUID(), "tangent-yes", plane);
+        hit.addLine(0.0, 0.0, 10.0, 0.0);
+        hit.addCircle(5.0, 3.0, 3.0); // 圆心到直线 3 = 半径 ⇒ 相切 ✓
+        boolean suggested = false;
+        for (final SketchMeasure.ImpliedRelation rel : SketchMeasure.impliedRelations(hit, 1.0)) {
+            if (rel.solverKind() == SketchSolver.LINE_TANGENT_CIRCLE) {
+                suggested = true;
+                check(rel.vars().length == 7, "相切约束应有 7 个操作数（a0x a0y a1x a1y cx cy r）");
+            }
+        }
+        check(suggested, "已经相切的 直线+圆 ⇒ 应当建议相切（一键补上 ✓）");
+
+        final Sketch miss = new Sketch(java.util.UUID.randomUUID(),
+                java.util.UUID.randomUUID(), "tangent-no", plane);
+        miss.addLine(0.0, 0.0, 10.0, 0.0);
+        miss.addCircle(5.0, 6.0, 2.0); // 明显不相切 ✓
+        for (final SketchMeasure.ImpliedRelation rel : SketchMeasure.impliedRelations(miss, 1.0)) {
+            check(rel.solverKind() != SketchSolver.LINE_TANGENT_CIRCLE,
+                    "不相切的 直线+圆 ⇒ 不该建议相切（补上会求解失败 ✗）");
+        }
     }
 
     private static void check(final boolean condition, final String label) {
@@ -404,6 +436,10 @@ public final class SketchModelCheck {
                     "operandCount(" + kind + ") 必须与 Rust 侧 operand_count 一致（期望 "
                             + operandCounts[kind - 1] + "，实际 " + SketchSolver.operandCount(kind) + "）");
         }
+        // ★ 相切关系（用户要求"直线+圆弧要能一键补相切"）的离线回归 ✓
+        //   ⚠ 这个文件在**默认包**里 ⇒ 用别的包的类必须 import（SketchMeasure 之前漏了 import，
+        //     表现是"找不到符号 SketchMeasure"，而文件其实**一直在**编译清单里 ⇒ 白查了两轮 ✓）
+        tangentSuggestedOnlyWhenTangent();
         for (final int kind : new int[] {SketchSolver.FIXED, SketchSolver.COINCIDENT,
                 SketchSolver.DISTANCE, SketchSolver.HORIZONTAL, SketchSolver.VERTICAL,
                 SketchSolver.EQUAL_LEN, SketchSolver.MIDPOINT, SketchSolver.RADIUS}) {

@@ -356,9 +356,21 @@ public final class SketchSession {
         if (stage != Stage.CHOOSING_PLANE || body == null) {
             throw new IllegalStateException("还没选定结构，不能挑基准面");
         }
-        // 原点就取平面自己的原点（基准面是结构包围盒中心，方块面是面中心），
-        // 这样草图的 (0,0) 落在玩家直觉的位置上。
-        final Vector3d origin = new Vector3d(plane.origin());
+        // ★ 原点取平面自己的原点 ✓ —— 但**必须对到方块网格的交点**上 ✗✓
+        //
+        // 原实现直接用 plane.origin()：方块面的原点是**面中心** ✗
+        // ⇒ 相对方块网格在 u、v 两个方向都差 **0.5 格**（用户实测反馈：
+        //    "网格在平面的两个方向上都偏离了 0.5 格" ✓）—— 吸附目标是整数格点 ✓
+        //    于是"画出来的东西"和"看得见的网格"整体错半格 ✓。
+        // 修法 ✓：把原点沿基准面的两个轴各自**移掉小数部分** ✓
+        //    ⇒ 草图的 (0,0) 落在网格交点上 ✓（轴对齐的面 u/v 就是世界轴 ✓ 有效 ✓）。
+        //    ⚠ 只影响**新建**草图 ✓：已保存的草图保留自己的原点 ✓ 不会被搬动 ✓。
+        final Vector3d rawOrigin = new Vector3d(plane.origin());
+        final double ou = rawOrigin.dot(plane.axisU());
+        final double ov = rawOrigin.dot(plane.axisV());
+        final Vector3d origin = rawOrigin
+                .fma(-(ou - Math.round(ou)), plane.axisU(), new Vector3d())
+                .fma(-(ov - Math.round(ov)), plane.axisV(), new Vector3d());
         this.working = new Sketch(UUID.randomUUID(), body, name,
                 new SketchPlane(origin, plane.axisU(), plane.axisV()));
         this.tool = Tool.SELECT;

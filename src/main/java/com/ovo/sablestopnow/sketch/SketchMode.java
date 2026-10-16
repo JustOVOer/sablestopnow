@@ -168,7 +168,11 @@ public final class SketchMode {
             //   ⇒ 若直接用拾取容差（跟相机距离走 ✓ 可能 >0.5 ✓）就会**到处都吸**✗
             //      —— 网格变成磁铁、画不出非整数的尺寸 ✓（我那条第"远离格点不提示"的对偶断言
             //      当场抓到过这个 ✗ ⇒ 现在夹到 1/3 格 ✓ 留出自由带 ✓）
-            final double gridTol = Math.min(pickTolerance, 1.0 / 3.0);
+            // ★ 用户实测反馈："吸附的范围要小一点，不要影响正常操作" ✓
+            //   1/3 格（≈0.33）太贪 ✗：想画非整数尺寸时指针稍微一偏就被拉走 ✓
+            //   收到 **1/6 格（≈0.167）** ✓ —— 仍然好瞄（格点附近有 1/3 格的"甜区"直径）✓
+            //   但明显不再抢走自由摆放 ✓
+            final double gridTol = Math.min(pickTolerance, 1.0 / 6.0);
             final double gu = Math.round(uv.x);
             final double gv = Math.round(uv.y);
             final double du = Math.abs(uv.x - gu);

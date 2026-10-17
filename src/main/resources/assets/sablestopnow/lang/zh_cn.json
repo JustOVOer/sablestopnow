@@ -531,6 +531,7 @@
   "model.dim.line_line_distance": "线线距离",
   "model.relation.add": "补：%1$s",
   "model.dim.title": "尺寸",
+  "model.dim.relations": "可补关系",
   "model.smart.result": "智能尺寸：%1$s = %2$s",
   "model.dim.reference": "%1$s %2$s（未约束）",
   "model.dim.distance": "距离",

@@ -655,6 +655,26 @@ public final class ModelUi {
         openSmart.toggled = session.tool()
                 == com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION;
         body.add(openSmart);
+        // ★★ **几何关系一键补**（相切 / 水平 / 竖直 …）✓✓
+        //   用户实测："选择直线和圆弧后仍然没有相切按钮" ✗
+        //   根因：`relations` 在上面**算出来了却从来没被渲染成按钮** ✗（这条分支是补的 ✓）
+        //   ⇒ 现在把每条可补关系渲染成一键按钮 ✓ 点了真的落约束 + 求解 + 刷新 ✓
+        if (!relations.isEmpty()) {
+            body.add(new Label(Component.translatable("model.dim.relations")).color(0xFF8FA0D8));
+            final com.ovo.sablestopnow.client.gui.lib.Container relRow =
+                    new com.ovo.sablestopnow.client.gui.lib.Container();
+            relRow.layout = Layouts.hboxWrap(0, 4, 2);
+            relRow.prefW = com.ovo.sablestopnow.client.gui.lib.Widget.FILL;
+            relRow.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
+            for (final var rel : relations) {
+                relRow.add(new Button(Component.translatable(rel.labelKey()), () -> {
+                    live.addConstraint(rel.solverKind(), 0.0, rel.vars());
+                    com.ovo.sablestopnow.client.SketchClient.mode().solve();
+                    refreshLeftPanel();
+                }));
+            }
+            body.add(relRow);
+        }
         // ★ **辅助线**开关 ✓（SolidWorks 的 Construction Geometry ✓ 用户要求 ✓）
         //   作用对象 = 当前**选中的图元** ✓（选中一条线再点 ⇒ 它变辅助线/变回实体 ✓）
         //   外观 ✓ 世界渲染画实线 + 我在 SketchHud 叠一层**虚线** ✓（用户确认：辅助线就是虚线 ✓）

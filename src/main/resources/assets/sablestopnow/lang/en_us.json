@@ -528,6 +528,7 @@
   "model.dim.line_line_distance": "线线距离",
   "model.relation.add": "Add: %1$s",
   "model.dim.title": "Dimensions",
+  "model.dim.relations": "Relations",
   "model.smart.result": "Smart dimension: %1$s = %2$s",
   "model.dim.reference": "%1$s %2$s (reference)",
   "model.dim.distance": "Distance",

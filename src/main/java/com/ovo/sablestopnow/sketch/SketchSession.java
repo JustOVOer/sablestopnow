@@ -1017,7 +1017,10 @@ public final class SketchSession {
                 case CIRCLE -> {
                     final KeyPoint kp = new KeyPoint(working.variable(e[0]), working.variable(e[1]),
                             KeyKind.CENTER, entity, e[0], e[1]);
-                    final double d = Math.hypot(u - kp.u(), v - kp.v());
+                    // ★ 用户要求：**圆心/端点这类"图元上的点"吸附时应当优先** ✓
+                    //   做法：距离打个 0.8 折扣 ⇒ 与"线/弧上的普通位置"打平时点会赢 ✓
+                    //   （与 `pickEntity` 里"点优先"的处理是同一思路 ✓）
+                    final double d = Math.hypot(u - kp.u(), v - kp.v()) * 0.8;
                     if (d <= bestDistance) {
                         bestDistance = d;
                         best = kp;
@@ -1027,7 +1030,8 @@ public final class SketchSession {
                     // 圆心：有自己的变量 → 能加真正的 COINCIDENT（"同心"就是这么表达的）
                     final double cx = working.variable(e[0]);
                     final double cy = working.variable(e[1]);
-                    final double dc = Math.hypot(u - cx, v - cy);
+                    // 圆心同样**优先** ✓（0.8 折扣 ✓ 与圆的圆心一致 ✓）
+                    final double dc = Math.hypot(u - cx, v - cy) * 0.8;
                     if (dc <= bestDistance) {
                         bestDistance = dc;
                         best = new KeyPoint(cx, cy, KeyKind.CENTER, entity, e[0], e[1]);

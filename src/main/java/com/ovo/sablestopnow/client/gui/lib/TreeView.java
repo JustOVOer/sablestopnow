@@ -414,11 +414,14 @@ public class TreeView extends Container {
                 final int cx = x + w / 2;
                 final int cy = y + h / 2;
                 final int color = ctx.theme.textDim;
+                // ★ 用户要求：展开用 "V"、收起用 ">" ✓（原来是画三角形点 ✗ —— 看不清方向 ✓）
+                //   统一用字符更直白 ✓ 也更容易和别处图例保持一致 ✓
                 if (RowWidget.this.item.open.value() > 0.5) {
-                    UiDraw.triangle(g, cx - 3, cy - 2, 6, 5, true, color);
+                    UiDraw.text(g, net.minecraft.client.Minecraft.getInstance().font, "V",
+                            cx - 3, cy - 4, color, 1.0f, false);
                 } else {
-                    UiDraw.triangle(g, cx - 2, cy - 3, 5, 6, false, color);
-                    UiDraw.triangle(g, cx - 2, cy + 3, 5, 6, true, color);
+                    UiDraw.text(g, net.minecraft.client.Minecraft.getInstance().font, ">",
+                            cx - 3, cy - 4, color, 1.0f, false);
                 }
             }
         }

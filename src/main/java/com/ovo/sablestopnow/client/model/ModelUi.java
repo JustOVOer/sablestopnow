@@ -746,11 +746,14 @@ public final class ModelUi {
         for (final var d : existing) {
             // 实测 ≠ 常数 → 求解器还没算平，用警示色并同时给出两个数
             final boolean off = Math.abs(d.measured() - d.value()) > 1.0e-4;
+            // ★ 用户要求：约束/尺寸**要编号** ✓（"左侧约束和尺寸建议…并进行编号" ✓）
+            //   编号用**约束下标 +1**（与画布上双击改值的对象一致 ✓ 稳定不随排序跳 ✓）
+            final String num = "#" + (d.constraintIndex() + 1) + " ";
             final String text = off
-                    ? String.format(java.util.Locale.ROOT, "%s %.3f  (实测 %.3f)",
+                    ? String.format(java.util.Locale.ROOT, "%s%s %.3f  (实测 %.3f)", num,
                             Component.translatable(d.labelKey()).getString(), d.value(),
                             d.measured())
-                    : String.format(java.util.Locale.ROOT, "%s %.3f",
+                    : String.format(java.util.Locale.ROOT, "%s%s %.3f", num,
                             Component.translatable(d.labelKey()).getString(), d.value());
             body.add(new Label(Component.literal(text))
                     .color(off ? 0xFFFF8A5C : 0xFFE6E6E6));

@@ -384,6 +384,47 @@ public final class SketchClient {
             //     点**图元** ⇒ 加入选择（最多两个 ✓）  点**空白** ⇒ 用当前选择**放置** ✓
             //   为什么必须这样 ✗✓：若"点第二个图元"就直接放置 ⇒ 永远选不中第二个 ✗
             //     ⇒ 两图元尺寸（线线距离 / 两线夹角 ✓ 需求 (3) ✓）走不通 ✗
+            // ★ 用户要求：**智能尺寸要能吃到"圆心/端点"这类图元上的点** ✓✓
+            //   用户实测："先选择线段，再点击圆心，此时理应设置圆心到线段距离，然而设置的是线段长度" ✗
+            //   原因 ✓：点击只认**图元**，圆心不是图元 ⇒ "点空白"被当成"放置"，于是把选择里的线标了长度 ✗。
+            //   做法 ✓：命中图元之前先看**当前吸附点**（悬停时已经算好 ⇒ 复用 ✓ 不新增 API ✓）
+            //     —— 选中的是一条线、且吸附到圆心/端点 ⇒ 直接落"点到直线的距离" ✓
+            //     （值取**当前实测** ⇒ 落下去是零改动 ✓ 玩家随后双击改值 ✓）
+            final var snapKp = MODE.snapAt();
+            if (hit == null && picked.size() == 1 && work != null && snapKp != null
+                    && (snapKp.kind() == com.ovo.sablestopnow.sketch.SketchSession.KeyKind.CENTER
+                            || snapKp.kind() == com.ovo.sablestopnow.sketch.SketchSession.KeyKind.ENDPOINT)
+                    && snapKp.px() >= 0 && snapKp.py() >= 0
+                    && picked.get(0).kind() == com.ovo.sablestopnow.sketch.Sketch.EntityKind.LINE) {
+                final int[] lv = picked.get(0).vars();
+                final double axp = work.variable(lv[0]);
+                final double ayp = work.variable(lv[1]);
+                final double bxp = work.variable(lv[2]);
+                final double byp = work.variable(lv[3]);
+                final double lenp = Math.hypot(bxp - axp, byp - ayp);
+                if (lenp > 1.0e-9) {
+                    final double pxp = work.variable(snapKp.px());
+                    final double pyp = work.variable(snapKp.py());
+                    final double distp = Math.abs((byp - ayp) * (pxp - axp)
+                            - (bxp - axp) * (pyp - ayp)) / lenp;
+                    final int[] pvars = {snapKp.px(), snapKp.py(), lv[0], lv[1], lv[2], lv[3]};
+                    final boolean pOk = session.dimensionWith(
+                            com.ovo.sablestopnow.sketch.SketchSolver.POINT_LINE_DISTANCE, distp, pvars);
+                    com.ovo.sablestopnow.client.model.ModelMode.prompt(pOk
+                            ? "model.measure.added" : "model.measure.not_lockable");
+                    if (pOk) {
+                        session.clearSelection();
+                        MODE.solve();
+                        final int pci = session.dimensionIndexOf(
+                                com.ovo.sablestopnow.sketch.SketchSolver.POINT_LINE_DISTANCE, pvars);
+                        if (pci >= 0) {
+                            com.ovo.sablestopnow.client.SketchHud.openEdit(
+                                    pci, "model.dim.distance", distp);
+                        }
+                    }
+                    return true;
+                }
+            }
             if (hit != null) {
                 if (picked.size() >= 2) {
                     session.clearSelection(); // 已选两个还想选 ⇒ 从这一个重新开始 ✓ 不至于卡住 ✓

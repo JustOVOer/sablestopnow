@@ -635,7 +635,39 @@ public final class ModelUi {
     private static void buildDimensionPanel(final com.ovo.sablestopnow.client.gui.lib.Container body,
                                            final com.ovo.sablestopnow.sketch.SketchSession session,
                                            final com.ovo.sablestopnow.sketch.Sketch live) {
-        final var existing = com.ovo.sablestopnow.sketch.SketchMeasure.existingDimensions(live);
+        // ★ 用户要求：**左栏只显示选中图元的约束/尺寸** ✓（"左侧约束和尺寸建议只显示选中的图元的"）
+        //   做法：把"选中图元用到的变量下标"收集起来，只保留**引用了其中任一变量**的尺寸 ✓
+        //   （没有选中任何图元时照旧全部显示 ✓ 不然空草图会看起来"什么都没标"✗）
+        final var existingAll = com.ovo.sablestopnow.sketch.SketchMeasure.existingDimensions(live);
+        final java.util.Set<Integer> pickedVars = new java.util.HashSet<>();
+        final var pickedEntities = session.selection();
+        for (final var pe : pickedEntities) {
+            for (final int pv : pe.vars()) {
+                pickedVars.add(pv);
+            }
+        }
+        final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.Dimension> existing;
+        if (pickedVars.isEmpty()) {
+            existing = existingAll;
+        } else {
+            final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.Dimension> filtered =
+                    new java.util.ArrayList<>();
+            for (final var dd : existingAll) {
+                boolean hit = false;
+                final int ci = dd.constraintIndex();
+                if (ci >= 0 && ci < live.constraints().size()) {
+                    for (final int ov : live.constraints().get(ci).operands()) {
+                        if (pickedVars.contains(ov)) {
+                            hit = true;
+                        }
+                    }
+                }
+                if (hit) {
+                    filtered.add(dd);
+                }
+            }
+            existing = filtered;
+        }
         final var refs = com.ovo.sablestopnow.sketch.SketchMeasure.referenceDimensions(live);
         final var relations = com.ovo.sablestopnow.sketch.SketchMeasure.impliedRelations(live, 1.0);
         // ★ **不要**因为"现在还没有任何尺寸"就整块不建 ✗✓（用户实测反馈：

@@ -385,7 +385,8 @@ public final class SketchHud {
                     && d.constraintIndex() < working.constraints().size()) {
                 final int[] av = working.constraints().get(d.constraintIndex()).operands();
                 final int angArgb = d.driving() ? 0xFFE6E6E6 : 0xFF8C93A8;
-                drawAngularDimension(g, working, sub, mc, tmp, av, screen, angArgb, d);
+                drawAngularDimension(g, working, sub, mc, tmp, av, screen, angArgb,
+                        d.value(), d.constraintIndex(), d.driving());
                 continue; // 不再走下面那套线性画法 ✓
             }
             // ---- 尺寸线（SolidWorks 的画法：线**穿过标签**，两端有界线与箭头 ✓）----
@@ -556,6 +557,18 @@ public final class SketchHud {
                     psub = s;
                 }
             }
+        }
+        // ★ 用户实测："角度尺寸的预览和最终在草图上的显示不一致，预览还是线段尺寸的样式" ✗
+        //   ⇒ 角度预览也走**同一套**角度画法（弧线 + 切向箭头 + 两线自身作界线 ✓）
+        //   标签位置就用指针 ⇒ 弧半径随指针变化 ⇒ **松手落下的就是看到的** ✓
+        if (shown.labelKey() != null && shown.labelKey().contains("angle")
+                && shown.vars() != null && shown.vars().length >= 8 && psub != null) {
+            final org.joml.Vector3d angTmp = new org.joml.Vector3d();
+            drawAngularDimension(g, working, psub, mc, angTmp, shown.vars(),
+                    new double[] {guiX(mc) + OFFSET_X, guiY(mc) + OFFSET_Y},
+                    session.lockedVariant() >= 0 ? 0xEEFFCC55 : 0x99FFCC55,
+                    shown.value(), -1, true);
+            return; // 不再走下面的线性预览 ✓
         }
         final double[] pends = com.ovo.sablestopnow.sketch.SketchMeasure
                 .endpointsOfVars(working, shown.solverKind(), shown.vars());
@@ -811,8 +824,8 @@ public final class SketchHud {
                                              final dev.ryanhcode.sable.sublevel.ClientSubLevel sub,
                                              final Minecraft mc, final org.joml.Vector3d tmp,
                                              final int[] v, final double[] labelScreen,
-                                             final int argb,
-                                             final com.ovo.sablestopnow.sketch.SketchMeasure.Dimension d) {
+                                             final int argb, final double value,
+                                             final int hitIndex, final boolean driving) {
         if (v == null || v.length < 8) {
             return;
         }
@@ -880,14 +893,17 @@ public final class SketchHud {
         //   位置取弧的中间方向、比弧再外一点 ✓ 与 SolidWorks 一致 ✓
         final double midA = a1 + sweep * 0.5;
         final String angText = Component.translatable("model.dim.angle").getString()
-                + String.format(java.util.Locale.ROOT, " %.2f°", d.value());
+                + String.format(java.util.Locale.ROOT, " %.2f°", value);
         final double angTx = ox + Math.cos(midA) * (r + 12.0);
         final double angTy = oy + Math.sin(midA) * (r + 12.0);
         com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, Minecraft.getInstance().font, angText,
                 (int) angTx, (int) angTy, argb, 1.0f, true);
         // ★ 登记"可双击改值"的命中区 ✓（与线性尺寸同一套：**画与命中共用同一个位置** ✓
         //   否则会出现"看到的位置点不中" ✗ —— 这类问题用户实测反馈过 ✓）
-        LABEL_HITS.add(new LabelHit(d.constraintIndex(), d.driving(), angTx, angTy));
+        // 预览（hitIndex < 0）不登记命中区 ✓ —— 预览还没落约束，点了也没有对象可改 ✓
+        if (hitIndex >= 0) {
+            LABEL_HITS.add(new LabelHit(hitIndex, driving, angTx, angTy));
+        }
         // 箭头：沿**切向**（弧两端各一个 ✓ 不是线性尺寸那种 V 形 ✓）
         final double dir = sweep >= 0.0 ? 1.0 : -1.0;
         for (final double aEnd : new double[] {a1, a2}) {

@@ -572,7 +572,12 @@ public final class SketchMeasure {
             final double lenB = Math.hypot(bx, by);
             if (lenA > 1e-9 && lenB > 1e-9) {
                 final double cos = Math.min(1.0, Math.max(-1.0, (ax * bx + ay * by) / (lenA * lenB)));
-                final double degrees = Math.toDegrees(Math.acos(Math.abs(cos)));
+                // ★ 修实测问题"角度设置出来是 (180 − 目标角度)" ✓✓
+                //   原式用了 Math.abs(cos) ✗ ⇒ 永远得到**锐角**（≤90°），
+                //   而求解器的 LINES_ANGLE(kind 22) 是**有向角**（两条线的方向向量夹角，0..180 ✓）
+                //   ⇒ 两个方向相反时两边就差 180° ✓ 用户设 60 得到 120 ✓
+                //   现在去掉绝对值：acos(cos) 就是方向向量的夹角 ✓ 与求解器口径一致 ✓。
+                final double degrees = Math.toDegrees(Math.acos(cos));
                 return new SmartDimension("model.dim.angle", degrees, true,
                         SketchSolver.LINES_ANGLE,
                         new int[] {va[0], va[1], va[2], va[3], vb[0], vb[1], vb[2], vb[3]});

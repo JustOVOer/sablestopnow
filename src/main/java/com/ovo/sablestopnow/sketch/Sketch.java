@@ -576,6 +576,31 @@ public final class Sketch {
     public int[] toOps() {
         final List<Integer> ops = new ArrayList<>();
         for (final Constraint c : constraints) {
+            // ★★ **线线距离在模型层也要自己组合** ✓✓（用户实测："能调、反应正确，但尺寸标红"✗）
+            //
+            // 之前我只把组合写进了 `SketchSolver.Program.parallelLinesDistance(...)`（那是**构造器**路径 ✗），
+            // 而真实草图是把**约束的 kind 原样**写进程序 ⇒ 求解器拿到的仍是 kind 14（上游那条
+            // 会解偏的组合 ✓ 离线复现过：目标 8 解成 0.667 ✗）⇒ 实测值永远对不上设定值 ⇒ 标红 ✓。
+            //
+            // 这里展开成**两条基本约束**：
+            //   ① PARALLEL(l0, l1)（不吃常量 ✓）
+            //   ② POINT_LINE_DISTANCE(l0.p0 → l1)（吃 **1** 个常量 ✓ 与 kind 14 原本的常量个数一致 ✓
+            //      ⇒ `toConsts()` **不需要改** ✓ 两边仍然对齐 ✓）
+            if (c.kind() == SketchSolver.PARALLEL_LINES_DISTANCE && c.operands().length >= 8) {
+                final int[] v = c.operands();
+                ops.add(SketchSolver.PARALLEL);
+                for (final int operand : v) {
+                    ops.add(operand);
+                }
+                ops.add(SketchSolver.POINT_LINE_DISTANCE);
+                ops.add(v[0]);
+                ops.add(v[1]);
+                ops.add(v[4]);
+                ops.add(v[5]);
+                ops.add(v[6]);
+                ops.add(v[7]);
+                continue;
+            }
             ops.add(c.kind());
             for (final int operand : c.operands()) {
                 ops.add(operand);

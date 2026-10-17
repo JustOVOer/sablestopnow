@@ -144,7 +144,11 @@ public final class SketchMeasure {
                     || c.kind() == SketchSolver.PARALLEL_LINES_DISTANCE) && c.operands().length >= 6) {
                 // 点到线 / 线到线：标签画在**垂足与点/线之间**⇒ 一眼看出量的是哪一段（与 SW 一致 ✓）
                 final int[] v = c.operands();
-                final int li = c.kind() == SketchSolver.PARALLEL_LINES_DISTANCE ? 2 : 2;
+                // ★ 修实测"线线距离显示位置不正确" ✓✓
+                //   线线距离的操作数是 **8 个**：线一 0..3、线二 4..7 ✓
+                //   原代码把线段起点下标一律写成 2 ✗ ⇒ 拿"线一的终点 + 线二的起点"当直线 ⇒ 垂足算错 ⇒ 标签乱飘 ✓
+                //   ⇒ 线线距离要用 **4**（线二的起点）✓ 点到线才是 2 ✓
+                final int li = c.kind() == SketchSolver.PARALLEL_LINES_DISTANCE ? 4 : 2;
                 final double px = sketch.variable(v[0]);
                 final double py = sketch.variable(v[1]);
                 final double footX = projectX(sketch, px, py, v[li], v[li + 1], v[li + 2], v[li + 3]);

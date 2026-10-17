@@ -385,7 +385,7 @@ public final class SketchHud {
                     && d.constraintIndex() < working.constraints().size()) {
                 final int[] av = working.constraints().get(d.constraintIndex()).operands();
                 final int angArgb = d.driving() ? 0xFFE6E6E6 : 0xFF8C93A8;
-                drawAngularDimension(g, working, sub, mc, tmp, av, screen, angArgb);
+                drawAngularDimension(g, working, sub, mc, tmp, av, screen, angArgb, d.value());
                 continue; // 不再走下面那套线性画法 ✓
             }
             // ---- 尺寸线（SolidWorks 的画法：线**穿过标签**，两端有界线与箭头 ✓）----
@@ -811,7 +811,7 @@ public final class SketchHud {
                                              final dev.ryanhcode.sable.sublevel.ClientSubLevel sub,
                                              final Minecraft mc, final org.joml.Vector3d tmp,
                                              final int[] v, final double[] labelScreen,
-                                             final int argb) {
+                                             final int argb, final double value) {
         if (v == null || v.length < 8) {
             return;
         }
@@ -874,6 +874,15 @@ public final class SketchHud {
             px = nx;
             py = ny;
         }
+        // ★ 角度**数值文字** ✓（用户实测："箭头对了，但是不显示角度" ✗ ——
+        //   我这条独立画法当时只画了弧和箭头、**忘了画文字** ✓）
+        //   位置取弧的中间方向、比弧再外一点 ✓ 与 SolidWorks 一致 ✓
+        final double midA = a1 + sweep * 0.5;
+        final String angText = Component.translatable("model.dim.angle").getString()
+                + String.format(java.util.Locale.ROOT, " %.2f°", value);
+        com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, Minecraft.getInstance().font, angText,
+                (int) (ox + Math.cos(midA) * (r + 12.0)),
+                (int) (oy + Math.sin(midA) * (r + 12.0)), argb, 1.0f, true);
         // 箭头：沿**切向**（弧两端各一个 ✓ 不是线性尺寸那种 V 形 ✓）
         final double dir = sweep >= 0.0 ? 1.0 : -1.0;
         for (final double aEnd : new double[] {a1, a2}) {

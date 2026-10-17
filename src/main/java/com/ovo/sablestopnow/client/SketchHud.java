@@ -385,7 +385,7 @@ public final class SketchHud {
                     && d.constraintIndex() < working.constraints().size()) {
                 final int[] av = working.constraints().get(d.constraintIndex()).operands();
                 final int angArgb = d.driving() ? 0xFFE6E6E6 : 0xFF8C93A8;
-                drawAngularDimension(g, working, sub, mc, tmp, av, screen, angArgb, d.value());
+                drawAngularDimension(g, working, sub, mc, tmp, av, screen, angArgb, d);
                 continue; // 不再走下面那套线性画法 ✓
             }
             // ---- 尺寸线（SolidWorks 的画法：线**穿过标签**，两端有界线与箭头 ✓）----
@@ -811,7 +811,8 @@ public final class SketchHud {
                                              final dev.ryanhcode.sable.sublevel.ClientSubLevel sub,
                                              final Minecraft mc, final org.joml.Vector3d tmp,
                                              final int[] v, final double[] labelScreen,
-                                             final int argb, final double value) {
+                                             final int argb,
+                                             final com.ovo.sablestopnow.sketch.SketchMeasure.Dimension d) {
         if (v == null || v.length < 8) {
             return;
         }
@@ -879,10 +880,14 @@ public final class SketchHud {
         //   位置取弧的中间方向、比弧再外一点 ✓ 与 SolidWorks 一致 ✓
         final double midA = a1 + sweep * 0.5;
         final String angText = Component.translatable("model.dim.angle").getString()
-                + String.format(java.util.Locale.ROOT, " %.2f°", value);
+                + String.format(java.util.Locale.ROOT, " %.2f°", d.value());
+        final double angTx = ox + Math.cos(midA) * (r + 12.0);
+        final double angTy = oy + Math.sin(midA) * (r + 12.0);
         com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, Minecraft.getInstance().font, angText,
-                (int) (ox + Math.cos(midA) * (r + 12.0)),
-                (int) (oy + Math.sin(midA) * (r + 12.0)), argb, 1.0f, true);
+                (int) angTx, (int) angTy, argb, 1.0f, true);
+        // ★ 登记"可双击改值"的命中区 ✓（与线性尺寸同一套：**画与命中共用同一个位置** ✓
+        //   否则会出现"看到的位置点不中" ✗ —— 这类问题用户实测反馈过 ✓）
+        LABEL_HITS.add(new LabelHit(d.constraintIndex(), d.driving(), angTx, angTy));
         // 箭头：沿**切向**（弧两端各一个 ✓ 不是线性尺寸那种 V 形 ✓）
         final double dir = sweep >= 0.0 ? 1.0 : -1.0;
         for (final double aEnd : new double[] {a1, a2}) {

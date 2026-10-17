@@ -173,7 +173,21 @@ public final class SketchMeasure {
                 final double my0 = (sketch.variable(v[1]) + sketch.variable(v[3])) * 0.5;
                 final double mx1 = (sketch.variable(v[4]) + sketch.variable(v[6])) * 0.5;
                 final double my1 = (sketch.variable(v[5]) + sketch.variable(v[7])) * 0.5;
-                out.add(new Dimension(i, c.kind(), c.value(), c.value(), true, "model.dim.angle",
+                // ★ 实测值必须**真算** ✗✓（原来直接把设定值当实测 ⇒ "标红"变成永远不红/永远红 ✓
+                //   用户实测"线线距离改完反应正确但尺寸标红"就是这个机制的另一面 ✓）
+                final double axv = sketch.variable(v[2]) - sketch.variable(v[0]);
+                final double ayv = sketch.variable(v[3]) - sketch.variable(v[1]);
+                final double bxv = sketch.variable(v[6]) - sketch.variable(v[4]);
+                final double byv = sketch.variable(v[7]) - sketch.variable(v[5]);
+                final double la = Math.hypot(axv, ayv);
+                final double lb = Math.hypot(bxv, byv);
+                double measuredDeg = c.value();
+                if (la > 1.0e-9 && lb > 1.0e-9) {
+                    final double cosv = Math.min(1.0, Math.max(-1.0,
+                            (axv * bxv + ayv * byv) / (la * lb)));
+                    measuredDeg = Math.toDegrees(Math.acos(cosv));
+                }
+                out.add(new Dimension(i, c.kind(), c.value(), measuredDeg, true, "model.dim.angle",
                         (mx0 + mx1) * 0.5, (my0 + my1) * 0.5));
             }
         }

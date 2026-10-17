@@ -56,6 +56,9 @@ import java.util.UUID;
 @EventBusSubscriber(modid = SablestopNow.MOD_ID, value = Dist.CLIENT)
 public final class SketchRenderer {
 
+    /** 圆/圆弧**圆心**的常驻标记色 ✓（与小点区分开 ✓ 见 C-2 用户要求）。 */
+    private static final float[] CENTER_COLOR = {0.50f, 0.70f, 1.00f, 1.00f};
+
     /** 圆的折线段数。草图阶段够用；精确圆弧是拉伸阶段的事。 */
     private static final int CIRCLE_SEGMENTS = 48;
 
@@ -613,9 +616,25 @@ public final class SketchRenderer {
                     line(vc, pose, c.add(0, -t, 0), c.add(0, t, 0), entityColor);
                     lines += 2;
                 }
-                case CIRCLE -> lines += drawCircle(vc, pose, cameraPos, renderPose, sketch, v,
-                        entityColor);
+                case CIRCLE -> {
+                    // ★ 用户要求：**圆心常驻显示** ✓（"圆/圆弧的圆心应当常驻显示，不然不好找" ✓）
+                    //   画法与小点一致（小十字 ✓），但用**另一种颜色**避免和真正的点混淆 ✓
+                    final Vec3 centerC = world(cameraPos, renderPose, sketch,
+                            sketch.variable(v[0]), sketch.variable(v[1]));
+                    final double ct = 0.07;
+                    line(vc, pose, centerC.add(-ct, 0, 0), centerC.add(ct, 0, 0), CENTER_COLOR);
+                    line(vc, pose, centerC.add(0, -ct, 0), centerC.add(0, ct, 0), CENTER_COLOR);
+                    lines += 2;
+                    lines += drawCircle(vc, pose, cameraPos, renderPose, sketch, v, entityColor);
+                }
                 case ARC -> {
+                    // ★ 圆心常驻显示 ✓（同圆 ✓ 用户要求 ✓）
+                    final Vec3 centerA = world(cameraPos, renderPose, sketch,
+                            sketch.variable(v[0]), sketch.variable(v[1]));
+                    final double at = 0.07;
+                    line(vc, pose, centerA.add(-at, 0, 0), centerA.add(at, 0, 0), CENTER_COLOR);
+                    line(vc, pose, centerA.add(0, -at, 0), centerA.add(0, at, 0), CENTER_COLOR);
+                    lines += 2;
                     // 弧用折线近似。段数按扫角缩放：一小段弧给它 48 段纯属浪费。
                     // ⚠ 扫角**现算**（弧存的是圆心 + 起点 + 终点 ✓ 半径/角度不是变量 ✓）
                     final double sweep = sketch.arcSweep(entity);

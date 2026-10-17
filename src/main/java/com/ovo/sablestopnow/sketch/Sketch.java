@@ -357,7 +357,16 @@ public final class Sketch {
         if (arc.kind() != EntityKind.ARC) {
             return 0.0;
         }
-        return sweep(arcStart(arc), arcEnd(arc));
+        // ★ 用户要求：**圆弧只画劣弧** ✓（"圆弧只画劣弧" 实测反馈 ✓）
+        //   `sweep(...)` 返回逆时针正角 (0, 2π] ✗ —— 起点/终点顺序一反过来就是**优弧** ✓
+        //   ⇒ 超过 π 就换成 `ccw − 2π`（负角 = 顺时针走**短的那一段** ✓）。
+        //   渲染 / 采样 / 拾取共用这个函数（类注释里就写着必须共用 ✓）⇒ 三处自动一致 ✓。
+        final double ccw = sweep(arcStart(arc), arcEnd(arc));
+        // ⚠ 例外：起点与终点**几乎重合**时是有意义的"整圈"（ccw ≈ 2π）✓
+        //   —— 离线断言已经在守这条（"起点终点相同的圆弧 ⇒ 扫角约 2π" ✓），
+        //   一刀切换成负角会把它砍成 0 ✗（我第一版就是这样，门禁立刻报红 ✓）。
+        final boolean full = ccw >= 2.0 * Math.PI - 1.0e-9;
+        return (ccw > Math.PI && !full) ? ccw - 2.0 * Math.PI : ccw;
     }
 
     /**

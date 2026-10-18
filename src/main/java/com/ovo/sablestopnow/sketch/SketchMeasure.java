@@ -187,10 +187,10 @@ public final class SketchMeasure {
                 final double lb = Math.hypot(bxv, byv);
                 double measuredDeg = c.value();
                 if (la > 1.0e-9 && lb > 1.0e-9) {
-                    // ★ 与放置时同一口径：**无向角** `acos(dot)`（0…180，恒非负 ✓ 与 SW 一致 ✓）
-                    final double cosv = Math.min(1.0, Math.max(-1.0,
-                            (axv * bxv + ayv * byv) / (la * lb)));
-                    measuredDeg = Math.toDegrees(Math.acos(cosv));
+                    // ★ 与放置时同一口径：**有向角** `atan2(叉积, 点积)` ✓
+                    //   求解器满足的是 |角| = 常量 ⇒ 实测可能是 −θ ⇒ 比较时取绝对值 ✓（见 off 判定）
+                    measuredDeg = Math.toDegrees(Math.atan2(axv * byv - ayv * bxv,
+                            axv * bxv + ayv * byv));
                 }
                 out.add(new Dimension(i, c.kind(), c.value(), measuredDeg, true, "model.dim.angle",
                         (mx0 + mx1) * 0.5, (my0 + my1) * 0.5));
@@ -717,11 +717,15 @@ public final class SketchMeasure {
                         }
                     }
                 }
-                final double na = Math.hypot(dax, day);
-                final double nb = Math.hypot(dbx, dby);
-                final double cosRay = Math.min(1.0, Math.max(-1.0,
-                        (dax * dbx + day * dby) / (na * nb)));
-                final double degrees = Math.toDegrees(Math.acos(cosRay));
+                // ★★ 修实测"预览是锐角、落下变 180−x，还把原来的锐角也翻了" ✓✓
+                //   铁证在 shim：kind 22 = `LinesAtAngle(A, B, AngleKind::Other(Angle::from_degrees(常量)))`
+                //   ⇒ 求解器要的是**有向角**（A 方向 → B 方向，逆时针为正 ✓）
+                //   而我们以前给的是**无向** `acos`（0…180 ✗）⇒ 它会把 60 满足成 120 ✓✓
+                //   ⇒ 这里改用 `atan2(叉积, 点积)`：**有向**、且方向已按"点击侧"翻好 ✓
+                //     （显示与比较都取绝对值 ⇒ 用户永远看到 0…180 的正值 ✓ 与 SolidWorks 一致 ✓）
+                final double crossRay = dax * dby - day * dbx;
+                final double dotRay = dax * dbx + day * dby;
+                final double degrees = Math.toDegrees(Math.atan2(crossRay, dotRay));
                 return new SmartDimension("model.dim.angle", degrees, true,
                         SketchSolver.LINES_ANGLE,
                         new int[] {va[0], va[1], va[2], va[3], vb[0], vb[1], vb[2], vb[3]});

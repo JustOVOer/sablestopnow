@@ -528,7 +528,9 @@ public final class SketchHud {
             final int argb;
             if (!d.driving()) {
                 argb = 0xFF8C93A8;                       // 参考尺寸：灰
-            } else if (Math.abs(d.measured() - d.value()) > 1.0e-4) {
+            } else if (Math.abs(Math.abs(d.measured()) - Math.abs(d.value())) > 1.0e-4) {
+                // ★ 角度是有向角（求解器口径）⇒ 实测可能是 −θ ⇒ **按绝对值比较** ✓
+                //   否则"设 60 显示 60 却标红"这种误报会一直存在 ✓
                 argb = 0xFFFF8A5C;                       // 实测 ≠ 常数：求解器还没算平
             } else {
                 argb = 0xFFE6E6E6;                       // 正常

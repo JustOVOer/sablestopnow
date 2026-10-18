@@ -798,7 +798,8 @@ public final class ModelUi {
         }
         for (final var d : existing) {
             // 实测 ≠ 常数 → 求解器还没算平，用警示色并同时给出两个数
-            final boolean off = Math.abs(d.measured() - d.value()) > 1.0e-4;
+            // ★ 角度存的是**有向角** ⇒ 实测可能为 −θ ⇒ 按**绝对值**比较 ✓（否则会误报标红）
+            final boolean off = Math.abs(Math.abs(d.measured()) - Math.abs(d.value())) > 1.0e-4;
             // ★ 用户要求：约束/尺寸**要编号** ✓（"左侧约束和尺寸建议…并进行编号" ✓）
             //   编号用**约束下标 +1**（与画布上双击改值的对象一致 ✓ 稳定不随排序跳 ✓）
             final String num = "#" + (d.constraintIndex() + 1) + " ";

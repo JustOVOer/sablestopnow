@@ -161,6 +161,24 @@ public final class SketchSession {
         if (working == null) {
             return null;
         }
+        // ★ 需求：**基准点（草图原点）也能被选中** ✓
+        //   原点本身是**虚拟**的（不是图元 ✗）⇒ 点它当然选不到 ✓
+        //   ⇒ 点它时在原点生成（或复用）一个点图元 ✓ 并用两条 FIXED 钉死在 (0,0) ✓
+        if (Math.hypot(u, v) <= tolerance) {
+            for (final Sketch.Entity e : working.entities()) {
+                if (e.kind() == Sketch.EntityKind.POINT) {
+                    final int[] pv0 = e.vars();
+                    if (Math.hypot(working.variable(pv0[0]), working.variable(pv0[1])) < 0.05) {
+                        return e; // 已经有原点处的点 ✓
+                    }
+                }
+            }
+            final Sketch.Entity org = working.addPoint(0.0, 0.0);
+            final int[] opv = org.vars();
+            working.addConstraint(SketchSolver.FIXED, 0.0, opv[0]);
+            working.addConstraint(SketchSolver.FIXED, 0.0, opv[1]);
+            return org;
+        }
         final KeyPoint kp = pickKeyPoint(u, v, tolerance);
         if (kp == null || kp.owner() == null || kp.px() < 0 || kp.py() < 0) {
             return null; // 没有关键点（或关键点不带变量 ⇒ 无法约束）⇒ 交给普通拾取 ✓

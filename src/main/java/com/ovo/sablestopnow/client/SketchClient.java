@@ -589,6 +589,15 @@ public final class SketchClient {
     /** 放弃（不提交）。 */
     public static void cancel() {
         com.ovo.sablestopnow.client.SketchHud.closeEdit(); // ★ 取消草图 ⇒ 关掉改值浮层 ✓（否则输入被挡住 ✓）
+        // ★★ 修实测"草图的尺寸和约束似乎不会保存" ✓✓
+        //   原来 Esc/取消 = `MODE.cancel()` **丢掉整张草图的编辑** ✗
+        //   而保存只在 `finish()` 里发一次 ⇒ 玩家按 Esc 退出时，刚做的尺寸/约束全没了 ✓
+        //   ⇒ 现在**取消也保存**（有内容就存 ✓ 宁可多存也不丢工作 ✓）
+        final var beforeCancel = MODE.session() == null ? null : MODE.session().working();
+        final boolean hasWork = beforeCancel != null && !beforeCancel.constraints().isEmpty();
+        if (hasWork) {
+            com.ovo.sablestopnow.network.SketchNetworking.sendSave(beforeCancel);
+        }
         MODE.cancel();
         com.ovo.sablestopnow.SablestopNow.LOGGER.info(
                 "[sketch] exit: anyOpen={} blocksWorldInput={} active={} stage={} tool={}",

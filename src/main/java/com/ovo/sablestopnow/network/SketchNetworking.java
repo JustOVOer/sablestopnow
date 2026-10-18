@@ -177,7 +177,15 @@ public final class SketchNetworking {
      * <p>编码走 {@link SketchData#writeSketch} —— 与存档同一份实现，见类注释。
      */
     public static void sendSave(final Sketch sketch) {
+        // ★ 诊断 ✓（用户实测："草图的尺寸和约束等等似乎不会保存" ✗）
+        //   这条链是"退出草图 ⇒ sendSave ⇒ 服务端收包 ⇒ 写 SavedData"✓
+        //   ⇒ 在这里打一条**发包前**的日志 ✓ 就能先分清"没发"还是"发了没存"✓
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch-save] send: id={} body={} entities={} constraints={}",
+                sketch.id(), sketch.body(),
+                sketch.entities().size(), sketch.constraints().size());
         VeilPacketManager.server().sendPacket(new SaveSketchPayload(SketchData.writeSketch(sketch)));
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-save] send: packet queued ✓");
     }
 
     /** 客户端请求删除一张草图。 */

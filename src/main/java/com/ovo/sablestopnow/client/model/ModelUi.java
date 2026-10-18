@@ -1068,7 +1068,10 @@ public final class ModelUi {
             // ★ 用户要求：树里点**草图** ⇒ 图形区**高亮该草图** ✓（与"点模型/配合"同一套互斥选择 ✓）
             //   复用渲染器现成的"正在编辑的草图 ⇒ 高亮"通道 ✓（SketchClient 进入编辑时用的也是它 ✓）
             if (item.data instanceof com.ovo.sablestopnow.sketch.Sketch pickedSketch) {
-                com.ovo.sablestopnow.client.SketchRenderer.setEditing(pickedSketch.id());
+                // ★ 用户实测："现在无法从右侧树状图点击进入草图" ✗
+                //   原来这里只做了**高亮**（setEditing ✓）⇒ 看着像"选中了"却不进编辑 ✗
+                //   ⇒ 改成走**真正的入口** `SketchClient.edit(sketch)` ✓（左栏的"编辑"按钮用的就是它 ✓）
+                com.ovo.sablestopnow.client.SketchClient.edit(pickedSketch);
                 refreshLeftPanel();
                 return;
             }

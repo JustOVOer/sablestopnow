@@ -1034,8 +1034,11 @@ public final class SketchHud {
         //   我这条独立画法当时只画了弧和箭头、**忘了画文字** ✓）
         //   位置取弧的中间方向、比弧再外一点 ✓ 与 SolidWorks 一致 ✓
         final double midA = a1 + sweep * 0.5;
+        // ★ 修实测"角度尺寸得到的角度是负数" ✓✓
+        //   约束里存的是**有向角**（−180…180 ✓ 与求解器同口径 ✓ 这正是设定值不再差 180° 的原因 ✓）
+        //   但**显示**不该出现负号 ⇒ 画面与改值框都取绝对值（0…180 ✓ 与 SolidWorks 一致 ✓）
         final String angText = Component.translatable("model.dim.angle").getString()
-                + String.format(java.util.Locale.ROOT, " %.2f°", value);
+                + String.format(java.util.Locale.ROOT, " %.2f°", Math.abs(value));
         final double angTx = ox + Math.cos(midA) * (r + 12.0);
         final double angTy = oy + Math.sin(midA) * (r + 12.0);
         com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, Minecraft.getInstance().font, angText,

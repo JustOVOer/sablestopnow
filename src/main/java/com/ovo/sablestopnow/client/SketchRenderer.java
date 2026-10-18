@@ -638,8 +638,13 @@ public final class SketchRenderer {
                     // 弧用折线近似。段数按扫角缩放：一小段弧给它 48 段纯属浪费。
                     // ⚠ 扫角**现算**（弧存的是圆心 + 起点 + 终点 ✓ 半径/角度不是变量 ✓）
                     final double sweep = sketch.arcSweep(entity);
+                    // ★ 修实测"劣弧仍然没有" ✓✓
+                    //   劣弧规则生效后，扫角可能是**负数**（表示顺时针走短的那段 ✓）
+                    //   但段数用的是 `ceil(sweep / 2π)` ✗ ⇒ 负数被 `max(4, …)` 兜底成 **4 段** ✗
+                    //   ⇒ 画出来的"劣弧"是一条只有 4 段的粗折线，看着不像弧 ✓
+                    //   ⇒ 段数按**绝对值**算 ✓
                     final int segments = Math.max(4,
-                            (int) Math.ceil(CIRCLE_SEGMENTS * sweep / (2.0 * Math.PI)));
+                            (int) Math.ceil(CIRCLE_SEGMENTS * Math.abs(sweep) / (2.0 * Math.PI)));
                     Vec3 prev = null;
                     for (int i = 0; i <= segments; i++) {
                         final double[] p = sketch.arcPoint(entity, (double) i / segments);

@@ -384,7 +384,11 @@ public final class Sketch {
         final double cy = variable(v[1]);
         final double r = arcRadius(arc);
         final double a0 = arcStart(arc);
-        final double a = a0 + sweep(a0, arcEnd(arc)) * t;
+        // ★ 修实测"圆弧仍然未画成劣弧" ✓✓
+        //   这里原本**自己又算了一遍** `sweep(a0, arcEnd)` ✗ ⇒ 绕过了 `arcSweep`
+        //   （我上一轮只改了 `arcSweep` ⇒ 采样/渲染用的还是旧口径 ⇒ 画的仍是优弧 ✗）
+        //   ⇒ 统一走 `arcSweep` ✓（它已经处理"超过 π 取短弧、整圈仍保留 2π"✓）
+        final double a = a0 + arcSweep(arc) * t;
         return new double[] {cx + r * Math.cos(a), cy + r * Math.sin(a)};
     }
 

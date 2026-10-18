@@ -208,6 +208,34 @@ public class Button extends Widget {
         return (float) Math.max(0.0, 1.0 - (sweepClock - SWEEP_SECONDS) / FADE_SECONDS);
     }
 
+    /**
+     * **按按钮文字自动**决定扫光色 ✓（用户要求：确定类 = 草绿、删除/取消类 = 红 ✓）。
+     *
+     * <p>为什么按文字而不是逐个调用点设 ✗✓：第一次我只给"改值浮层"的两个按钮设了颜色 ✗
+     * ⇒ 左栏/其它面板的确定、删除仍然是主题浅蓝 ⇒ 用户看到的就是"配色完全没生效" ✓
+     * 这里按**显示文字**统一判定（中英都认 ✓），所有面板一次生效 ✓。
+     */
+    private int autoSweepColor() {
+        if (sweepColor != 0) {
+            return sweepColor;
+        }
+        final String t = label == null ? "" : label.get().getString();
+        if (t.contains("删除") || t.contains("取消") || t.contains("移除") || t.contains("清空")
+                || t.toLowerCase(java.util.Locale.ROOT).contains("delete")
+                || t.toLowerCase(java.util.Locale.ROOT).contains("cancel")
+                || t.toLowerCase(java.util.Locale.ROOT).contains("remove")) {
+            return 0xFFB03030; // 红 ✓
+        }
+        if (t.contains("确定") || t.contains("应用") || t.contains("保存") || t.contains("添加")
+                || t.contains("完成") || t.toLowerCase(java.util.Locale.ROOT).contains("ok")
+                || t.toLowerCase(java.util.Locale.ROOT).contains("apply")
+                || t.toLowerCase(java.util.Locale.ROOT).contains("save")
+                || t.toLowerCase(java.util.Locale.ROOT).contains("confirm")) {
+            return 0xFF6B8E23; // 草绿 ✓
+        }
+        return 0; // 其它保持主题色 ✓
+    }
+
     /** 正在扫/正在淡出。 */
     public boolean sweeping() {
         return sweepClock >= 0.0;
@@ -290,8 +318,9 @@ public class Button extends Widget {
         final float alpha = sweepAlpha();
         if (progress > 0.0f && alpha > 0.01f) {
             final int swept = Math.round(w * progress);
+            final int sweepArgb = autoSweepColor();
             UiDraw.rect(g, x, y, swept, h,
-                    UiDraw.fade(sweepColor == 0 ? th.sweep : sweepColor, alpha));
+                    UiDraw.fade(sweepArgb == 0 ? th.sweep : sweepArgb, alpha));
             // 前缘一道更亮的细边：扫过的动作才看得出「刷」的方向
             if (progress < 1.0f && swept > 0) {
                 UiVector.line(g, x + swept - 0.5, y + 0.5, x + swept - 0.5, y + h - 0.5,
@@ -299,7 +328,7 @@ public class Button extends Widget {
             }
             // 扫光期间覆盖边框，避免浅蓝底 + 深蓝框显得脏
             UiDraw.rectOutline(g, x, y, w, h,
-                    UiDraw.fade(sweepColor == 0 ? th.sweepEdge : sweepColor, alpha), 1);
+                    UiDraw.fade(sweepArgb == 0 ? th.sweepEdge : sweepArgb, alpha), 1);
         }
 
         final String text = raw();

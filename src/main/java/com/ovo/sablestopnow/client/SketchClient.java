@@ -361,6 +361,18 @@ public final class SketchClient {
         // 之前我是"点击之后阶段仍是 CHOOSING_PLANE 才打"——于是成功的那次反而没有日志，
         // 我因此白白查了好几轮。失败的日志能定位失败，成功的日志才能确认成功。
         final var stageBefore = MODE.stage();
+        // ★ 需求 ⑦：点击落在**草图原点（基准点）**附近 ⇒ 本次落点吸到原点 ✓
+        //   ⚠ 这个锚点（stageBefore）在 click() 里**唯一** ✓ —— 上一版我用
+        //     `final Vector3d localDir = toLocalDir(...)` 当锚点，它在两个方法里都有 ✗
+        //     结果插了两份、清理时又把边界算错 ⇒ 只能回滚重来 ✓ 记住这个坑 ✓。
+        final var skSess0 = MODE.session();
+        if (skSess0 != null
+                && skSess0.stage() == com.ovo.sablestopnow.sketch.SketchSession.Stage.EDITING) {
+            final Vector3d uvAtOrigin = MODE.planePoint(localFrom, localDir);
+            if (uvAtOrigin != null && Math.hypot(uvAtOrigin.x, uvAtOrigin.y) <= 0.12) {
+                skSess0.forceSnapOrigin();
+            }
+        }
         // Ctrl 按下 = 多选增删。读键盘只能在客户端这一层做（SketchMode 不依赖 Minecraft）。
         // ★ 智能尺寸工具：左键 = 在指针处**放置**当前预览到的候选 ✓（SolidWorks 的左键放置 ✓）
         //   必须在这里拦 ✗ —— SketchMode 只管画图元、不知道"工具"这回事 ✓。

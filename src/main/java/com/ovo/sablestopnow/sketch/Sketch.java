@@ -74,13 +74,25 @@ public final class Sketch {
      *
      * <p>不存坐标。要坐标就问 {@link Sketch#variable(int)}。
      */
-    public record Entity(EntityKind kind, int[] vars) {
+    public record Entity(EntityKind kind, int[] vars, boolean cw) {
         public Entity {
             if (vars.length != kind.varCount()) {
                 throw new IllegalArgumentException(kind + " 需要 " + kind.varCount()
                         + " 个变量，给了 " + vars.length);
             }
             vars = vars.clone();
+        }
+
+        /**
+         * 旧构造器（**方向位默认 false**）✓ —— 保留它，所有已有调用点都不用改 ✓。
+         *
+         * <p>{@code cw} 是**圆弧方向位**（需求 ④："鼠标在弦的哪一侧就往哪侧画劣弧" ✓）：
+         * 圆心+起点+终点只能定出两条弧（劣弧/优弧），劣弧**唯一** ✗
+         * ⇒ 想表达"往鼠标那侧鼓"，就必须额外记住**走向** ✓
+         * （{@code false} = 逆时针方向的那条劣弧 ✓ 与历史行为一致 ✓）。
+         */
+        public Entity(final EntityKind kind, final int[] vars) {
+            this(kind, vars, false);
         }
 
         /** 图元某个变量的当前值。 */
@@ -366,7 +378,14 @@ public final class Sketch {
         //   —— 离线断言已经在守这条（"起点终点相同的圆弧 ⇒ 扫角约 2π" ✓），
         //   一刀切换成负角会把它砍成 0 ✗（我第一版就是这样，门禁立刻报红 ✓）。
         final boolean full = ccw >= 2.0 * Math.PI - 1.0e-9;
-        return (ccw > Math.PI && !full) ? ccw - 2.0 * Math.PI : ccw;
+        final double minor = (ccw > Math.PI && !full) ? ccw - 2.0 * Math.PI : ccw;
+        // ★ 需求 ④：**方向位** ✓ —— 鼠标在弦哪一侧，就往哪一侧画劣弧 ✓
+        //   几何上给定 圆心+起点+终点，劣弧只有一条 ✓ 想换到另一侧只能**改走向** ✓
+        //   cw=true ⇒ 取反（顺时针走那条短弧 ✓）；整圈（full）不取反 ✓ 保持 2π ✓
+        if (arc.cw() && !full) {
+            return -minor;
+        }
+        return minor;
     }
 
     /**

@@ -275,6 +275,8 @@ public final class SketchHud {
         com.ovo.sablestopnow.client.model.ModelUi.syncSmartCandidateToggles();
         // ★ 草图 → 树 的高亮同步 ✓（用户要求"草图和右侧树状图联动" ✓ 反方向 ✓）
         com.ovo.sablestopnow.client.model.ModelUi.syncSketchTreeHighlight();
+        // ★ 需求 1：悬停在图元上时，鼠标**右上方**小字显示它的名称+编号（如"直线3"✓）
+        drawHoverName(event.getGuiGraphics(), mc);
         // 辅助线用**虚线**画一遍 ✓（SolidWorks 的构造几何就是虚线 ✓ 创建方式与直线一致 ✓）
         // 不参与轮廓/拉伸 ✓（SketchProfiles ×2 + Extrude ×1 已跳过 ✓）
         drawConstructionOverlay(event.getGuiGraphics(), mc);
@@ -805,6 +807,51 @@ public final class SketchHud {
      * <p>只画"穿过吸附点、沿被吸附的那一轴"的一段 ✓（不是无限长 ✓）——
      * 长度取当前子结构在该轴上的尺寸 ✓ 够用且不会画到世界外面去 ✓。
      */
+    /**
+     * **悬停名称提示** ✓（需求 1："鼠标移到图元上时在右上方小字显示名称" ✓）。
+     *
+     * <p>名称 = 图元种类 + **同类序号**（从 1 开始 ✓ 例如"直线3"、"圆弧1"）✓
+     * 序号按图元在草图里的顺序数同类 ⇒ 与左栏的编号口径一致、稳定不跳 ✓。
+     */
+    private static void drawHoverName(final net.minecraft.client.gui.GuiGraphics g,
+                                      final Minecraft mc) {
+        if (!SketchClient.active() || mc.level == null) {
+            return;
+        }
+        final SketchSession session = SketchClient.mode().session();
+        final var work = session == null ? null : session.working();
+        if (work == null) {
+            return;
+        }
+        final var hovered = session.pickEntity(session.hoverU(), session.hoverV(),
+                SketchClient.mode().pickTolerance());
+        if (hovered == null) {
+            return;
+        }
+        int index = 0;
+        int same = 0;
+        for (final var e : work.entities()) {
+            index++;
+            if (e.kind() == hovered.kind()) {
+                same++;
+            }
+            if (e == hovered) {
+                break;
+            }
+        }
+        final String base = switch (hovered.kind()) {
+            case LINE -> "直线";
+            case CIRCLE -> "圆";
+            case ARC -> "圆弧";
+            case POINT -> "点";
+        };
+        final String label = base + same;
+        final int tx = (int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() + 14;
+        final int ty = (int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() - 20;
+        com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, mc.font, label,
+                tx, ty, 0xFFDDDDDD, 1.0f, true);
+    }
+
     /** 平面 uv → 屏幕 ✓（角度尺寸画法自用 ✓ 与主循环同一条投影链 ✓）。 */
     @Nullable
     private static double[] projectUv(final com.ovo.sablestopnow.sketch.Sketch work,

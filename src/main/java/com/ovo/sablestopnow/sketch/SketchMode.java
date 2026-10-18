@@ -190,6 +190,15 @@ public final class SketchMode {
         // SolidWorks 的手感是"指到哪就亮到哪"，玩家靠高亮确认自己会对齐到哪条线；
         // 只在 SELECT 下高亮的话，画线时完全没有反馈。
         hoveredEntity = session.pickEntity(uv.x, uv.y, pickTolerance);
+        // ★ 用户建议：**将要选到点时，用现有的吸附框提示** ✓
+        //   做法：悬停到的图元是点时，把 snapAt 指向它 ⇒ 渲染器那套
+        //   "关键点小方框 + 名称提示"立刻复用 ✓ 玩家一眼看出"这次选的是点、不是直线" ✓
+        if (hoveredEntity != null && hoveredEntity.kind() == Sketch.EntityKind.POINT) {
+            final int[] pv = hoveredEntity.vars();
+            snapAt = new SketchSession.KeyPoint(
+                    session.working().variable(pv[0]), session.working().variable(pv[1]),
+                    SketchSession.KeyKind.ENDPOINT, hoveredEntity, pv[0], pv[1]);
+        }
         // 预览落点 = 真按下去会用的那个点。**必须和 click() 走同一条路径**：
         // 先吸关键点，再（画直线时）做水平/竖直推理。少了任何一步，
         // 预览都在骗人 —— 玩家看到预览落在端点左边的斜线上，松手却是一条贴着端点的平线。

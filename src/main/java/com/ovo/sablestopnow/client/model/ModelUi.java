@@ -681,7 +681,9 @@ public final class ModelUi {
         }
         final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.ImpliedRelation> relations;
         if (relPickVars.isEmpty()) {
-            relations = com.ovo.sablestopnow.sketch.SketchMeasure.impliedRelations(live, 1.0);
+            // ★ 修实测"可补约束在无选中图元时显示全部，占很多空间" ✗✓
+            //   ⇒ **没选图元就一条都不显示** ✓（要加约束必须先选图元 ✓ 与 SolidWorks 一致 ✓）
+            relations = java.util.List.of();
         } else {
             final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.ImpliedRelation> rf =
                     new java.util.ArrayList<>();

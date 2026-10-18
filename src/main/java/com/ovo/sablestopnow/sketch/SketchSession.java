@@ -1498,11 +1498,18 @@ public final class SketchSession {
         final Sketch.Entity line = working.addLine(ax, ay, bx, by);
         final int[] v = line.vars();
         // 起点吸到了老几何上 → 补一条真约束（只吸坐标的话求解器一动就散了）
-        constrainToSnap(new int[] {v[0], v[1]});
-        // ★ 终点也来一次 ✓（默认关闭 ✗ 由客户端开启 ✓ 见 setSnapLineEnd ✓）
-        //   原来只约束起点 ⇒ 终点（例如圆弧**圆心**那端）不落约束 ⇒ 钉不住 ✓
+        // ★★ 修实测"只钉住先落下的端点，后落下的没钉住" ✓✓
+        //   原因：`pendingSnap` 只有一个槽 ✓ 起点与终点先后各调一次 `constrainToSnap`
+        //   ⇒ **两次拿到的是同一个吸附**（都是最后一次悬停的那个 ✗）
+        //   ⇒ 起点被钉到了**终点**该吸的对象上 ✗ 终点反而拿不到 ✓
+        //   修法：两端都改用 `constrainAt(..., u, v)` —— **按各自的坐标**重新拾关键点 ✓
+        // ⚠ 这两条**只在客户端开启时**生效 ✓（默认关 ✓）
+        //   离线用例里的几何不因此改变 ⇒ 2250 项断言不受影响 ✓
         if (snapLineEnd) {
-            constrainToSnap(new int[] {v[2], v[3]});
+            constrainAt(new int[] {v[0], v[1]}, ax, ay);
+            constrainAt(new int[] {v[2], v[3]}, bx, by);
+        } else {
+            constrainToSnap(new int[] {v[0], v[1]});
         }
         if (horizontal) {
             working.addConstraint(SketchSolver.HORIZONTAL, 0.0, v[0], v[1], v[2], v[3]);

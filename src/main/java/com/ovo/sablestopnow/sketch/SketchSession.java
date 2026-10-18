@@ -1638,6 +1638,13 @@ public final class SketchSession {
         final boolean horizontal = ortho[2] == 1.0;
         final boolean vertical = ortho[2] == 2.0;
 
+        // ★★ 修实测"没有钉住"（日志铁证：re=ENDPOINT 但 +con=0）✓✓
+        //   真因：`constrainAt` 在**线建好之后**才拾关键点 ⇒ 新线自己的端点就在落点上、
+        //   距离 0 ⇒ 拾到的永远是**它自己** ✗ ⇒ 被"自己和自己重合是退化约束"那道保护
+        //   直接 return 掉 ✓ ⇒ 一条约束都落不下来 ✓
+        //   ⇒ 修法：**建线之前**先把两端该吸的关键点拾好 ✓，建完线直接用这两个 ✓
+        final KeyPoint kpStart = pickKeyPoint(ax, ay, 0.15);
+        final KeyPoint kpEnd = pickKeyPoint(bx, by, 0.15);
         final int constraintsBefore = working.constraints().size();
         final Sketch.Entity line = working.addLine(ax, ay, bx, by);
         final int[] v = line.vars();
@@ -1649,10 +1656,17 @@ public final class SketchSession {
         //   修法：两端都改用 `constrainAt(..., u, v)` —— **按各自的坐标**重新拾关键点 ✓
         // ⚠ 这两条**只在客户端开启时**生效 ✓（默认关 ✓）
         //   离线用例里的几何不因此改变 ⇒ 2250 项断言不受影响 ✓
+        // 用**建线前拾好的**关键点落约束 ✓（不再是线自己的端点 ✓）
+        lastLineDiag = lastLineDiag
+                + " kpA=" + (kpStart == null ? "none" : kpStart.kind().name())
+                + " kpB=" + (kpEnd == null ? "none" : kpEnd.kind().name());
         if (snapLineEnd) {
-            constrainAt(new int[] {v[0], v[1]}, ax, ay);
-            constrainAt(new int[] {v[2], v[3]}, bx, by);
+            this.pendingSnap = kpStart;
+            constrainToSnap(new int[] {v[0], v[1]});
+            this.pendingSnap = kpEnd;
+            constrainToSnap(new int[] {v[2], v[3]});
         } else {
+            this.pendingSnap = kpStart;
             constrainToSnap(new int[] {v[0], v[1]});
         }
         // ★ 诊断（实测"所有点都钉不住"✗）：把**这次画线落了几条约束**一并打出来 ✓

@@ -489,9 +489,14 @@ public final class ModelInput {
                 }
                 com.ovo.sablestopnow.client.SketchClient.mode().session().selectConstraint(-1);
             }            // ★ 按在**已有尺寸标签**上 ⇒ 这次按下是"拖标签"✓ 不是"放置新尺寸"✗
+            // ★ 需求 2（用户实测）："让所有尺寸可以拖动改变在草图上的显示位置" ✗
+            //   原来**只在智能尺寸工具下**才允许抓标签 ✗ ⇒ 平时用"选择"模式根本拖不动 ✓
+            //   ⇒ 放开：**选择 / 智能尺寸 两种工具**都能抓标签拖动 ✓
             if (com.ovo.sablestopnow.client.SketchClient.mode().session() != null
-                    && com.ovo.sablestopnow.client.SketchClient.mode().session().tool()
-                            == com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION) {
+                    && (com.ovo.sablestopnow.client.SketchClient.mode().session().tool()
+                            == com.ovo.sablestopnow.sketch.SketchSession.Tool.DIMENSION
+                            || com.ovo.sablestopnow.client.SketchClient.mode().session().tool()
+                            == com.ovo.sablestopnow.sketch.SketchSession.Tool.SELECT)) {
                 final var grab = com.ovo.sablestopnow.client.SketchHud.pickLabel(
                         dimGuiX(mc), dimGuiY(mc), 14.0);
                 if (grab != null && grab.constraintIndex() >= 0 && grab.driving()) {

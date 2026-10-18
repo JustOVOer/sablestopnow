@@ -669,7 +669,33 @@ public final class ModelUi {
             existing = filtered;
         }
         final var refs = com.ovo.sablestopnow.sketch.SketchMeasure.referenceDimensions(live);
-        final var relations = com.ovo.sablestopnow.sketch.SketchMeasure.impliedRelations(live, 1.0);
+        // ★ 需求 3（参考 SolidWorks）：**多选时只列出"和选中图元相关"的可用约束** ✓
+        //   原来把整张草图的建议关系全列出来 ✗（选什么都看到同一堆 ✗）
+        //   ⇒ 先算"选中图元用到的变量"，再只保留**引用了其中任一变量**的关系 ✓
+        //   （与下面尺寸过滤同一套口径 ✓）
+        final java.util.Set<Integer> relPickVars = new java.util.HashSet<>();
+        for (final var rpe : session.selection()) {
+            for (final int rpv : rpe.vars()) {
+                relPickVars.add(rpv);
+            }
+        }
+        final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.ImpliedRelation> relations;
+        if (relPickVars.isEmpty()) {
+            relations = com.ovo.sablestopnow.sketch.SketchMeasure.impliedRelations(live, 1.0);
+        } else {
+            final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.ImpliedRelation> rf =
+                    new java.util.ArrayList<>();
+            for (final var rel0 : com.ovo.sablestopnow.sketch.SketchMeasure
+                    .impliedRelations(live, 1.0)) {
+                for (final int rv0 : rel0.vars()) {
+                    if (relPickVars.contains(rv0)) {
+                        rf.add(rel0);
+                        break;
+                    }
+                }
+            }
+            relations = rf;
+        }
         // ★ **不要**因为"现在还没有任何尺寸"就整块不建 ✗✓（用户实测反馈：
         //   "草图界面不显示智能尺寸按键，只有选择图元后才显示" ✗）
         //   原因就是这里原先直接 return ⇒ 全新草图（无尺寸/无参考/无关系）连**入口按钮**都没有 ✓

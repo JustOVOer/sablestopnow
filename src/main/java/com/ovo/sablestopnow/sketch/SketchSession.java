@@ -1553,6 +1553,19 @@ public final class SketchSession {
      * <p>半径与起始角由**起点**决定，终止角由**终点**决定（终点到圆心的距离被忽略 ——
      * 玩家点终点时只是在"指方向"）。半径为零就什么都造不出来，直接放弃。
      */
+    /**
+     * 让某个点**按坐标**重新拾取关键点并落约束 ✓（修"圆弧圆心不固定"✗）。
+     *
+     * <p>为什么需要它 ✗✓：`constrainToSnap` 用的是 `pendingSnap` —— 那是**悬停当时**的吸附 ✓
+     * 而画弧要点三次 ✓ 到第 3 次时 `pendingSnap` 已经是**终点**的吸附了 ✗
+     * ⇒ 圆心那次调用实际拿到的是终点的吸附 ⇒ 圆心永远落不到"同心"约束 ✓
+     * 这里改成**按该点自己的坐标**重新拾一次 ✓（与悬停同一函数 ✓ 口径一致 ✓）。
+     */
+    private void constrainAt(final int[] pointVars, final double u, final double v) {
+        this.pendingSnap = pickKeyPoint(u, v, 0.15);
+        constrainToSnap(pointVars);
+    }
+
     private void addArcFromThreePoints(final double[] center, final double[] start,
                                        final double[] end) {
         final double r = Math.hypot(start[0] - center[0], start[1] - center[1]);
@@ -1562,9 +1575,10 @@ public final class SketchSession {
         final double a0 = Math.atan2(start[1] - center[1], start[0] - center[0]);
         final double a1 = Math.atan2(end[1] - center[1], end[0] - center[0]);
         final Sketch.Entity arc = working.addArc(center[0], center[1], r, a0, a1);
-        // 圆心吸到了老几何上 → 补一条重合（"同心"就是这么表达的，和圆一样）
+        // ★★ 修实测"圆弧圆心没有钉住" ✓✓ —— 圆心按**自己的坐标**拾关键点并落约束 ✓
+        //   （原来走 constrainToSnap ⇒ 拿到的是第 3 次点击的**终点**吸附 ✗ 圆心永远落不上 ✓）
         final int[] v = arc.vars();
-        constrainToSnap(new int[] {v[0], v[1]});
+        constrainAt(new int[] {v[0], v[1]}, center[0], center[1]);
     }
 
     /**

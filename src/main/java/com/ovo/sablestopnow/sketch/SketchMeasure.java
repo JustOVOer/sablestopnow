@@ -187,10 +187,10 @@ public final class SketchMeasure {
                 final double lb = Math.hypot(bxv, byv);
                 double measuredDeg = c.value();
                 if (la > 1.0e-9 && lb > 1.0e-9) {
-                    // ★ 与放置时同一口径：**有向角**（atan2(叉积, 点积)）✓
-                    //   否则"实测"和"设定"会差 180°，尺寸恒显示为异常 ✓
-                    measuredDeg = Math.toDegrees(Math.atan2(axv * byv - ayv * bxv,
-                            axv * bxv + ayv * byv));
+                    // ★ 与放置时同一口径：**无向角** `acos(dot)`（0…180，恒非负 ✓ 与 SW 一致 ✓）
+                    final double cosv = Math.min(1.0, Math.max(-1.0,
+                            (axv * bxv + ayv * byv) / (la * lb)));
+                    measuredDeg = Math.toDegrees(Math.acos(cosv));
                 }
                 out.add(new Dimension(i, c.kind(), c.value(), measuredDeg, true, "model.dim.angle",
                         (mx0 + mx1) * 0.5, (my0 + my1) * 0.5));
@@ -663,12 +663,12 @@ public final class SketchMeasure {
                 //   而求解器的 LINES_ANGLE(kind 22) 是**有向角**（两条线的方向向量夹角，0..180 ✓）
                 //   ⇒ 两个方向相反时两边就差 180° ✓ 用户设 60 得到 120 ✓
                 //   现在去掉绝对值：acos(cos) 就是方向向量的夹角 ✓ 与求解器口径一致 ✓。
-                // ★ 修实测"**有时**还是 (180 − 角度)" ✓✓
-                //   `acos` 只给**无向角**（0..180 ✓），而求解器的夹角约束是**有向角** ✗
-                //   ⇒ 两条线的方向相反时就差 180° ✓（所以是"有时"✓）
-                //   改用 `atan2(叉积, 点积)` ⇒ 有向角（−180..180 ✓）与求解器同口径 ✓
-                final double cross = ax * by - ay * bx;
-                final double degrees = Math.toDegrees(Math.atan2(cross, ax * bx + ay * by));
+                // ★ 按 SolidWorks 的角度原理 ✓（用户要求"参考 SW"✓）：
+                //   SW 的角度尺寸**永远是正值（0…180°）** ✓ 具体是锐角还是钝角
+                //   **由你把尺寸放在哪一侧决定** ✓ 绝不会显示负数 ✓
+                //   ⇒ 这里用**无向角** `acos(dot)`（0…180 ✓），且**不加 abs**
+                //     （加了 abs 会永远得到锐角 ⇒ 设 60 得 120 ✗ 那是上一版的问题 ✓）
+                final double degrees = Math.toDegrees(Math.acos(cos));
                 return new SmartDimension("model.dim.angle", degrees, true,
                         SketchSolver.LINES_ANGLE,
                         new int[] {va[0], va[1], va[2], va[3], vb[0], vb[1], vb[2], vb[3]});

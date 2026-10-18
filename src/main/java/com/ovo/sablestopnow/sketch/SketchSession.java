@@ -721,6 +721,28 @@ public final class SketchSession {
         if (working == null) {
             return null;
         }
+        // ★★ 修实测"总是选到点所在的直线上""选不到除圆心外的其他点" ✓✓
+        //   原因：所有图元**同一轮**比较距离 ✗ ⇒ 点正好在直线端点/中点时，
+        //   到直线的距离是 0（更近）⇒ 永远输给直线 ✓（即使点已经有 ×0.75 的加成 ✗）
+        //   修法：**点优先** —— 先在容差内找点（含圆心生成的中心点 ✓），有就立刻返回 ✓
+        //   ⇒ 悬停高亮也会因此变成**点**而不是直线 ✓（用户明确要求 ✓）
+        Sketch.Entity pointBest = null;
+        double pointBestDistance = tolerance;
+        for (final Sketch.Entity entity : working.entities()) {
+            if (entity.kind() != Sketch.EntityKind.POINT) {
+                continue;
+            }
+            final int[] pv = entity.vars();
+            final double pd = Math.hypot(u - working.variable(pv[0]), v - working.variable(pv[1]))
+                    * 0.75;
+            if (pd <= pointBestDistance) {
+                pointBestDistance = pd;
+                pointBest = entity;
+            }
+        }
+        if (pointBest != null) {
+            return pointBest; // 点在容差内 ⇒ 点赢 ✓（与 SolidWorks 的优先级一致 ✓）
+        }
         Sketch.Entity best = null;
         double bestDistance = tolerance;
         for (final Sketch.Entity entity : working.entities()) {

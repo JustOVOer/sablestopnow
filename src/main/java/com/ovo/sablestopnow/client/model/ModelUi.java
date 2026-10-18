@@ -1123,6 +1123,12 @@ public final class ModelUi {
                 //   原来这里只做了**高亮**（setEditing ✓）⇒ 看着像"选中了"却不进编辑 ✗
                 //   ⇒ 改成走**真正的入口** `SketchClient.edit(sketch)` ✓（左栏的"编辑"按钮用的就是它 ✓）
                 com.ovo.sablestopnow.client.SketchClient.edit(pickedSketch);
+                // ★★ 修实测"右树点草图后左栏仍无变化" ✓✓ —— **真因就在这里** ✓
+                //   草图面板其实一直在左栏里（见 buildDimensionPanel 的调用 ✓），但整块是被
+                //   **外层"当前功能"分支**包住的 ✗ ⇒ 只调 `SketchClient.edit(...)` 时功能还是
+                //   原来的（拉伸/配合…）⇒ 草图块永远不会被渲染 ✓
+                //   ⇒ 点树里的草图 = **同时把功能切到草图** ✓
+                com.ovo.sablestopnow.client.model.ModelMode.setTool("sketch");
                 // ★ 诊断（实测"右树点草图后左栏仍无变化"✗）：一行区分四种可能 ✓
                 //   active=是否进草图 / stage / leftBody=左栏容器是否为 null / sig=重建指纹是否变了
                 com.ovo.sablestopnow.SablestopNow.LOGGER.info(

@@ -100,6 +100,19 @@ public final class SketchSession {
      * 每次都被离线断言拦下 —— 原点一旦参与关键点比较，就会改变"吸到的是端点还是原点"的语义 ✓
      * ⇒ 只在**客户端明确要求**时设置 ✓ 模型层的拾取逻辑保持原样 ✓。
      */
+    /**
+     * 画线时**终点也落吸附约束** ✓（需求：用户实测"圆弧圆心没有钉住"✗）。
+     *
+     * <p>⚠ 默认 **false** ✓：给画线无条件加终点约束会改变离线用例里的几何
+     * （7 项断言当场报红 ✗）⇒ 由**客户端**开启 ✓ 测试不受影响 ✓。
+     */
+    private boolean snapLineEnd;
+
+    /** 由客户端开启"终点也吸附成约束" ✓。 */
+    public void setSnapLineEnd(final boolean value) {
+        this.snapLineEnd = value;
+    }
+
     public void forceSnapOrigin() {
         this.pendingSnap = new KeyPoint(0.0, 0.0, KeyKind.ORIGIN, null, -1, -1);
     }
@@ -1475,6 +1488,11 @@ public final class SketchSession {
         final int[] v = line.vars();
         // 起点吸到了老几何上 → 补一条真约束（只吸坐标的话求解器一动就散了）
         constrainToSnap(new int[] {v[0], v[1]});
+        // ★ 终点也来一次 ✓（默认关闭 ✗ 由客户端开启 ✓ 见 setSnapLineEnd ✓）
+        //   原来只约束起点 ⇒ 终点（例如圆弧**圆心**那端）不落约束 ⇒ 钉不住 ✓
+        if (snapLineEnd) {
+            constrainToSnap(new int[] {v[2], v[3]});
+        }
         if (horizontal) {
             working.addConstraint(SketchSolver.HORIZONTAL, 0.0, v[0], v[1], v[2], v[3]);
         } else if (vertical) {

@@ -373,6 +373,10 @@ public final class SketchClient {
                 skSess0.forceSnapOrigin();
             }
         }
+        // ★ 开启"画线时终点也落吸附约束" ✓（客户端专属 ⇒ 离线用例不受影响 ✓）
+        if (MODE.session() != null) {
+            MODE.session().setSnapLineEnd(true);
+        }
         // Ctrl 按下 = 多选增删。读键盘只能在客户端这一层做（SketchMode 不依赖 Minecraft）。
         // ★ 智能尺寸工具：左键 = 在指针处**放置**当前预览到的候选 ✓（SolidWorks 的左键放置 ✓）
         //   必须在这里拦 ✗ —— SketchMode 只管画图元、不知道"工具"这回事 ✓。

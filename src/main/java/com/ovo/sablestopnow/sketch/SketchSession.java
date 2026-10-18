@@ -1419,8 +1419,12 @@ public final class SketchSession {
         double bx = b[0];
         double by = b[1];
 
-        if (Math.hypot(bx - ax, by - ay) < 1.0e-9) {
-            return; // 点在同一处，画不出线段
+        // ★ 修实测"有时画出来的直线长度为 0" ✓✓
+        //   原来阈值是 1e-9 ✗ —— 只要两次点击稍微错开一点（比如 0.0001 格）就会**建出一条
+        //   肉眼看着零长**的线 ✓，它没有方向、求和渲染都会出怪事 ✓
+        //   ⇒ 阈值提到 **1e-3（约 1 毫米）**：太短就当"没画" ✓ 玩家再点一次即可 ✓
+        if (Math.hypot(bx - ax, by - ay) < 1.0e-3) {
+            return; // 点在同一处（或几乎同一处），画不出线段
         }
         // 水平/竖直推理吸附：与预览共用 inferOrtho，两边永远一致
         final double[] ortho = inferOrtho(ax, ay, bx, by);

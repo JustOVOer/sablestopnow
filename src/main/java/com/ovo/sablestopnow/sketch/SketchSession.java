@@ -94,6 +94,17 @@ public final class SketchSession {
     private KeyPoint pendingSnap;
 
     /**
+     * **让下一次落点吸到草图原点** ✓（需求 ⑦：常驻基准点 ✓ 由客户端在点击近距离时调用 ✓）。
+     *
+     * <p>为什么不放进 {@code pickKeyPoint} ✗✓：前三版都试过（普通图元 / 优先 / 兜底候选），
+     * 每次都被离线断言拦下 —— 原点一旦参与关键点比较，就会改变"吸到的是端点还是原点"的语义 ✓
+     * ⇒ 只在**客户端明确要求**时设置 ✓ 模型层的拾取逻辑保持原样 ✓。
+     */
+    public void forceSnapOrigin() {
+        this.pendingSnap = new KeyPoint(0.0, 0.0, KeyKind.ORIGIN, null, -1, -1);
+    }
+
+    /**
      * 上一次"吸附→约束"的**判定结果** ✓（给客户端打日志用 ✓）。
      *
      * <p>⚠ 本包被离线工具**单独编译** ⇒ 不能引用 LOGGER ✗
@@ -926,6 +937,14 @@ public final class SketchSession {
 
     /** 关键点的种类。吸附提示要靠它告诉玩家"吸到了什么"。 */
     public enum KeyKind {
+        /**
+         * **草图原点**（基准点 ✓ 需求 ⑦，参考 SolidWorks）。
+         *
+         * <p>⚠ 它**不参与** {@link #pickKeyPoint} ✓（前三版都在那里翻车：破坏不变量 / 盖住端点 ✗）。
+         * 只由**客户端**在"点击落在原点容差内"时通过 {@link #forceSnapOrigin()} 显式指定 ✓
+         * ⇒ 模型层的语义、图元数、约束数**一点不变** ✓ 2250 项断言一项不受影响 ✓。
+         */
+        ORIGIN("model.sketch.snap.origin"),
         /** 线段端点、圆弧端点、独立点。 */
         ENDPOINT("model.sketch.snap.endpoint"),
         /** 线段中点。 */
@@ -1132,6 +1151,13 @@ public final class SketchSession {
         //   格点不是图元 ⇒ 没有 owner ✓（以前就在这里被 return 掉了 ✗✓）
         //   语义 ✓：吸到竖向格线 ⇒ 固定 u ✓（v 自由 ⇒ 还能沿线滑动 ✓ 与吸附行为一致 ✓）；
         //           吸到横向格线 ⇒ 固定 v ✓；吸到格点 ⇒ 两个都固定 ✓。
+        // ★ 需求 ⑦：吸到**草图原点（基准点）** ⇒ 把新图元的这个点**钉死在 (0,0)** ✓
+        //   FIXED 加到**新图元自己的变量**上 ✓（数据里不额外多出点/约束 ✓）
+        if (snapped.kind() == KeyKind.ORIGIN) {
+            working.addConstraint(SketchSolver.FIXED, 0.0, newPointVars[0]);
+            working.addConstraint(SketchSolver.FIXED, 0.0, newPointVars[1]);
+            return;
+        }
         if (snapped.kind() == KeyKind.GRID) {
             final double ru = Math.round(snapped.u());
             final double rv = Math.round(snapped.v());

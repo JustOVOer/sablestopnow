@@ -93,6 +93,14 @@ public final class SketchSession {
     @Nullable
     private KeyPoint pendingSnap;
 
+    /**
+     * 上一次"吸附→约束"的**判定结果** ✓（给客户端打日志用 ✓）。
+     *
+     * <p>⚠ 本包被离线工具**单独编译** ⇒ 不能引用 LOGGER ✗
+     * ⇒ 只把结果存成静态字段 ✓ 由客户端（SketchClient）打日志 ✓。
+     */
+    public static String lastSnapDiag = "none";
+
     public Stage stage() {
         return stage;
     }
@@ -1135,6 +1143,10 @@ public final class SketchSession {
             }
             return;
         }
+        // ★ 诊断（用户实测"圆弧端点固定仍未做"✗）：把判定结果留给客户端打日志 ✓
+        lastSnapDiag = "kind=" + snapped.kind()
+                + " owner=" + (snapped.owner() == null ? "null" : snapped.owner().kind())
+                + " px=" + snapped.px() + " py=" + snapped.py();
         if (snapped.owner() == null) {
             return;
         }

@@ -277,6 +277,13 @@ public final class SketchHud {
         com.ovo.sablestopnow.client.model.ModelUi.syncSketchTreeHighlight();
         // ★ 需求 1：悬停在图元上时，鼠标**右上方**小字显示它的名称+编号（如"直线3"✓）
         drawHoverName(event.getGuiGraphics(), mc);
+        // ★ 诊断 ✓：把"上次吸附→约束的判定"打出来（只在变化时打 ✓ 不刷屏 ✓）
+        //   用户实测"圆弧端点固定仍未做"✗ ⇒ 这行会告诉我们：有没有吸到弧端点、px/py 是不是有效变量 ✓
+        final String snapDiag = SketchSession.lastSnapDiag;
+        if (!snapDiag.equals(lastSnapDiagLogged)) {
+            lastSnapDiagLogged = snapDiag;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-snap] {}", snapDiag);
+        }
         // 辅助线用**虚线**画一遍 ✓（SolidWorks 的构造几何就是虚线 ✓ 创建方式与直线一致 ✓）
         // 不参与轮廓/拉伸 ✓（SketchProfiles ×2 + Extrude ×1 已跳过 ✓）
         drawConstructionOverlay(event.getGuiGraphics(), mc);
@@ -813,6 +820,9 @@ public final class SketchHud {
      * <p>名称 = 图元种类 + **同类序号**（从 1 开始 ✓ 例如"直线3"、"圆弧1"）✓
      * 序号按图元在草图里的顺序数同类 ⇒ 与左栏的编号口径一致、稳定不跳 ✓。
      */
+    /** 上次已打印的吸附诊断 ✓（只在变化时打日志 ✓ 免得刷屏 ✓）。 */
+    private static String lastSnapDiagLogged = "";
+
     private static void drawHoverName(final net.minecraft.client.gui.GuiGraphics g,
                                       final Minecraft mc) {
         if (!SketchClient.active() || mc.level == null) {

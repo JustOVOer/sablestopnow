@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 从 bash 跑门禁的薄包装（真正干活的是 verify-all.ps1 ✓ 不重复实现检查 ✓）
-# 用法： tools/verify.sh            跑全量
-#        tools/verify.sh -Only sketch   只跑一个块
+# 从 bash 跑门禁：经 wscript 隐藏启动 ⇒ **不弹窗、不抢焦点** ✓
 cd "$(dirname "$0")/.." || exit 2
-args=()
-for a in "$@"; do args+=("$a"); done
-if [ "${#args[@]}" -eq 0 ]; then
-  cmd //c "powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify-all.ps1"
+OUT="$TEMP/dsh-verify-out.txt"
+[ -z "$TEMP" ] && OUT="/tmp/dsh-verify-out.txt"
+rm -f "$OUT"
+if [ "${#@}" -gt 0 ]; then
+  cscript //nologo tools/verify-hidden.vbs "$@" >/dev/null 2>&1
 else
-  cmd //c "powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify-all.ps1 ${args[*]}"
+  cscript //nologo tools/verify-hidden.vbs >/dev/null 2>&1
 fi
+cat "$OUT" 2>/dev/null

@@ -1680,6 +1680,16 @@ public final class ModelUi {
     /** 左栏内容的输入：功能、已选元素、已选类型、当前模型、选中的施力点/耦合。 */
     private static String leftPanelSignature() {
         final StringBuilder sb = new StringBuilder(ModelMode.tool());
+        // ★★ 修实测"进草图时左栏无变化" ✓✓
+        //   指纹里**没有草图状态** ✗ ⇒ 进出草图、切换草图、约束数变化都不会重建左栏 ✓
+        //   （左栏内容是按 active()/stage 分支的 ✓ 但指纹不变 ⇒ 分支永远不重跑 ✗）
+        sb.append("#sk:").append(com.ovo.sablestopnow.client.SketchClient.active() ? "1" : "0");
+        final var skSess = com.ovo.sablestopnow.client.SketchClient.mode().session();
+        sb.append('#').append(skSess == null || skSess.working() == null
+                ? "-" : skSess.working().id().toString());
+        sb.append('#').append(skSess == null || skSess.working() == null
+                ? -1 : skSess.working().constraints().size());
+        sb.append('#').append(skSess == null ? "-" : skSess.stage().name());
         sb.append('#').append(ModelMode.selectedModel());
         sb.append('#').append(chosenType == null ? "-" : chosenType.id());
         for (final MateRef ref : ModelMode.picked()) {

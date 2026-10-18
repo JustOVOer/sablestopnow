@@ -310,6 +310,28 @@ public final class Sketch {
     }
 
     /**
+     * 同上，但**带方向位** ✓（需求 ④：鼠标往哪侧拖，劣弧就往哪侧鼓 ✓）。
+     *
+     * <p>{@code cw=true} ⇒ 画"从起点顺时针到终点"的那条短弧 ✓。
+     */
+    public Entity addArcPoints(final double cx, final double cy,
+                              final double sx, final double sy,
+                              final double ex, final double ey,
+                              final boolean cw) {
+        final Entity arc = addEntity(EntityKind.ARC, cx, cy, sx, sy, ex, ey);
+        if (!cw || arc == null) {
+            return arc;
+        }
+        // record 不可变 ⇒ 用同一组变量下标替换成"带方向位"的那条 ✓
+        final Entity marked = new Entity(EntityKind.ARC, arc.vars(), true);
+        final int idx = entities.indexOf(arc);
+        if (idx >= 0) {
+            entities.set(idx, marked);
+        }
+        return marked;
+    }
+
+    /**
      * 从 {@code a0} 逆时针扫到 {@code a1} 的**正角度**，范围 {@code (0, 2π]}。
      *
      * <p>返回 2π 而不是 0：起止角相同在圆弧语义下应当是"整圈"而不是"零度"。

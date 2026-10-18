@@ -1574,7 +1574,20 @@ public final class SketchSession {
         }
         final double a0 = Math.atan2(start[1] - center[1], start[0] - center[0]);
         final double a1 = Math.atan2(end[1] - center[1], end[0] - center[0]);
-        final Sketch.Entity arc = working.addArc(center[0], center[1], r, a0, a1);
+        // ★ 需求 ④："鼠标在**初始线（弦）的哪一侧**就往哪一侧画劣弧" ✓
+        //   我们的画法是 圆心 → 起点 → 终点 ✓ ⇒ 判定就用**扫动的方向**：
+        //   从起点到终点的角度差（规范化到 (−π, π]）为**负** ⇒ 玩家是**顺时针**拖的 ✓
+        //   ⇒ 方向位 cw=true ⇒ 画顺时针那条短弧 ✓ 与他拖的方向一致 ✓
+        double delta = a1 - a0;
+        while (delta > Math.PI) {
+            delta -= 2.0 * Math.PI;
+        }
+        while (delta <= -Math.PI) {
+            delta += 2.0 * Math.PI;
+        }
+        final boolean clockwise = delta < 0.0;
+        final Sketch.Entity arc = working.addArcPoints(center[0], center[1],
+                start[0], start[1], end[0], end[1], clockwise);
         // ★★ 修实测"圆弧圆心没有钉住" ✓✓ —— 圆心按**自己的坐标**拾关键点并落约束 ✓
         //   （原来走 constrainToSnap ⇒ 拿到的是第 3 次点击的**终点**吸附 ✗ 圆心永远落不上 ✓）
         final int[] v = arc.vars();

@@ -140,6 +140,10 @@ public class SketchData extends SavedData {
             final CompoundTag et = new CompoundTag();
             et.putString("kind", e.kind().name());
             et.putIntArray("vars", e.vars());
+            // 需求 ④：圆弧方向位 ✓（只写 true ⇒ 旧存档没有这个键时按 false 读 ✓ 向后兼容 ✓）
+            if (e.cw()) {
+                et.putBoolean("cw", true);
+            }
             entities.add(et);
         }
         entry.put("entities", entities);
@@ -195,7 +199,8 @@ public class SketchData extends SavedData {
                 final CompoundTag et = entityList.getCompound(i);
                 entities.add(new Sketch.Entity(
                         Sketch.EntityKind.valueOf(et.getString("kind")),
-                        et.getIntArray("vars")));
+                        et.getIntArray("vars"),
+                        et.getBoolean("cw"))); // 缺键 ⇒ false ✓ 旧存档照常读 ✓
             }
 
             final List<Sketch.Constraint> constraints = new ArrayList<>();

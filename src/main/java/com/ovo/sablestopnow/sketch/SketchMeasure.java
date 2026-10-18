@@ -462,6 +462,27 @@ public final class SketchMeasure {
                         "model.relation.concentric"));
             }
         }
+        // ★ 需求 ⑥：**线线平行** ✓（用户明确举例 ✓ 求解器 PARALLEL(9) 原生支持 ✓）
+        //   不管当前是不是平行都给出入口 ✓（SolidWorks 也是"选两条线就能点平行" ✓）
+        //   左栏按"全部变量都在选中图元里"过滤 ⇒ 只有同时选中两条线才出现 ✓
+        final java.util.List<Sketch.Entity> parLines = new java.util.ArrayList<>();
+        for (final Sketch.Entity le : sketch.entities()) {
+            if (le.kind() == Sketch.EntityKind.LINE) {
+                parLines.add(le);
+            }
+        }
+        for (int li = 0; li < parLines.size(); li++) {
+            final int[] la = parLines.get(li).vars();
+            for (int lj = li + 1; lj < parLines.size(); lj++) {
+                final int[] lb = parLines.get(lj).vars();
+                final int[] vars = {la[0], la[1], la[2], la[3], lb[0], lb[1], lb[2], lb[3]};
+                if (hasSameKindAndOperands(constraints, SketchSolver.PARALLEL, vars)) {
+                    continue;
+                }
+                out.add(new ImpliedRelation(SketchSolver.PARALLEL, vars,
+                        "model.relation.parallel"));
+            }
+        }
         // 等长：两条线段长度在容差内相等
         final java.util.List<Sketch.Entity> lines = new java.util.ArrayList<>();
         for (final Sketch.Entity e : sketch.entities()) {

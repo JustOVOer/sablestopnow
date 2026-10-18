@@ -432,9 +432,11 @@ public final class SketchHud {
                     //   SolidWorks 的直径/半径尺寸是**尺寸线穿过圆心、箭头直接落在圆周上** ✓
                     //   ⇒ **不画界线** ✓（画了反而与圆周斜交 ⇒ 就是用户看到的问题 ✓）
                     //   同理线线距离也不画 ✓（两条线自身即基准 ✓ 参考图 2 ✓）
+                    // ★ 用户实测反馈："圆和圆弧的尺寸的界线没有显示" ✗ ——
+                    //   我上一轮把半径/直径的界线也一起关掉了 ✗ ⇒ 现在**只对线线距离**不画 ✓
+                    //   （线线距离两条线本身就是基准 ✓ 参考图 2 ✓）
                     final String lk = d.labelKey() == null ? "" : d.labelKey();
-                    final boolean skipExt = lk.contains("line_line")
-                            || lk.contains("radius") || lk.contains("diameter");
+                    final boolean skipExt = lk.contains("line_line");
                     if (!skipExt) {
                         // ★ 需求 ③：界线必须**垂直于图元**（用户："界线没有垂直于图元"✗）
                         //   原实现是"从测量点拉到尺寸线的**端点**"✗ ⇒ 斜线 ⇒ 看着不垂直 ✓

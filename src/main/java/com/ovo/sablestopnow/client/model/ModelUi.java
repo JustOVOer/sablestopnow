@@ -758,7 +758,10 @@ public final class ModelUi {
             row.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hboxWrap(0, 4, 2);
             row.prefW = com.ovo.sablestopnow.client.gui.lib.Widget.FILL;
             row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
-            row.add(new Label(Component.translatable(nameKey)).color(
+            // ★ 需求 1：约束也**带编号** ✓（"平行1、平行2"这种 ✓ 编号 = 约束下标 +1 ✓ 与尺寸同一口径 ✓）
+            final String relName = "#" + (index + 1) + " "
+                    + Component.translatable(nameKey).getString();
+            row.add(new Label(Component.literal(relName)).color(
                     session.selectedConstraint() == index ? 0xFFFFCC55 : 0xFFB9C4E8));
             row.add(new Button(Component.translatable("model.sketch.constraint_delete"), () -> {
                 session.selectConstraint(index);

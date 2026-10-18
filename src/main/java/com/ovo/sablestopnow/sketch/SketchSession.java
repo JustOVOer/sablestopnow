@@ -1108,8 +1108,15 @@ public final class SketchSession {
 
     /** 画图元时，把"起点吸到了谁"变成一条真正的约束。 */
     private void constrainToSnap(final int[] newPointVars) {
-        final KeyPoint snapped = this.pendingSnap;
+        KeyPoint snapped = this.pendingSnap;
         this.pendingSnap = null;
+        if (snapped == null) {
+            // ★ 用户实测"圆弧钉不住"的真实成因之一 ✓✓
+            //   `pendingSnap` 只在**悬停**时被写入 ⇒ 玩家**没悬停就直接点击**时它是 null ✗
+            //   ⇒ "吸到了端点却不落约束" ✗（看着贴上了，动一下就散开 ✓）
+            //   修法：用点击位置**补算一次**关键点 ✓（与悬停用的是同一个函数 ✓ 口径一致 ✓）
+            snapped = pickKeyPoint(this.hoverU, this.hoverV, 0.15);
+        }
         if (snapped == null || working == null || !this.snapConstraints) {
             return;
         }

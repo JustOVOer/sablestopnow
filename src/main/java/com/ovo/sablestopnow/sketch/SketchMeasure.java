@@ -416,6 +416,30 @@ public final class SketchMeasure {
                         "model.relation.tangent"));
             }
         }
+        // ★ 需求 ③（参考 SolidWorks）：**两个点 ⇒ 重合** ✓
+        //   独立点两两之间先给一条 COINCIDENT 候选 ✓（求解器 kind 2 ✓ 4 个操作数 ✓）
+        //   左栏的"可补关系"已经按"**全部变量都在选中图元里**"过滤 ✓
+        //   ⇒ 只有你**同时选中两个点**时，这条才会出现在按钮区 ✓ 不会刷屏 ✓
+        for (int pi = 0; pi < sketch.entities().size(); pi++) {
+            final Sketch.Entity pa = sketch.entities().get(pi);
+            if (pa.kind() != Sketch.EntityKind.POINT) {
+                continue;
+            }
+            final int[] va = pa.vars();
+            for (int pj = pi + 1; pj < sketch.entities().size(); pj++) {
+                final Sketch.Entity pb = sketch.entities().get(pj);
+                if (pb.kind() != Sketch.EntityKind.POINT) {
+                    continue;
+                }
+                final int[] vb = pb.vars();
+                final int[] vars = {va[0], va[1], vb[0], vb[1]};
+                if (hasSameKindAndOperands(constraints, SketchSolver.COINCIDENT, vars)) {
+                    continue; // 已经重合过 ⇒ 不重复 ✓
+                }
+                out.add(new ImpliedRelation(SketchSolver.COINCIDENT, vars,
+                        "model.relation.coincident"));
+            }
+        }
         // 等长：两条线段长度在容差内相等
         final java.util.List<Sketch.Entity> lines = new java.util.ArrayList<>();
         for (final Sketch.Entity e : sketch.entities()) {

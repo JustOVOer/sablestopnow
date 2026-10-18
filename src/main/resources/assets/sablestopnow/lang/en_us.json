@@ -2,7 +2,6 @@
   "itemGroup.sablestopnow": "Example Mod Tab",
   "block.sablestopnow.example_block": "Example Block",
   "item.sablestopnow.example_item": "Example Item",
-
   "sablestopnow.configuration.title": "Aeronautics: Tweaks & Toolkit",
   "sablestopnow.configuration.section.sablestopnow.common.toml": "Aeronautics: Tweaks & Toolkit",
   "sablestopnow.configuration.section.sablestopnow.common.toml.title": "Aeronautics: Tweaks & Toolkit",
@@ -16,7 +15,6 @@
   "sablestopnow.auto_pause.command": "/sablesn forces",
   "sablestopnow.auto_pause.hint_after": " to view records.",
   "sablestopnow.auto_pause.command_hover": "Click to type command to view force records",
-
   "sablestopnow.force.list.title_all": "===== All Forces (Page %d/%d) =====",
   "sablestopnow.force.list.title_filtered": "===== Filtered Forces (Page %d/%d) =====",
   "sablestopnow.force.list.no_records": "No records.",
@@ -29,7 +27,6 @@
   "sablestopnow.force.list.old_data_hint": "Note: No new forces this tick, displaying previous tick's records.",
   "config.sablestopnow.force_limiter.lock_new_sub_levels": "Lock New Sub-Levels",
   "config.sablestopnow.force_limiter.disable_placement_collision_check": "Disable Placement Collision Check",
-
   "sablestopnow.split.prefix": "[SableStopNow] ",
   "sablestopnow.split.ask_confirm": "Sub-level split detected, please enter",
   "sablestopnow.split.confirm_hover": "Click to type confirm command",
@@ -50,9 +47,7 @@
   "config.sablestopnow.collision.hull_max_pieces": "Max convex pieces",
   "config.sablestopnow.staff_enhance.staff_outline_thickness": "Staff outline box thickness (blocks)",
   "config.sablestopnow.staff_enhance.staff_outline_bold_scale": "Bold outline scale",
-
   "config.sablestopnow.staff_enhance.enable_staff_enhance": "Enable Physics Staff Enhancements",
-
   "key.categories.sablestopnow": "Aeronautics: Tweaks & Toolkit | 航空学：调整与工具包",
   "key.sablestopnow.multi_select": "多选模式 | Multi-select",
   "key.sablestopnow.region_select": "区域选择 | Region Select",
@@ -203,9 +198,7 @@
   "sablestopnow.command.tick.started": "Stepping %d physics ticks (pause will be restored automatically)",
   "sablestopnow.speedlock.message": "Physics body %s is too fast (%.1f blocks/s) and has been locked",
   "sablestopnow.speedlock.tp": "[click to TP]",
-
   "key.sablestopnow.open_config": "打开模组设置 | Open mod settings",
-
   "gui.sablestopnow.title": "航空学：调整与工具包 | Aeronautics: Tweaks & Toolkit",
   "gui.sablestopnow.title.line1": "Aeronautics",
   "gui.sablestopnow.title.line2": "Tweaks & Toolkit | 调整与工具包",
@@ -213,14 +206,12 @@
   "gui.sablestopnow.value.on": "开 | ON",
   "gui.sablestopnow.value.off": "关 | OFF",
   "gui.sablestopnow.value.empty": "（空，用逗号分隔） | (empty, comma separated)",
-
   "gui.sablestopnow.category.assembler": "物理组装器 | Physics Assembler",
   "gui.sablestopnow.category.assembler.desc": "力过滤 / 自动暂停 / 超速锁定 / 组装 | Force filter, auto pause, overspeed lock",
   "gui.sablestopnow.category.staff": "物理手杖 | Physics Staff",
   "gui.sablestopnow.category.staff.desc": "多选 / 所有权 / 快照 / 视角锁定 / 描边 / 按键 | Selection, ownership, snapshots, keys",
   "gui.sablestopnow.category.goggles": "工程师护目镜 | Engineer's Goggles",
   "gui.sablestopnow.category.goggles.desc": "物理结构描边 / 坐标轴 / HUD / 界面 | Outlines, axis, HUD, interface",
-
   "gui.sablestopnow.opt.filter_excessive_force": "过滤超限力 | Filter excessive forces",
   "gui.sablestopnow.opt.filter_excessive_force.desc": "超过阈值的力会被丢弃，不会作用到物理结构上 | Forces above the threshold are discarded",
   "gui.sablestopnow.opt.threshold": "力阈值 | Force threshold",
@@ -245,7 +236,6 @@
   "gui.sablestopnow.opt.hull_inset.desc": "曲面实体的凸包每个面往里收多少格；0 = 完全不收 | Blocks each hull face is inset by (0 = off)",
   "gui.sablestopnow.opt.hull_max_pieces": "凸分解块数上限 | Max convex pieces",
   "gui.sablestopnow.opt.hull_max_pieces.desc": "非凸/带孔的形状最多拆成几个凸块（1 = 关闭凸分解，孔会被填掉） | Convex pieces a non-convex solid may be split into (1 = off)",
-
   "gui.sablestopnow.opt.enable_staff_enhance": "启用物理手杖增强 | Enable staff enhancements",
   "gui.sablestopnow.opt.enable_staff_enhance.desc": "总开关：关闭时手杖行为与原版航空学完全一致 | Master switch",
   "gui.sablestopnow.opt.staff_outline_thickness": "选中轮廓粗细 | Staff outline thickness",
@@ -273,7 +263,6 @@
   "gui.sablestopnow.opt.keybinds": "按键设置 | Key bindings",
   "gui.sablestopnow.opt.keybinds.desc": "打开原版按键控制界面，修改本模组的全部键位 | Open the vanilla Controls screen",
   "gui.sablestopnow.opt.keybinds.button": "打开按键设置 | Open Controls",
-
   "gui.sablestopnow.opt.render_sub_level_outlines": "渲染物理结构描边 | Render sub-level outlines",
   "gui.sablestopnow.opt.render_sub_level_outlines.desc": "给物理结构表面方块画彩色边框 | Colored outlines for sub-level blocks",
   "gui.sablestopnow.opt.outline_always_visible": "描边始终可见 | Outlines always visible",
@@ -290,7 +279,6 @@
   "gui.sablestopnow.opt.axis_angle_degrees.desc": "坐标轴臂相对相机的张角（度），据此保持屏幕大小恒定 | Degrees subtended at the camera",
   "key.sablestopnow.mate_mode": "Mate mode",
   "key.sablestopnow.mate_tree": "Open mate browser",
-
   "mate.type.coincident": "Coincident",
   "mate.type.parallel": "Parallel",
   "mate.type.perpendicular": "Perpendicular",
@@ -305,7 +293,6 @@
   "mate.type.distance.desc": "Hold a specified distance",
   "mate.type.angle.desc": "Hold a specified angle",
   "mate.type.limit.desc": "Allow free movement within a distance range [min, max]",
-
   "mate.ref.vertex": "Vertex",
   "mate.ref.edge": "Edge",
   "mate.ref.face": "Face",
@@ -315,11 +302,9 @@
   "mate.ref.body_axis": "Body axis",
   "mate.ref.body_plane": "Body plane",
   "mate.ref.block_center": "Block centre",
-
   "mate.body_ref.center": "Body centre",
   "mate.body_ref.axis": "Body axis",
   "mate.body_ref.plane": "Body plane",
-
   "mate.error.same_body": "Both ends belong to the same body",
   "mate.error.duplicate": "This mate already exists",
   "mate.error.needs_direction": "This mate needs a direction on both ends",
@@ -335,7 +320,6 @@
   "mate.error.cannot_change": "Cannot modify this mate",
   "mate.rejected.prefix": "[Mates] ",
   "mate.prompt.no_target": "The crosshair is not on a physics body",
-
   "gui.sablestopnow.mate.title": "Mates",
   "gui.sablestopnow.mate.entry": "Mate %s",
   "gui.sablestopnow.mate.empty": "No mates yet. Hold the physics staff, press Y, then right-click two references.",
@@ -376,7 +360,6 @@
   "sablestopnow.mate.hud.hint_free": "Click the sidebar buttons - Tab or the bottom button re-locks the cursor - Esc leaves mate mode",
   "sablestopnow.mate.hud.button_lock": "Lock cursor",
   "sablestopnow.mate.hud.button_unlock": "Click to free cursor",
-
   "gui.sablestopnow.section.force": "力过滤与记录 | Force filter & records",
   "gui.sablestopnow.section.assembly": "组装与放置 | Assembly & placement",
   "gui.sablestopnow.section.speed": "超速保护 | Overspeed guard",
@@ -393,20 +376,16 @@
   "gui.sablestopnow.section.other": "其他 | Other",
   "gui.sablestopnow.hint.none": "把鼠标移到设置项上可看说明 | Hover a setting for details",
   "gui.sablestopnow.back.short": "返回 | Back",
-
   "gui.sablestopnow.opt.ui_animations": "界面动画开关 | UI animations",
   "gui.sablestopnow.opt.ui_animations.desc": "界面动画总开关：关闭后色块展开、滑入、淡入淡出等全部直接到位（低配机器或觉得晃眼时关掉） | Master switch for every animation in the settings GUI",
   "gui.sablestopnow.opt.ui_font_scale": "界面字号缩放 | UI font scale",
   "gui.sablestopnow.opt.ui_font_scale.desc": "设置界面的文字缩放（0.5~1.0）：调小可以让一屏塞下更多设置项 | Text scale of the settings GUI (0.5~1.0)",
   "gui.sablestopnow.opt.ui_text_shrink_min": "文字自动缩字号下限",
   "gui.sablestopnow.opt.ui_text_shrink_min.desc": "文字放不下时先按这个比例缩小，再退回短标签/换行/省略号。0.6~1.0，默认 0.80。",
-
   "config.sablestopnow.ui.ui_animations": "界面动画开关 | UI animations",
   "config.sablestopnow.ui.ui_font_scale": "界面字号缩放 | UI font scale",
-
   "gui.sablestopnow.mate.done": "完成 | Done",
   "gui.sablestopnow.mate.cancel": "取消 | Cancel",
-
   "model.debug.sphere.short": "Sphere",
   "model.debug.need_body": "Select a structure first",
   "model.tab.debug": "Debug",
@@ -443,11 +422,9 @@
   "model.tool.normal_to.hint": "点击后选择一个面，相机转到正对该面的方向",
   "model.tool.hide": "隐藏/显示 | Hide",
   "model.tool.delete_mate": "删除配合 | Delete mate",
-
   "model.tab.mate.short": "配合",
   "model.tab.model.short": "模型",
   "model.tab.view.short": "视图",
-
   "model.tool.mate.short": "新建配合",
   "model.tool.ratio.short": "比例配合",
   "model.tool.gear.short": "齿轮配合",
@@ -612,7 +589,6 @@
   "model.view.top.short": "上视",
   "model.view.iso.short": "等轴测",
   "model.view.fit.short": "缩放到合适",
-
   "model.left.title": "编辑 | Edit",
   "model.left.picked": "已选 %1$s 个元素 | %1$s picked",
   "model.left.need": "还需要 %1$s 个 | need %1$s more",
@@ -629,7 +605,6 @@
   "model.prompt.coupling_done": "Coupling editing finished",
   "model.prompt.nothing_to_finish": "Nothing is being edited right now",
   "model.prompt.aim_marker": "把鼠标移到屏幕上的标记（小方块 / 线段 / 面的轮廓）上再点击 | Move the cursor onto the on-screen marker, then click",
-
   "model.tree.title": "树状图 | Tree",
   "model.tree.empty": "此处没有物理结构（模型） | No physics structures here",
   "model.tree.refresh": "刷新 | Refresh",
@@ -641,7 +616,6 @@
   "model.prop.hidden": "隐藏 | Hidden",
   "model.prop.collide": "碰撞 | Collision",
   "model.prop.locked": "锁定 | Locked",
-
   "model.view.front": "前视 | Front",
   "model.view.back": "后视 | Back",
   "model.view.left": "左视 | Left",
@@ -652,7 +626,6 @@
   "model.view.fit": "缩放到合适 | Fit",
   "model.view.center": "居中 | Center",
   "model.view.center.short": "居中",
-
   "mate.edit.title": "编辑配合 | Edit mate",
   "mate.create.title": "新建配合 | New mate",
   "mate.create.hint": "Set type and values here; click Done to create",
@@ -663,12 +636,10 @@
   "mate.edit.name": "Name (optional)",
   "mate.edit.name.hint": "empty = auto name",
   "model.prompt.mate_done": "Mate editing finished",
-
   "model.menu.hide": "隐藏/显示该模型 | Hide / show this model",
   "model.menu.delete_mate": "删除选中的配合 | Delete selected mate",
   "model.menu.fit": "缩放到该模型 | Fit to model",
   "model.menu.center": "把该模型移到视野中央 | Center this model in view",
-
   "model.prompt.enter": "已进入模型模式：每个物理结构视为一个模型 | Model mode on",
   "model.prompt.need_normal": "只能从普通模式进入模型视图（先退出多选/整组拖拽） | Enter from normal mode only",
   "model.prompt.exit": "已退出模型模式 | Model mode off",
@@ -681,7 +652,6 @@
   "model.prompt.dragging": "正在拖动模型（缓慢搬运） | Dragging model",
   "model.prompt.normal_to": "已正视该面 | Looking at the face",
   "model.prompt.force_placed": "已放置施力点：在左侧设置力的大小与无线红石频道 | Force point placed",
-
   "model.force.none": "没有选中施力点 | No force point selected",
   "model.force.none.hint": "在树状图里点一个施力点，或用「添加施力点」在模型表面放置 | Pick one in the tree, or place a new one",
   "model.force.at": "位置（模型局部）%1$s | At %1$s",
@@ -694,14 +664,12 @@
   "model.force.remove": "删除施力点 | Delete force point",
   "gui.sablestopnow.panel.collapse": "收起边栏 | Collapse panel",
   "gui.sablestopnow.panel.expand": "展开边栏 | Expand panel",
-
   "model.ratio.order": "先选从动面，最后选的那一个是基准面 | Pick driven faces first; the last pick is the base",
   "model.gear.order": "按顺序：固定轴A、齿轮轴A、固定轴B、齿轮轴B | Order: fixed A, gear A, fixed B, gear B",
   "model.gear.default_teeth": "默认齿数比 20:40（比值 0.5），建好后可在树里改 | Default teeth 20:40",
   "model.prompt.refs_more": "还需要选择元素（共 %1$s 个） | Need %1$s references",
   "model.prompt.ratio_created": "已创建比例配合 | Ratio group created",
   "model.prompt.gear_created": "已创建齿轮配合 | Gear coupling created",
-
   "model.coupling.none": "没有选中耦合配合 | No coupling selected",
   "model.coupling.ratio": "比例配合 | Ratio group",
   "model.coupling.base": "基准面：%1$s | Base: %1$s",

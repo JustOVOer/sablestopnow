@@ -147,6 +147,41 @@ public final class SketchSession {
         return pt;
     }
 
+    /**
+     * 把**任意关键点**（线段端点/中点、圆与弧的圆心、弧端点）变成**可选的点图元** ✓。
+     *
+     * <p>为什么需要它 ✗✓：直线的端点、中点**不是图元**（只是几何位置 ✓）
+     * ⇒ 拾取层只认图元 ⇒ 玩家"想选端点"时只会选到那条直线 ✓（用户实测："现在仍然只能选到线"✗）
+     * <p>做法：点下去时若附近有关键点 ⇒ **造一个点**放在那里 ✓ 并落"点 ↔ 该关键点"的重合约束 ✓
+     * ⇒ 之后它就是一个正常点 ✓ 可被选中、可两点重合、可标尺寸 ✓
+     * <p>已有同位置的点会**复用** ✓（不会越点越多 ✓）。
+     */
+    @Nullable
+    public Sketch.Entity pointEntityAt(final double u, final double v, final double tolerance) {
+        if (working == null) {
+            return null;
+        }
+        final KeyPoint kp = pickKeyPoint(u, v, tolerance);
+        if (kp == null || kp.owner() == null || kp.px() < 0 || kp.py() < 0) {
+            return null; // 没有关键点（或关键点不带变量 ⇒ 无法约束）⇒ 交给普通拾取 ✓
+        }
+        // 已经有同位置的点 ⇒ 直接复用 ✓
+        for (final Sketch.Entity e : working.entities()) {
+            if (e.kind() == Sketch.EntityKind.POINT) {
+                final int[] pv = e.vars();
+                if (Math.hypot(working.variable(pv[0]) - kp.u(),
+                        working.variable(pv[1]) - kp.v()) < 0.05) {
+                    return e;
+                }
+            }
+        }
+        final Sketch.Entity pt = working.addPoint(kp.u(), kp.v());
+        final int[] pv = pt.vars();
+        // 与它所属图元的那个关键点**重合** ✓（端点/中点/圆心都走这一条 ✓）
+        working.addConstraint(SketchSolver.COINCIDENT, 0.0, pv[0], pv[1], kp.px(), kp.py());
+        return pt;
+    }
+
     /** 找到坐标附近(容差内)的圆/弧，返回它的圆心图元 ✓（没有则 null ✓）。 */
     @Nullable
     public Sketch.Entity centerPointAt(final double u, final double v, final double tolerance) {
@@ -1585,6 +1620,7 @@ public final class SketchSession {
         final boolean horizontal = ortho[2] == 1.0;
         final boolean vertical = ortho[2] == 2.0;
 
+        final int constraintsBefore = working.constraints().size();
         final Sketch.Entity line = working.addLine(ax, ay, bx, by);
         final int[] v = line.vars();
         // 起点吸到了老几何上 → 补一条真约束（只吸坐标的话求解器一动就散了）
@@ -1601,6 +1637,10 @@ public final class SketchSession {
         } else {
             constrainToSnap(new int[] {v[0], v[1]});
         }
+        // ★ 诊断（实测"所有点都钉不住"✗）：把**这次画线落了几条约束**一并打出来 ✓
+        //   ⇒ 0 条 = 吸附没命中/没落约束；≥2 条 = 约束落了但不生效（那就查求解器）✓
+        lastLineDiag = lastLineDiag + " +con=" + (working.constraints().size() - constraintsBefore)
+                + " tEnd=" + snapLineEnd;
         if (horizontal) {
             working.addConstraint(SketchSolver.HORIZONTAL, 0.0, v[0], v[1], v[2], v[3]);
         } else if (vertical) {

@@ -602,6 +602,32 @@ public final class SketchMeasure {
     @Nullable
     public static SmartDimension smartDimension(final Sketch sketch,
                                                 final java.util.List<Sketch.Entity> picked) {
+        // 老签名保留 ✓（离线用例用它 ✓）⇒ 不传指针 ⇒ 角度就用两条线各自的方向 ✓
+        return smartDimension(sketch, picked, Double.NaN, Double.NaN);
+    }
+
+    /** 两条直线的交点 ✓（平行/退化返回 null ✓）。 */
+    @Nullable
+    private static double[] lineIntersection(final double ax, final double ay,
+                                             final double bx, final double by,
+                                             final double cx, final double cy,
+                                             final double dx, final double dy) {
+        final double r1x = bx - ax;
+        final double r1y = by - ay;
+        final double r2x = dx - cx;
+        final double r2y = dy - cy;
+        final double den = r1x * r2y - r1y * r2x;
+        if (Math.abs(den) < 1.0e-12) {
+            return null; // 平行（角度尺寸那条路用不到交点 ✓）
+        }
+        final double t = ((cx - ax) * r2y - (cy - ay) * r2x) / den;
+        return new double[] {ax + r1x * t, ay + r1y * t};
+    }
+
+    @Nullable
+    public static SmartDimension smartDimension(final Sketch sketch,
+                                                final java.util.List<Sketch.Entity> picked,
+                                                final double pointerU, final double pointerV) {
         if (sketch == null || picked == null || picked.isEmpty() || picked.size() > 2) {
             return null;
         }
@@ -663,12 +689,39 @@ public final class SketchMeasure {
                 //   而求解器的 LINES_ANGLE(kind 22) 是**有向角**（两条线的方向向量夹角，0..180 ✓）
                 //   ⇒ 两个方向相反时两边就差 180° ✓ 用户设 60 得到 120 ✓
                 //   现在去掉绝对值：acos(cos) 就是方向向量的夹角 ✓ 与求解器口径一致 ✓。
-                // ★ 按 SolidWorks 的角度原理 ✓（用户要求"参考 SW"✓）：
-                //   SW 的角度尺寸**永远是正值（0…180°）** ✓ 具体是锐角还是钝角
-                //   **由你把尺寸放在哪一侧决定** ✓ 绝不会显示负数 ✓
-                //   ⇒ 这里用**无向角** `acos(dot)`（0…180 ✓），且**不加 abs**
-                //     （加了 abs 会永远得到锐角 ⇒ 设 60 得 120 ✗ 那是上一版的问题 ✓）
-                final double degrees = Math.toDegrees(Math.acos(cos));
+                // ★ 按用户给的规则（= SolidWorks 的语义）✓✓：
+                //   **以两线交点为顶点，取从交点发出的两条有向射线，方向由点击位置决定** ✓
+                //   即：把每条线的方向翻到"指针所在的那一侧" ✓ 再取两方向的夹角 ✓
+                //   ⇒ 结果恒在 0…180、永不为负，且**你点哪一侧就是哪一侧的角** ✓
+                double dax = ax;
+                double day = ay;
+                double dbx = bx;
+                double dby = by;
+                if (!Double.isNaN(pointerU)) {
+                    final double[] inter = lineIntersection(
+                            sketch.variable(va[0]), sketch.variable(va[1]),
+                            sketch.variable(va[2]), sketch.variable(va[3]),
+                            sketch.variable(vb[0]), sketch.variable(vb[1]),
+                            sketch.variable(vb[2]), sketch.variable(vb[3]));
+                    if (inter != null) {
+                        // 交点 → 指针 的方向；每条线的方向若与它反向就翻过来 ✓
+                        final double px = pointerU - inter[0];
+                        final double py = pointerV - inter[1];
+                        if (dax * px + day * py < 0) {
+                            dax = -dax;
+                            day = -day;
+                        }
+                        if (dbx * px + dby * py < 0) {
+                            dbx = -dbx;
+                            dby = -dby;
+                        }
+                    }
+                }
+                final double na = Math.hypot(dax, day);
+                final double nb = Math.hypot(dbx, dby);
+                final double cosRay = Math.min(1.0, Math.max(-1.0,
+                        (dax * dbx + day * dby) / (na * nb)));
+                final double degrees = Math.toDegrees(Math.acos(cosRay));
                 return new SmartDimension("model.dim.angle", degrees, true,
                         SketchSolver.LINES_ANGLE,
                         new int[] {va[0], va[1], va[2], va[3], vb[0], vb[1], vb[2], vb[3]});

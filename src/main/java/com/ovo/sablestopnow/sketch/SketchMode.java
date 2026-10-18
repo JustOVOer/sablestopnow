@@ -290,11 +290,14 @@ public final class SketchMode {
                     Sketch.Entity hit = session.pickEntity(uv.x, uv.y, pickTolerance);
                     // ★ 需求 ③：点在**圆心**附近 ⇒ 自动在圆心放一个点图元并选中它 ✓
                     //   （圆心不是图元 ⇒ 原来点圆心什么也选不到 ✓ 用户实测"点圆心无反应"✗）
-                    if (hit == null) {
-                        final Sketch.Entity centerPt = session.centerPointAt(
+                    if (hit == null || hit.kind() != Sketch.EntityKind.POINT) {
+                        // ★ 需求 ③（推广版）：光标落在**任意关键点**附近（端点/中点/圆心）⇒
+                        //   在那里生成（或复用）一个**点图元**并选中它 ✓
+                        //   原来只处理圆心 ⇒ 直线的端点/中点永远选不到点 ✓ 用户实测"只能选到线"✗
+                        final Sketch.Entity keyPt = session.pointEntityAt(
                                 uv.x, uv.y, pickTolerance);
-                        if (centerPt != null) {
-                            hit = centerPt;
+                        if (keyPt != null) {
+                            hit = keyPt;
                         }
                     }
                     if (additive) {

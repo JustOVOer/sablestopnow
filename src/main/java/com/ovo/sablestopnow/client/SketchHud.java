@@ -297,6 +297,12 @@ public final class SketchHud {
             lastLineDiagLogged = lineDiag;
             com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-line] {}", lineDiag);
         }
+        // ★ 画弧诊断 ✓（实测"劣弧方向不对"✗）：三次点击 + 角度差 + 判定出的 cw ✓
+        final String arcDiag = SketchSession.lastArcDiag;
+        if (!arcDiag.equals(lastArcDiagLogged)) {
+            lastArcDiagLogged = arcDiag;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-arc] {}", arcDiag);
+        }
         // 辅助线用**虚线**画一遍 ✓（SolidWorks 的构造几何就是虚线 ✓ 创建方式与直线一致 ✓）
         // 不参与轮廓/拉伸 ✓（SketchProfiles ×2 + Extrude ×1 已跳过 ✓）
         drawConstructionOverlay(event.getGuiGraphics(), mc);
@@ -911,6 +917,7 @@ public final class SketchHud {
     /** 上次已打印的吸附诊断 ✓（只在变化时打日志 ✓ 免得刷屏 ✓）。 */
     private static String lastSnapDiagLogged = "";
     private static String lastLineDiagLogged = "";
+    private static String lastArcDiagLogged = "";
 
     private static void drawHoverName(final net.minecraft.client.gui.GuiGraphics g,
                                       final Minecraft mc) {

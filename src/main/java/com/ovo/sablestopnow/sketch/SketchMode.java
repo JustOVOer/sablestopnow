@@ -278,7 +278,16 @@ public final class SketchMode {
                 // SELECT 工具：拾取鼠标下的图元（加约束/标尺寸的目标）。
                 // 其余工具：先吸附到关键点，再交给绘制。
                 if (session.tool() == SketchSession.Tool.SELECT) {
-                    final Sketch.Entity hit = session.pickEntity(uv.x, uv.y, pickTolerance);
+                    Sketch.Entity hit = session.pickEntity(uv.x, uv.y, pickTolerance);
+                    // ★ 需求 ③：点在**圆心**附近 ⇒ 自动在圆心放一个点图元并选中它 ✓
+                    //   （圆心不是图元 ⇒ 原来点圆心什么也选不到 ✓ 用户实测"点圆心无反应"✗）
+                    if (hit == null) {
+                        final Sketch.Entity centerPt = session.centerPointAt(
+                                uv.x, uv.y, pickTolerance);
+                        if (centerPt != null) {
+                            hit = centerPt;
+                        }
+                    }
                     if (additive) {
                         // Ctrl：增删。点空处**不动**选择集 —— 否则手一抖就把辛苦选好的一堆清空了。
                         if (hit != null) {

@@ -113,6 +113,62 @@ public final class SketchSession {
         this.snapLineEnd = value;
     }
 
+    /**
+     * 在圆/圆弧的**圆心处生成一个点图元**并返回 ✓（需求 ③："点击圆心等位置无反应"✗）。
+     *
+     * <p>为什么需要它 ✗✓：圆心不是图元（是圆的几何属性 ✓）⇒ 拾取层只认图元
+     * ⇒ 点圆心等于点在圆内部 ⇒ 什么也选不到 ✓
+     * <p>做法：第一次点到圆心时**造一个点** ✓ 并立刻加"点 ↔ 圆心 重合"约束 ✓
+     * ⇒ 之后它就是一个正常的点 ✓ 可以被选中、可以跟别的点加重合、可以标尺寸 ✓
+     * <p>重复点击不会造出第二个点 ✓（半径 0.05 格内已有中心点就复用 ✓）。
+     */
+    @Nullable
+    public Sketch.Entity ensureCenterPoint(final Sketch.Entity round) {
+        if (working == null
+                || (round.kind() != Sketch.EntityKind.CIRCLE
+                && round.kind() != Sketch.EntityKind.ARC)) {
+            return null;
+        }
+        final int[] rv = round.vars();
+        final double cx = working.variable(rv[0]);
+        final double cy = working.variable(rv[1]);
+        for (final Sketch.Entity e : working.entities()) {
+            if (e.kind() == Sketch.EntityKind.POINT) {
+                final int[] pv = e.vars();
+                if (Math.hypot(working.variable(pv[0]) - cx,
+                        working.variable(pv[1]) - cy) < 0.05) {
+                    return e; // 已经有中心点 ⇒ 复用 ✓（不再造第二个 ✓）
+                }
+            }
+        }
+        final Sketch.Entity pt = working.addPoint(cx, cy);
+        final int[] pv = pt.vars();
+        working.addConstraint(SketchSolver.COINCIDENT, 0.0, pv[0], pv[1], rv[0], rv[1]);
+        return pt;
+    }
+
+    /** 找到坐标附近(容差内)的圆/弧，返回它的圆心图元 ✓（没有则 null ✓）。 */
+    @Nullable
+    public Sketch.Entity centerPointAt(final double u, final double v, final double tolerance) {
+        if (working == null) {
+            return null;
+        }
+        Sketch.Entity best = null;
+        double bestDistance = tolerance;
+        for (final Sketch.Entity e : working.entities()) {
+            if (e.kind() != Sketch.EntityKind.CIRCLE && e.kind() != Sketch.EntityKind.ARC) {
+                continue;
+            }
+            final int[] rv = e.vars();
+            final double dd = Math.hypot(u - working.variable(rv[0]), v - working.variable(rv[1]));
+            if (dd <= bestDistance) {
+                bestDistance = dd;
+                best = e;
+            }
+        }
+        return best == null ? null : ensureCenterPoint(best);
+    }
+
     public void forceSnapOrigin() {
         this.pendingSnap = new KeyPoint(0.0, 0.0, KeyKind.ORIGIN, null, -1, -1);
     }
@@ -127,6 +183,9 @@ public final class SketchSession {
 
     /** 上一次画线的**落点诊断** ✓（原始坐标 + 长度 ✓ 给客户端打日志用 ✓）。 */
     public static String lastLineDiag = "none";
+
+    /** 上一次画弧的**三点与角度差诊断** ✓（给客户端打日志用 ✓）。 */
+    public static String lastArcDiag = "none";
 
     public Stage stage() {
         return stage;
@@ -1602,6 +1661,12 @@ public final class SketchSession {
             delta += 2.0 * Math.PI;
         }
         final boolean clockwise = delta < 0.0;
+        // ★ 诊断（实测"劣弧方向仍不对"✗）：把三次点击与角度差打出来 ✓
+        //   ⇒ 一看就知道你的点击序列对应哪种语义 ✓ 再定规则（而不是继续猜 ✓）
+        lastArcDiag = String.format(java.util.Locale.ROOT,
+                "c=(%.2f,%.2f) s=(%.2f,%.2f) e=(%.2f,%.2f) a0=%.1f a1=%.1f d=%.1f cw=%s",
+                center[0], center[1], start[0], start[1], end[0], end[1],
+                Math.toDegrees(a0), Math.toDegrees(a1), Math.toDegrees(delta), clockwise);
         final Sketch.Entity arc = working.addArcPoints(center[0], center[1],
                 start[0], start[1], end[0], end[1], clockwise);
         // ★★ 修实测"圆弧圆心没有钉住" ✓✓ —— 圆心按**自己的坐标**拾关键点并落约束 ✓

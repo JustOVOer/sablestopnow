@@ -131,10 +131,15 @@ public final class SketchHud {
     }
 
     public static void openEdit(final int constraintIndex, final String labelKey,
-                                final double value) {
+                                final double rawValue) {
         Ui.close(EDIT_LAYER); // 先关旧的 ✓ 重建最省心 ✓（不残留上一次的状态 ✗）
         editConstraint = constraintIndex;
         editLabelKey = labelKey; // ★ 记住类型键 ✓（"直径"的输入要换算回半径 ✓）
+        // ★ 修实测"modify 框和显示的角度不一致" ✓✓
+        //   画面上角度已经取绝对值显示了（0…180 ✓），但改值框预填的还是**原始有向值**（可能是负数）✗
+        //   ⇒ 在这里统一取绝对值 ✓（所有调用点一次覆盖 ✓ 与标签口径一致 ✓）
+        final double value = (labelKey != null && labelKey.contains("angle"))
+                ? Math.abs(rawValue) : rawValue;
         final UiLayer layer = Ui.open(UiLayer.of(EDIT_LAYER));
         layer.hud = true;
         layer.consumeInput = true;   // 要能收键盘 ✓ 否则输入不进文本框 ✗

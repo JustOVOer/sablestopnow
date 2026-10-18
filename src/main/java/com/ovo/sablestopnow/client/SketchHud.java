@@ -186,10 +186,14 @@ public final class SketchHud {
         row.layout = Layouts.hboxWrap(0, 4, 2);
         row.prefW = com.ovo.sablestopnow.client.gui.lib.Widget.FILL;
         row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
-        row.add(new com.ovo.sablestopnow.client.gui.lib.Button(Component.translatable("model.dim.edit_ok"), () -> field.endEdit(true)));
+        // ★ 需求 5：**确定类按键悬停底色 = 草绿** ✓（"确定和删除键…确定改草绿，删除/取消改红色" ✓）
+        final var okBtn = new com.ovo.sablestopnow.client.gui.lib.Button(
+                Component.translatable("model.dim.edit_ok"), () -> field.endEdit(true));
+        okBtn.hoverColor = 0xFF6B8E23; // olive / 草绿 ✓
+        row.add(okBtn);
         // ★ 用户要求 ✓：第二个键从「取消」改成「**删除**」——
         //   删除 = 删掉这个尺寸及其约束（几何留在原地 ✓ 只是重新变欠约束 ✓ 与 SolidWorks 一致 ✓）
-        row.add(new com.ovo.sablestopnow.client.gui.lib.Button(
+        final var delBtn = new com.ovo.sablestopnow.client.gui.lib.Button(
                 Component.translatable("model.dim.edit_delete"), () -> {
                     final int idx = editConstraint;
                     editConstraint = -1;
@@ -198,7 +202,9 @@ public final class SketchHud {
                         com.ovo.sablestopnow.client.SketchClient.deleteDimension(idx);
                     }
                     Ui.close(EDIT_LAYER);
-                }));
+                });
+        delBtn.hoverColor = 0xFFB03030; // 删除 ⇒ 红 ✓
+        row.add(delBtn);
         box.add(row);
         layer.root.add(box);
     }

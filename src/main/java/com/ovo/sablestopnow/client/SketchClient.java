@@ -563,8 +563,14 @@ public final class SketchClient {
         final double ly = -normal.y;
         final double lz = -normal.z;
         final double pitchDeg = Math.toDegrees(Math.asin(Math.max(-1.0, Math.min(1.0, -ly))));
+        // ★ 需求 ⑧（用户："先正视和这个面垂直的面，再正视这个面"✓）：**滚转必须唯一确定** ✓
+        //   我们这的相机只有 yaw/pitch（up = 世界竖直投影 ✓）⇒ 朝向完全由面法线决定 ✓
+        //   但原来的 ±Y 分支写的是"**yaw 保持原样**" ✗ ⇒ 顶着面看下去时，
+        //   网格会**跟着玩家原来的朝向转** ✓ ⇒ 这正是"网格不横平竖直"的来源 ✓
+        //   ⇒ 改成 **yaw = 0**：屏幕右 = +X、屏幕上 = −Z ⇒ 网格与世界轴对齐 ✓
+        //     （等价于用户说的"先侧看一个与它垂直的面、再正视它"⇒ 滚转被唯一确定 ✓）
         final double yawDeg = lx * lx + lz * lz < 1.0e-9
-                ? com.ovo.sablestopnow.client.model.ModelCamera.yaw() // 法线是 ±Y ⇒ yaw 保持原样 ✓
+                ? 0.0
                 : Math.toDegrees(Math.atan2(-lx, lz));
         com.ovo.sablestopnow.client.model.ModelCamera.alignTo((float) yawDeg, (float) pitchDeg);
         // ★ **自证式修正** ✓：不依赖"我对 yaw/pitch 符号的记忆"✗（真机上已出现 plates=0 的疑点 ✗）

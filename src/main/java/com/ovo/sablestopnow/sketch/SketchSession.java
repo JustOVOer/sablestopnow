@@ -1717,7 +1717,12 @@ public final class SketchSession {
      * 这里改成**按该点自己的坐标**重新拾一次 ✓（与悬停同一函数 ✓ 口径一致 ✓）。
      */
     private void constrainAt(final int[] pointVars, final double u, final double v) {
-        this.pendingSnap = pickKeyPoint(u, v, 0.15);
+        final KeyPoint kp = pickKeyPoint(u, v, 0.15);
+        // ★ 诊断（"没有钉住"要落到具体一环 ✓）：这次重拾**拾到了什么 / 没拾到** ✓
+        //   ⇒ 日志里 `[sketch-line]` 的 `re=` 字段就能直接判断：
+        //     re=none ⇒ 吸附半径没覆盖 / 坐标没重合；re=ENDPOINT ⇒ 拾到了但约束没落 ✓
+        lastLineDiag = lastLineDiag + " re=" + (kp == null ? "none" : kp.kind().name());
+        this.pendingSnap = kp;
         constrainToSnap(pointVars);
     }
 

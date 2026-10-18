@@ -1477,6 +1477,17 @@ public final class SketchSession {
         if (Math.hypot(bx - ax, by - ay) < 1.0e-3) {
             return; // 点在同一处（或几乎同一处），画不出线段
         }
+        // ★★ 修实测"画短直线时几乎每次都变为长度为 0" ✓✓
+        //   真因：**两次点击吸到了同一个关键点**（比如都吸到同一个端点/圆心 ✓）
+        //   于是起点和终点被钉到同一点 ⇒ 线段长度 0 ✓ 而上面那道"原始距离"检查
+        //   看的是鼠标点之间的距离（>1e-3 ✓）⇒ 拦不住 ✗
+        //   ⇒ 这里比较**吸附之后**的关键点身份：同一个就干脆不建 ✓（玩家再点一次即可 ✓）
+        final KeyPoint kpA = pickKeyPoint(ax, ay, 0.15);
+        final KeyPoint kpB = pickKeyPoint(bx, by, 0.15);
+        if (kpA != null && kpB != null
+                && kpA.kind() == kpB.kind() && kpA.owner() == kpB.owner()) {
+            return; // 两端吸到同一个关键点 ⇒ 会是零长线 ⇒ 不建 ✓
+        }
         // 水平/竖直推理吸附：与预览共用 inferOrtho，两边永远一致
         final double[] ortho = inferOrtho(ax, ay, bx, by);
         bx = ortho[0];

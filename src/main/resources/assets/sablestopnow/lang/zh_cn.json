@@ -544,6 +544,7 @@
   "model.measure.center_distance": "圆心距离",
   "model.measure.surface_gap": "表面间隙",
   "model.sketch.snap.endpoint": "端点",
+  "model.sketch.snap.origin": "原点",
   "model.sketch.snap.midpoint": "中点",
   "model.sketch.snap.center": "圆心",
   "model.sketch.snap.grid": "网格",

@@ -440,6 +440,28 @@ public final class SketchMeasure {
                         "model.relation.coincident"));
             }
         }
+        // ★ 需求 ⑥（参考 SolidWorks）：**同心** ✓
+        //   求解器没有独立的 CONCENTRIC kind ✓（也不必加 ✓）
+        //   ⇒ 用"圆心与圆心 **COINCIDENT(2)**"表达 ✓（4 个操作数 = 两个圆心 ✓ 正是同心 ✓）
+        //   只在两个圆/圆弧都被选中时才出现 ✓（左栏按"全部变量都在选中图元里"过滤 ✓）
+        final java.util.List<Sketch.Entity> rounds = new java.util.ArrayList<>();
+        for (final Sketch.Entity ce : sketch.entities()) {
+            if (ce.kind() == Sketch.EntityKind.CIRCLE || ce.kind() == Sketch.EntityKind.ARC) {
+                rounds.add(ce);
+            }
+        }
+        for (int ri = 0; ri < rounds.size(); ri++) {
+            final int[] ca = rounds.get(ri).vars();
+            for (int rj = ri + 1; rj < rounds.size(); rj++) {
+                final int[] cb = rounds.get(rj).vars();
+                final int[] vars = {ca[0], ca[1], cb[0], cb[1]};
+                if (hasSameKindAndOperands(constraints, SketchSolver.COINCIDENT, vars)) {
+                    continue; // 已经同心 ⇒ 不重复 ✓
+                }
+                out.add(new ImpliedRelation(SketchSolver.COINCIDENT, vars,
+                        "model.relation.concentric"));
+            }
+        }
         // 等长：两条线段长度在容差内相等
         final java.util.List<Sketch.Entity> lines = new java.util.ArrayList<>();
         for (final Sketch.Entity e : sketch.entities()) {

@@ -687,11 +687,20 @@ public final class ModelUi {
                     new java.util.ArrayList<>();
             for (final var rel0 : com.ovo.sablestopnow.sketch.SketchMeasure
                     .impliedRelations(live, 1.0)) {
+                // ★ 修实测"相切选项出现许多个" ✗✓
+                //   原来用的是"**任一**变量命中就保留" ⇒ 只要选了一条线，所有"该线↔任意圆/弧"
+                //   的相切建议**全都列出来** ✗（所以看到一堆 ✓）
+                //   ⇒ 改成"**该关系的全部变量都在选中图元里**"才保留 ✓
+                //     （相切关系 = 线的 4 个 + 圆的 3 个 ⇒ 必须把线和圆都选中才出现 ✓）
+                boolean allPicked = true;
                 for (final int rv0 : rel0.vars()) {
-                    if (relPickVars.contains(rv0)) {
-                        rf.add(rel0);
+                    if (!relPickVars.contains(rv0)) {
+                        allPicked = false;
                         break;
                     }
+                }
+                if (allPicked) {
+                    rf.add(rel0);
                 }
             }
             relations = rf;
@@ -726,8 +735,21 @@ public final class ModelUi {
             relRow.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
             for (final var rel : relations) {
                 relRow.add(new Button(Component.translatable(rel.labelKey()), () -> {
+                    // ★ 修实测"点任意一个后草图变红" ✗✓
+                    //   原因：这条关系是**无条件建议**的（哪怕现在并不相切 ✓）
+                    //   ⇒ 加上去后求解器无法满足 ⇒ 整张草图标红 ✗
+                    //   处理：求解后若不满足就**回滚掉这条约束** ✓ 并提示 ✓
+                    final int before = live.constraints().size();
                     live.addConstraint(rel.solverKind(), 0.0, rel.vars());
                     com.ovo.sablestopnow.client.SketchClient.mode().solve();
+                    final var solved = com.ovo.sablestopnow.client.SketchClient.mode().lastSolve();
+                    if (solved == null || !solved.ok()) {
+                        if (live.constraints().size() > before) {
+                            live.removeConstraint(live.constraints().size() - 1);
+                        }
+                        com.ovo.sablestopnow.client.model.ModelMode.prompt("model.dim.unsatisfied");
+                        com.ovo.sablestopnow.client.SketchClient.mode().solve();
+                    }
                     refreshLeftPanel();
                 }));
             }

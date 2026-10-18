@@ -125,6 +125,9 @@ public final class SketchSession {
      */
     public static String lastSnapDiag = "none";
 
+    /** 上一次画线的**落点诊断** ✓（原始坐标 + 长度 ✓ 给客户端打日志用 ✓）。 */
+    public static String lastLineDiag = "none";
+
     public Stage stage() {
         return stage;
     }
@@ -1474,6 +1477,12 @@ public final class SketchSession {
         //   原来阈值是 1e-9 ✗ —— 只要两次点击稍微错开一点（比如 0.0001 格）就会**建出一条
         //   肉眼看着零长**的线 ✓，它没有方向、求和渲染都会出怪事 ✓
         //   ⇒ 阈值提到 **1e-3（约 1 毫米）**：太短就当"没画" ✓ 玩家再点一次即可 ✓
+        // ★ 诊断（实测"短直线仍变成长度 0"✗ 且用户明确"不是吸附问题"✓）：
+        //   把**落点原始坐标**与**两端各自吸到的关键点**都留成静态字段 ✓ 由客户端打日志 ✓
+        //   （本包被离线工具单独编译 ⇒ 不能引用 LOGGER ✗ 见 lastSnapDiag 的说明 ✓）
+        lastLineDiag = String.format(java.util.Locale.ROOT,
+                "a=(%.3f,%.3f) b=(%.3f,%.3f) len=%.4f", ax, ay, bx, by,
+                Math.hypot(bx - ax, by - ay));
         if (Math.hypot(bx - ax, by - ay) < 1.0e-3) {
             return; // 点在同一处（或几乎同一处），画不出线段
         }

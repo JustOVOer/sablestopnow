@@ -189,7 +189,7 @@ public final class SketchHud {
         // ★ 需求 5：**确定类按键悬停底色 = 草绿** ✓（"确定和删除键…确定改草绿，删除/取消改红色" ✓）
         final var okBtn = new com.ovo.sablestopnow.client.gui.lib.Button(
                 Component.translatable("model.dim.edit_ok"), () -> field.endEdit(true));
-        okBtn.hoverColor = 0xFF6B8E23; // olive / 草绿 ✓
+        okBtn.sweepColor = 0xFF6B8E23; // 点击扫光 = 草绿 ✓（用户要的是**点击后刷过去**的颜色）
         row.add(okBtn);
         // ★ 用户要求 ✓：第二个键从「取消」改成「**删除**」——
         //   删除 = 删掉这个尺寸及其约束（几何留在原地 ✓ 只是重新变欠约束 ✓ 与 SolidWorks 一致 ✓）
@@ -203,7 +203,7 @@ public final class SketchHud {
                     }
                     Ui.close(EDIT_LAYER);
                 });
-        delBtn.hoverColor = 0xFFB03030; // 删除 ⇒ 红 ✓
+        delBtn.sweepColor = 0xFFB03030; // 点击扫光 = 红 ✓
         row.add(delBtn);
         box.add(row);
         layer.root.add(box);

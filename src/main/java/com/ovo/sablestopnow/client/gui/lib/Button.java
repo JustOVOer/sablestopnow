@@ -47,6 +47,14 @@ public class Button extends Widget {
     public boolean toggled;
     public int toggledColor = 0;
 
+    /**
+     * **点击扫光**的颜色 ✓（0 = 用主题默认的浅蓝 ✓）。
+     *
+     * <p>用户要求（实测反馈）："点确定这类按键时，背景刷过去的颜色改草绿；删除/取消改红色" ✓
+     * —— 注意他说的是**点下去刷过去的那道色**（sweep ✓），不是悬停底色 ✗。
+     */
+    public int sweepColor = 0;
+
     public final Anim hover = Anim.of(0.0).speed(20.0);
 
     /**
@@ -282,14 +290,16 @@ public class Button extends Widget {
         final float alpha = sweepAlpha();
         if (progress > 0.0f && alpha > 0.01f) {
             final int swept = Math.round(w * progress);
-            UiDraw.rect(g, x, y, swept, h, UiDraw.fade(th.sweep, alpha));
+            UiDraw.rect(g, x, y, swept, h,
+                    UiDraw.fade(sweepColor == 0 ? th.sweep : sweepColor, alpha));
             // 前缘一道更亮的细边：扫过的动作才看得出「刷」的方向
             if (progress < 1.0f && swept > 0) {
                 UiVector.line(g, x + swept - 0.5, y + 0.5, x + swept - 0.5, y + h - 0.5,
                         1.5f, UiDraw.fade(0xFFFFFFFF, alpha * 0.75f));
             }
             // 扫光期间覆盖边框，避免浅蓝底 + 深蓝框显得脏
-            UiDraw.rectOutline(g, x, y, w, h, UiDraw.fade(th.sweepEdge, alpha), 1);
+            UiDraw.rectOutline(g, x, y, w, h,
+                    UiDraw.fade(sweepColor == 0 ? th.sweepEdge : sweepColor, alpha), 1);
         }
 
         final String text = raw();

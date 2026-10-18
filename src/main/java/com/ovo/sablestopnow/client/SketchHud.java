@@ -277,6 +277,8 @@ public final class SketchHud {
         com.ovo.sablestopnow.client.model.ModelUi.syncSketchTreeHighlight();
         // ★ 需求 1：悬停在图元上时，鼠标**右上方**小字显示它的名称+编号（如"直线3"✓）
         drawHoverName(event.getGuiGraphics(), mc);
+        // ★ 需求 ⑥：**原点 + 坐标轴箭头**（SolidWorks 风格 ✓ 常驻显示 ✓）
+        drawOriginAxes(event.getGuiGraphics(), mc);
         // ★ 诊断 ✓：把"上次吸附→约束的判定"打出来（只在变化时打 ✓ 不刷屏 ✓）
         //   用户实测"圆弧端点固定仍未做"✗ ⇒ 这行会告诉我们：有没有吸到弧端点、px/py 是不是有效变量 ✓
         final String snapDiag = SketchSession.lastSnapDiag;
@@ -820,6 +822,81 @@ public final class SketchHud {
      * <p>名称 = 图元种类 + **同类序号**（从 1 开始 ✓ 例如"直线3"、"圆弧1"）✓
      * 序号按图元在草图里的顺序数同类 ⇒ 与左栏的编号口径一致、稳定不跳 ✓。
      */
+    /**
+     * **原点 + 坐标轴箭头** ✓（需求 ⑥，参考 SolidWorks 的草图原点 ✓）。
+     *
+     * <p>画在**屏幕空间** ✓（复用主循环同一条投影 ✓ ⇒ 看到的与可吸附的位置一致 ✓）。
+     * 原点用白色小方框 ✓；U 轴红、V 轴绿（与 SolidWorks 的 X 红 / Y 绿一致 ✓）。
+     */
+    private static void drawOriginAxes(final net.minecraft.client.gui.GuiGraphics g,
+                                       final Minecraft mc) {
+        if (!SketchClient.active() || mc.level == null) {
+            return;
+        }
+        final SketchSession session = SketchClient.mode().session();
+        final var work = session == null ? null : session.working();
+        if (work == null) {
+            return;
+        }
+        dev.ryanhcode.sable.sublevel.ClientSubLevel sub = null;
+        if (dev.ryanhcode.sable.api.sublevel.SubLevelContainer.getContainer(mc.level)
+                instanceof final dev.ryanhcode.sable.api.sublevel.ClientSubLevelContainer c) {
+            for (final dev.ryanhcode.sable.sublevel.ClientSubLevel s : c.getAllSubLevels()) {
+                if (s.getUniqueId().equals(work.body())) {
+                    sub = s;
+                }
+            }
+        }
+        if (sub == null) {
+            return;
+        }
+        final org.joml.Vector3d tmp = new org.joml.Vector3d();
+        final double[] o = projectUv(work, sub, mc, tmp, 0.0, 0.0);
+        if (o == null) {
+            return;
+        }
+        // 原点：小方框 ✓（白 ✓ 与普通点区分 ✓）
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, o[0] - 4, o[1] - 4, o[0] + 4, o[1] - 4,
+                1.2f, 0xFFFFFFFF);
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, o[0] + 4, o[1] - 4, o[0] + 4, o[1] + 4,
+                1.2f, 0xFFFFFFFF);
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, o[0] + 4, o[1] + 4, o[0] - 4, o[1] + 4,
+                1.2f, 0xFFFFFFFF);
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, o[0] - 4, o[1] + 4, o[0] - 4, o[1] - 4,
+                1.2f, 0xFFFFFFFF);
+        // U 轴（红 ✓）/ V 轴（绿 ✓）：短线 + 两笔箭头 ✓
+        arrow(g, work, sub, mc, tmp, o, 0.45, 0.0, 0xFFFF5555);
+        arrow(g, work, sub, mc, tmp, o, 0.0, 0.45, 0xFF55FF55);
+    }
+
+    /** 从原点画一支带箭头的轴 ✓（屏幕空间 ✓）。 */
+    private static void arrow(final net.minecraft.client.gui.GuiGraphics g,
+                              final com.ovo.sablestopnow.sketch.Sketch work,
+                              final dev.ryanhcode.sable.sublevel.ClientSubLevel sub,
+                              final Minecraft mc, final org.joml.Vector3d tmp,
+                              final double[] o, final double du, final double dv, final int argb) {
+        final double[] tip = projectUv(work, sub, mc, tmp, du, dv);
+        if (tip == null) {
+            return;
+        }
+        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, o[0], o[1], tip[0], tip[1], 1.6f, argb);
+        final double dx = tip[0] - o[0];
+        final double dy = tip[1] - o[1];
+        final double len = Math.hypot(dx, dy);
+        if (len < 1.0e-6) {
+            return;
+        }
+        final double ux = dx / len;
+        final double uy = dy / len;
+        // 箭头两笔 ✓（沿反方向各偏 30° ✓）
+        for (final double sgn : new double[] {1.0, -1.0}) {
+            final double ax = ux * Math.cos(0.5) - uy * Math.sin(0.5) * sgn;
+            final double ay = ux * Math.sin(0.5) * sgn + uy * Math.cos(0.5);
+            com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, tip[0], tip[1],
+                    tip[0] - ax * 7.0, tip[1] - ay * 7.0, 1.6f, argb);
+        }
+    }
+
     /** 上次已打印的吸附诊断 ✓（只在变化时打日志 ✓ 免得刷屏 ✓）。 */
     private static String lastSnapDiagLogged = "";
 

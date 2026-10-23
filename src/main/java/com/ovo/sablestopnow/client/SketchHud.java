@@ -305,7 +305,10 @@ public final class SketchHud {
         }
         // 辅助线用**虚线**画一遍 ✓（SolidWorks 的构造几何就是虚线 ✓ 创建方式与直线一致 ✓）
         // 不参与轮廓/拉伸 ✓（SketchProfiles ×2 + Extrude ×1 已跳过 ✓）
-        drawConstructionOverlay(event.getGuiGraphics(), mc);
+        // ★ 需求 ①：辅助线的虚线改在**世界渲染层**画（`SketchRenderer.drawConstruction`）✓
+        //   ⇒ 这里**不再叠一层 HUD 虚线** ✗ —— 两层叠在同一位置会互相补齐缝隙，
+        //     看起来反而又变成实线 ✓（这正是用户实测"仍然没有画成虚线"的原因之一 ✓）
+        // drawConstructionOverlay(event.getGuiGraphics(), mc);
 
         UiLayer layer = Ui.layer(LAYER);
         if (layer == null) {

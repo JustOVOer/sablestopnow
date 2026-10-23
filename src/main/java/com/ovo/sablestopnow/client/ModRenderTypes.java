@@ -79,6 +79,31 @@ public class ModRenderTypes {
     public static final RenderType BOXES_NO_DEPTH = boxType("sablestopnow_boxes_no_depth", true);
 
     /**
+     * 草图**背景网格** ✓（需求 ②）：半透明填充 + 半透明细线。
+     *
+     * <p>为什么用 QUADS 而不是 LINES ✗✓：线宽在驱动间不一致（这也是本类里 BOXES 存在的原因），
+     * 网格线要求"细且均匀" ⇒ 用**细长方条**画，跨平台观感一致 ✓
+     * <p>{@code COLOR_WRITE}（不写深度）⇒ 网格不会挡住它后面的东西，也不会被后来的图元"切"出缝 ✓
+     */
+    public static final RenderType SKETCH_GRID = RenderType.create(
+            "sablestopnow_sketch_grid",
+            DefaultVertexFormat.POSITION_COLOR,
+            VertexFormat.Mode.QUADS,
+            1536,
+            false,
+            true,
+            RenderType.CompositeState.builder()
+                    .setShaderState(RenderStateShard.POSITION_COLOR_SHADER)
+                    .setLayeringState(RenderStateShard.VIEW_OFFSET_Z_LAYERING)
+                    .setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
+                    .setOutputState(RenderStateShard.ITEM_ENTITY_TARGET)
+                    .setWriteMaskState(RenderStateShard.COLOR_WRITE)
+                    .setCullState(RenderStateShard.NO_CULL)
+                    .setDepthTestState(RenderStateShard.LEQUAL_DEPTH_TEST)
+                    .createCompositeState(false)
+    );
+
+    /**
      * 实体**贴图**：方块图集 + alpha 裁剪。
      *
      * <p>用原版的 {@code entityCutoutNoCull} 而不是自己拼 CompositeState：

@@ -58,6 +58,11 @@ public final class SketchRenderer {
 
     /** 圆/圆弧**圆心**的常驻标记色 ✓（与小点区分开 ✓ 见 C-2 用户要求）。 */
     private static final float[] CENTER_COLOR = {0.50f, 0.70f, 1.00f, 1.00f};
+    /**
+     * 辅助线（构造几何）的颜色 ✓ —— 比实体线暗一档、偏蓝灰 ✓
+     * （需求 ①：辅助线必须画成**虚线** ✓ 用户实测"仍然没有画成虚线"✗）
+     */
+    private static final float[] CONSTRUCTION_COLOR = {0.62f, 0.66f, 0.78f, 1.00f};
 
     /** 圆的折线段数。草图阶段够用；精确圆弧是拉伸阶段的事。 */
     private static final int CIRCLE_SEGMENTS = 48;
@@ -287,6 +292,14 @@ public final class SketchRenderer {
         if (working != null) {
             final ClientSubLevel wsub = byId.get(working.body());
             if (wsub != null) {
+                // ★ 需求 ②：**常驻背景网格** ✓ 必须先画（在图元下面）✓
+                //   独立缓冲源：从同一个 BufferSource 取第二个 RenderType 会结束掉前一个 builder ✓
+                final MultiBufferSource.BufferSource gridBuf =
+                        MultiBufferSource.immediate(
+                                new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+                final VertexConsumer vcGrid = gridBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
+                drawSketchGrid(vcGrid, pose, cameraPos, wsub.renderPose(), working);
+                gridBuf.endBatch();
                 drawn += drawSketch(vc, pose, cameraPos, wsub.renderPose(), working, EDITING_COLOR);
                 // 旋转轴的高亮画在草图之后：它是"参考"，被图元压住就白画了
                 drawn += drawRevolveAxis(vc, pose, cameraPos, wsub.renderPose(), working);
@@ -668,7 +681,100 @@ public final class SketchRenderer {
                 lines += drawKeyMarkers(vc, pose, cameraPos, renderPose, sketch, entity);
             }
         }
+        // ★ 需求 ①：辅助线在**世界渲染**里画成虚线 ✓
+        //   以前这里是 `continue` 跳过、全靠 HUD 那层屏幕空间虚线 ✗
+        //   ⇒ 那层没画（投影失败/被裁/被别的层盖住）时，辅助线就"看不见"或"看着是实线" ✓
+        //   ⇒ 现在改在世界空间画虚线段 ✓ 与实体线同一套投影 ⇒ 必然对齐 ✓
+        lines += drawConstruction(vc, pose, cameraPos, renderPose, sketch);
         return lines;
+    }
+
+    /**
+     * 画所有**辅助线**（构造几何）为虚线 ✓（需求 ①）。
+     *
+     * <p>直线按平面长度切段（0.10 格实 + 0.07 格空）；圆/弧**隔段画**（视觉上就是虚线环）✓
+     * 只用现有 `line(...)` ⇒ 不引入新的渲染类型，也不影响实体线的绘制路径 ✓
+     */
+    private static int drawConstruction(final VertexConsumer vc, final PoseStack.Pose pose,
+                                        final Vec3 cameraPos, final Pose3dc renderPose,
+                                        final Sketch sketch) {
+        int drawn = 0;
+        for (final Sketch.Entity entity : sketch.entities()) {
+            if (!sketch.isConstruction(entity)) {
+                continue;
+            }
+            final int[] v = entity.vars();
+            switch (entity.kind()) {
+                case LINE -> {
+                    final double x0 = sketch.variable(v[0]);
+                    final double y0 = sketch.variable(v[1]);
+                    final double x1 = sketch.variable(v[2]);
+                    final double y1 = sketch.variable(v[3]);
+                    final double dx = x1 - x0;
+                    final double dy = y1 - y0;
+                    final double len = Math.hypot(dx, dy);
+                    if (len < 1.0e-9) {
+                        continue;
+                    }
+                    final double ux = dx / len;
+                    final double uy = dy / len;
+                    final double dash = 0.10;
+                    final double gap = 0.07;
+                    double at = 0.0;
+                    while (at < len) {
+                        final double end = Math.min(len, at + dash);
+                        line(vc, pose,
+                                world(cameraPos, renderPose, sketch,
+                                        x0 + ux * at, y0 + uy * at),
+                                world(cameraPos, renderPose, sketch,
+                                        x0 + ux * end, y0 + uy * end),
+                                CONSTRUCTION_COLOR);
+                        drawn++;
+                        at = end + gap;
+                    }
+                }
+                case CIRCLE -> {
+                    final double cx = sketch.variable(v[0]);
+                    final double cy = sketch.variable(v[1]);
+                    final double r = Math.abs(sketch.variable(v[2]));
+                    if (r < 1.0e-9) {
+                        continue;
+                    }
+                    for (int i = 0; i < CIRCLE_SEGMENTS; i += 2) {
+                        final double a0 = 2.0 * Math.PI * i / CIRCLE_SEGMENTS;
+                        final double a1 = 2.0 * Math.PI * (i + 1) / CIRCLE_SEGMENTS;
+                        line(vc, pose,
+                                world(cameraPos, renderPose, sketch,
+                                        cx + r * Math.cos(a0), cy + r * Math.sin(a0)),
+                                world(cameraPos, renderPose, sketch,
+                                        cx + r * Math.cos(a1), cy + r * Math.sin(a1)),
+                                CONSTRUCTION_COLOR);
+                        drawn++;
+                    }
+                }
+                case ARC -> {
+                    final double sweep = sketch.arcSweep(entity);
+                    final int segs = Math.max(4,
+                            (int) Math.ceil(CIRCLE_SEGMENTS * Math.abs(sweep) / (2.0 * Math.PI)));
+                    for (int i = 0; i < segs; i += 2) {
+                        final double[] p0 = sketch.arcPoint(entity, (double) i / segs);
+                        final double[] p1 = sketch.arcPoint(entity, (double) (i + 1) / segs);
+                        if (p0 == null || p1 == null) {
+                            continue;
+                        }
+                        line(vc, pose,
+                                world(cameraPos, renderPose, sketch, p0[0], p0[1]),
+                                world(cameraPos, renderPose, sketch, p1[0], p1[1]),
+                                CONSTRUCTION_COLOR);
+                        drawn++;
+                    }
+                }
+                default -> {
+                    // 辅助的"点"不画虚线（点没有线可画）✓ 悬停时仍有关键点标识 ✓
+                }
+            }
+        }
+        return drawn;
     }
 
     /**
@@ -1006,5 +1112,69 @@ public final class SketchRenderer {
         vc.addVertex(pose, (float) b.x, (float) b.y, (float) b.z)
                 .setColor(color[0], color[1], color[2], 1.0f)
                 .setNormal(pose, 0.0f, 1.0f, 0.0f);
+    }
+
+    // ================= 草图背景网格（需求 ②） =================
+
+    /** 网格半宽（格）：±40 ⇒ 80×80 格，足够罩住一个面上的草图 ✓ */
+    private static final int GRID_HALF = 40;
+    /** 网格线半宽（格）：0.02 格 ≈ 2cm，细且稳定（不依赖 GL 线宽）✓ */
+    private static final double GRID_LINE_HALF = 0.02;
+    /** 淡灰 #C8C8C8 ✓ */
+    private static final float GRID_GREY = 0.784f;
+
+    /**
+     * 画**草图常驻背景网格** ✓（需求 ②）。
+     *
+     * <p>规格（用户指定）：间距 **1 格**；网格线淡灰 70% 不透明、细线；
+     * 背景同一淡灰 20% 不透明。范围 ±40 格，以草图原点 (0,0) 为中心 ✓
+     * <p>用 **QUADS 细长条**画线（与 BOXES 同思路）⇒ 线宽跨平台一致 ✓
+     */
+    private static void drawSketchGrid(final VertexConsumer vc, final PoseStack.Pose pose,
+                                       final Vec3 cameraPos, final Pose3dc renderPose,
+                                       final Sketch sketch) {
+        final double h = GRID_HALF;
+        // ① 背景填充（20%）
+        quad(vc, pose,
+                world(cameraPos, renderPose, sketch, -h, -h),
+                world(cameraPos, renderPose, sketch, h, -h),
+                world(cameraPos, renderPose, sketch, h, h),
+                world(cameraPos, renderPose, sketch, -h, h),
+                GRID_GREY, 0.20f);
+        // ② 网格线（70%）：竖线（沿 V 走）+ 横线（沿 U 走）
+        final double w = GRID_LINE_HALF;
+        for (int i = -GRID_HALF; i <= GRID_HALF; i++) {
+            final double c = i;
+            // 竖线：u = c
+            quad(vc, pose,
+                    world(cameraPos, renderPose, sketch, c - w, -h),
+                    world(cameraPos, renderPose, sketch, c + w, -h),
+                    world(cameraPos, renderPose, sketch, c + w, h),
+                    world(cameraPos, renderPose, sketch, c - w, h),
+                    GRID_GREY, 0.70f);
+            // 横线：v = c
+            quad(vc, pose,
+                    world(cameraPos, renderPose, sketch, -h, c - w),
+                    world(cameraPos, renderPose, sketch, h, c - w),
+                    world(cameraPos, renderPose, sketch, h, c + w),
+                    world(cameraPos, renderPose, sketch, -h, c + w),
+                    GRID_GREY, 0.70f);
+        }
+    }
+
+    /** 一个带 alpha 的四边形 ✓（顶点格式 POSITION_COLOR ✓ 给 {@code SKETCH_GRID} 用）。 */
+    private static void quad(final VertexConsumer vc, final PoseStack.Pose pose,
+                            final Vec3 a, final Vec3 b, final Vec3 c, final Vec3 d,
+                            final float grey, final float alpha) {
+        putVertex(vc, pose, a, grey, alpha);
+        putVertex(vc, pose, b, grey, alpha);
+        putVertex(vc, pose, c, grey, alpha);
+        putVertex(vc, pose, d, grey, alpha);
+    }
+
+    private static void putVertex(final VertexConsumer vc, final PoseStack.Pose pose,
+                                  final Vec3 p, final float grey, final float alpha) {
+        vc.addVertex(pose, (float) p.x, (float) p.y, (float) p.z)
+                .setColor(grey, grey, grey, alpha);
     }
 }

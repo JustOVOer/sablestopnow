@@ -2321,6 +2321,9 @@ public final class ModelUi {
                 // 圆弧：三次点击（圆心 → 起点 → 终点）
                 row.add(sketchToolButton("model.sketch.tool.arc",
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.ARC, session));
+                // ★ 需求 ⑤：**贝塞尔**（四次点击 P0 → C1 → P3 → C2 ✓ 两个手柄是辅助线 ✓）
+                row.add(sketchToolButton("model.sketch.tool.bezier",
+                        com.ovo.sablestopnow.sketch.SketchSession.Tool.BEZIER, session));
                 // ★ **辅助线** ✓：按用户要求放在**图元按键**里 ✓ 且是**直接绘制**模式 ✓（不是转换 ✗）
                 //   开启后用直线工具画出来的图元**直接就是辅助线** ✓（虚线外观 ✓ 不计入轮廓/拉伸 ✓）
                 final var constructionTool = new com.ovo.sablestopnow.client.gui.lib.Button(

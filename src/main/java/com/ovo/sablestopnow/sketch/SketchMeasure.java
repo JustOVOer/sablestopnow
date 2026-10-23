@@ -75,7 +75,8 @@ public final class SketchMeasure {
     private static boolean isPointLike(final Sketch.Entity entity) {
         return switch (entity.kind()) {
             case POINT, CIRCLE, ARC -> true;
-            case LINE -> false;
+            // 贝塞尔是一条曲线 ⇒ 不能当"一个点"来配约束 ✓（需求 ⑤）
+            case LINE, BEZIER -> false;
         };
     }
 
@@ -651,6 +652,8 @@ public final class SketchMeasure {
                         sketch.arcRadius(e), true, SketchSolver.ARC_RADIUS,
                         new int[] {v[0], v[1], v[2], v[3], v[4], v[5]});
                 case POINT -> null; // 单个点没有尺寸（它的位置由别的尺寸决定）
+                // 贝塞尔：暂不给尺寸（曲线长度不是求解器支持的约束 ✓ 需求 ⑤ 未完部分）
+                case BEZIER -> null;
             };
         }
         // --- 两个图元：复用已有的测量 + 可约束判定 ---
@@ -1396,7 +1399,7 @@ public final class SketchMeasure {
         final int[] v = entity.vars();
         return switch (entity.kind()) {
             case POINT, CIRCLE, ARC -> new double[] {sketch.variable(v[0]), sketch.variable(v[1])};
-            case LINE -> null;
+            case LINE, BEZIER -> null;
         };
     }
 
@@ -1405,7 +1408,7 @@ public final class SketchMeasure {
         return switch (entity.kind()) {
             case CIRCLE -> Math.abs(sketch.variable(entity.vars()[2]));
             case ARC -> sketch.arcRadius(entity);
-            case POINT, LINE -> null;
+            case POINT, LINE, BEZIER -> null;
         };
     }
 

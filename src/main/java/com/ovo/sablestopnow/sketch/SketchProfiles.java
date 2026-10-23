@@ -28,6 +28,9 @@ public final class SketchProfiles {
     /** 默认焊接容差（格）：端点相距小于它就当成同一个点。 */
     public static final double DEFAULT_WELD_TOLERANCE = 1.0e-4;
 
+    /** 贝塞尔曲线在**轮廓焊接/拉伸**时的采样段数 ✓（需求 ⑤：曲线参与轮廓 ✓）。 */
+    public static final int BEZIER_SEGMENTS = 32;
+
     /**
      * 一条闭合轮廓。
      *
@@ -172,12 +175,13 @@ public final class SketchProfiles {
      * </ol>
      */
     private static List<Profile> lineProfiles(final Sketch sketch, final double tolerance,
-                                              final Sampling sampling) {
-        final List<Sketch.Entity> edges = new ArrayList<>();
+                                              final Sampling sampling) {        final List<Sketch.Entity> edges = new ArrayList<>();
         for (final Sketch.Entity entity : sketch.entities()) {
             if (sketch.isConstruction(entity)) { continue; } // 辅助线**不参与轮廓/拉伸** ✓（SolidWorks 一致 ✓）
             // 弧有两个端点，和线段一样参与端点焊接
-            if (entity.kind() == Sketch.EntityKind.LINE || entity.kind() == Sketch.EntityKind.ARC) {
+            // ★ 需求 ⑤：**贝塞尔也参与轮廓** ✓（用户明确要求 ✓ 可拉伸/碰撞 ✓）
+            if (entity.kind() == Sketch.EntityKind.LINE || entity.kind() == Sketch.EntityKind.ARC
+                    || entity.kind() == Sketch.EntityKind.BEZIER) {
                 edges.add(entity);
             }
         }
@@ -236,10 +240,13 @@ public final class SketchProfiles {
         return out;
     }
 
-    /** 一条边在参数 {@code t ∈ [0,1]} 处的点：线段线性插值，弧按角度扫。 */
+    /** 一条边在参数 {@code t ∈ [0,1]} 处的点：线段线性插值，弧按角度扫，贝塞尔按三次多项式 ✓。 */
     public static double[] pointOn(final Sketch sketch, final Sketch.Entity edge, final double t) {
         if (edge.kind() == Sketch.EntityKind.ARC) {
             return sketch.arcPoint(edge, t);
+        }
+        if (edge.kind() == Sketch.EntityKind.BEZIER) {
+            return sketch.bezierPoint(edge, t);
         }
         final int[] v = edge.vars();
         final double ax = sketch.variable(v[0]);
@@ -266,7 +273,8 @@ public final class SketchProfiles {
                                    final Sketch.Entity edge, final boolean forward,
                                    final Sampling sampling) {
         final int segments = edge.kind() == Sketch.EntityKind.ARC
-                ? arcSegments(sketch, edge, sampling) : 1;
+                ? arcSegments(sketch, edge, sampling)
+                : (edge.kind() == Sketch.EntityKind.BEZIER ? BEZIER_SEGMENTS : 1);
         for (int i = 1; i <= segments; i++) {
             final double t = (double) i / segments;
             final double[] p = pointOn(sketch, edge, forward ? t : 1.0 - t);

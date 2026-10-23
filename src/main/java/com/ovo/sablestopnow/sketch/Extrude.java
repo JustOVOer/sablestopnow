@@ -267,7 +267,9 @@ public final class Extrude {
     public static boolean hasCurvature(final Sketch sketch) {
         for (final Sketch.Entity e : sketch.entities()) {
             if (sketch.isConstruction(e)) { continue; } // 辅助线**不参与轮廓/拉伸** ✓（SolidWorks 一致 ✓）
-            if (e.kind() == Sketch.EntityKind.CIRCLE || e.kind() == Sketch.EntityKind.ARC) {
+            if (e.kind() == Sketch.EntityKind.CIRCLE || e.kind() == Sketch.EntityKind.ARC
+                    // ★ 需求 ⑤：贝塞尔也是曲线 ⇒ 走"棱盒分解"才能贴合 ✓
+                    || e.kind() == Sketch.EntityKind.BEZIER) {
                 return true;
             }
         }

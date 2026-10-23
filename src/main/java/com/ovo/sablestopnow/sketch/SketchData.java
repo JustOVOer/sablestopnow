@@ -148,6 +148,16 @@ public class SketchData extends SavedData {
         }
         entry.put("entities", entities);
 
+        // ★ 辅助线标记 ✓（需求 ④ 顺带修：**以前根本没存** ✗ ⇒ 存档重进后虚线变实线 ✓）
+        //   用"kind + 全部变量下标"的字符串键 ✓（共享变量的圆弧辅助线才不会撞车 ✓）
+        final ListTag construction = new ListTag();
+        for (final String key : sketch.constructionKeys()) {
+            construction.add(net.minecraft.nbt.StringTag.valueOf(key));
+        }
+        if (!construction.isEmpty()) {
+            entry.put("construction", construction);
+        }
+
         final ListTag constraints = new ListTag();
         for (final Sketch.Constraint c : sketch.constraints()) {
             final CompoundTag ct = new CompoundTag();
@@ -212,6 +222,14 @@ public class SketchData extends SavedData {
             }
 
             sketch.restore(readDoubles(entry, "vars"), entities, constraints);
+            // ★ 辅助线标记 ✓（旧存档没有这个键 ⇒ 空 ✓ 向后兼容 ✓）
+            final ListTag consList = entry.getList("construction", Tag.TAG_STRING);
+            for (int i = 0; i < consList.size(); i++) {
+                sketch.addConstructionKey(consList.getString(i));
+            }
+            // ★ 需求 ④ 迁移：旧存档里的圆弧**没有两条辅助线** ⇒ 自动补上 ✓
+            //   （幂等 ⇒ 新存档里已经有那两条线时什么也不做 ✓）
+            sketch.ensureAllArcHandles();
             return sketch;
         } catch (final Exception e) {
             return null;

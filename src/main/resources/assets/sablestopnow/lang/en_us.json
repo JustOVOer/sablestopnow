@@ -682,5 +682,6 @@
   "model.coupling.bad_teeth": "齿数必须是 1..4096 的整数 | Teeth must be 1..4096",
   "model.coupling.ratio_value": "传动比 %1$s（A 转 1 圈 B 反向转 %2$s 圈） | ratio %1$s",
   "model.coupling.remove": "删除该耦合 | Delete coupling",
-  "model.relation.concentric": "Concentric"
+  "model.relation.concentric": "Concentric",
+  "model.sketch.tool.bezier": "Bezier"
 }

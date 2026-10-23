@@ -376,6 +376,10 @@ public final class SketchClient {
         // ★ 开启"画线时终点也落吸附约束" ✓（客户端专属 ⇒ 离线用例不受影响 ✓）
         if (MODE.session() != null) {
             MODE.session().setSnapLineEnd(true);
+            // ★ 需求 ④：客户端开启"画弧时生成两条辅助线"✓（离线用例不受影响 ✓）
+            MODE.session().setArcHandles(true);
+            // ★ 需求 ⑤：客户端开启"画贝塞尔时生成两条手柄辅助线"✓
+            MODE.session().setBezierHandles(true);
         }
         // Ctrl 按下 = 多选增删。读键盘只能在客户端这一层做（SketchMode 不依赖 Minecraft）。
         // ★ 智能尺寸工具：左键 = 在指针处**放置**当前预览到的候选 ✓（SolidWorks 的左键放置 ✓）

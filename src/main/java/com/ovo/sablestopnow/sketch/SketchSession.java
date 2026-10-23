@@ -55,7 +55,14 @@ public final class SketchSession {
          * <p>选这个输入法（而不是三点定弧）是为了**表示唯一**：
          * 圆心+起终点直接给出「从 a0 逆时针扫到 a1」，不必靠"走哪边"消歧义。
          */
-        ARC
+        ARC,
+        /**
+         * **三次贝塞尔**（需求 ⑤）：**四次点击** ——
+         * {@code P0(手柄1起点) → C1(手柄1终点) → P3(手柄2起点) → C2(手柄2终点)} ✓
+         *
+         * <p>落下第 3 点后要**实时预览**曲线 ✓（用户明确要求 ✓）
+         */
+        BEZIER
     }
 
     /**
@@ -107,6 +114,27 @@ public final class SketchSession {
      * （7 项断言当场报红 ✗）⇒ 由**客户端**开启 ✓ 测试不受影响 ✓。
      */
     private boolean snapLineEnd;
+
+    /**
+     * 画弧时是否同时生成**两条辅助线** ✓（需求 ④）。
+     *
+     * <p>⚠ 默认 **false** ✓：离线用例断言了"画弧只多出 6 个变量/一条弧"这类不变量 ✗
+     * 加了辅助线会改变图元数 ⇒ 由**客户端**开启 ✓ 测试不受影响 ✓（与 {@code snapLineEnd} 同一套路 ✓）
+     */
+    private boolean arcHandles;
+
+    /** 画贝塞尔时是否同时生成两条手柄辅助线 ✓（需求 ⑤；客户端开、离线默认关 ✓）。 */
+    private boolean bezierHandles;
+
+    /** 由客户端开启"画贝塞尔时生成两条手柄辅助线" ✓。 */
+    public void setBezierHandles(final boolean value) {
+        this.bezierHandles = value;
+    }
+
+    /** 由客户端开启"画弧时生成两条辅助线" ✓。 */
+    public void setArcHandles(final boolean value) {
+        this.arcHandles = value;
+    }
 
     /** 由客户端开启"终点也吸附成约束" ✓。 */
     public void setSnapLineEnd(final boolean value) {
@@ -579,7 +607,8 @@ public final class SketchSession {
             // ⇒ 用求解器按 6 个操作数定义的 ARC_RADIUS（kind 19 ✓）✓
             case ARC -> working.addConstraint(SketchSolver.ARC_RADIUS, value,
                     v[0], v[1], v[2], v[3], v[4], v[5]);
-            case POINT -> null;
+            // 贝塞尔（需求 ⑤）：暂时不给"半径/长度"这类尺寸 ✓（曲线长度不是求解器支持的约束 ✓）
+            case POINT, BEZIER -> null;
         };
     }
 
@@ -698,6 +727,8 @@ public final class SketchSession {
         final int[] v = entity.vars();
         return switch (entity.kind()) {
             case POINT, CIRCLE, ARC -> new int[] {v[0], v[1]};
+            // 贝塞尔：起点就是它的"代表点" ✓（终点 v[6],v[7] 在选目标时另有处理 ✓）
+            case BEZIER -> new int[] {v[0], v[1]};
             case LINE -> null;
         };
     }
@@ -813,6 +844,8 @@ public final class SketchSession {
                 // 圆弧：不能像圆那样只看"到圆周的距离" —— 那样点在弧的**反面延长线**上也会被选中。
                 // 取"到这个弧的折线近似"的距离（折线段数够密，玩家看不出它是折线）。
                 case ARC -> distanceToArc(u, v, working, entity);
+                // 贝塞尔（需求 ⑤）：同样按**折线近似**取距离 ✓
+                case BEZIER -> distanceToBezier(u, v, working, entity);
             };
             if (distance <= bestDistance) {
                 bestDistance = distance;
@@ -844,9 +877,25 @@ public final class SketchSession {
         return best;
     }
 
+    /** 点到**贝塞尔**的距离 ✓（按 32 段折线近似，与弧同一套路 ✓）。 */
+    private static double distanceToBezier(final double px, final double py, final Sketch sketch,
+                                           final Sketch.Entity curve) {
+        final int segments = 32;
+        double best = Double.MAX_VALUE;
+        double[] prev = sketch.bezierPoint(curve, 0.0);
+        for (int i = 1; i <= segments; i++) {
+            final double[] cur = sketch.bezierPoint(curve, (double) i / segments);
+            if (prev == null || cur == null) {
+                return Double.MAX_VALUE;
+            }
+            best = Math.min(best, distanceToSegment(px, py, prev[0], prev[1], cur[0], cur[1]));
+            prev = cur;
+        }
+        return best;
+    }
+
     /** 点到线段的距离。 */
-    private static double distanceToSegment(final double px, final double py,
-                                            final double ax, final double ay,
+    private static double distanceToSegment(final double px, final double py,                                            final double ax, final double ay,
                                             final double bx, final double by) {
         final double dx = bx - ax;
         final double dy = by - ay;
@@ -1230,6 +1279,21 @@ public final class SketchSession {
                         }
                     }
                 }
+                case BEZIER -> {
+                    // ★ 需求 ⑤：贝塞尔的**两个端点**也能吸附/落约束 ✓（和弧端点同一套路 ✓）
+                    final int[] bv = entity.vars();
+                    final double[][] bEnds = {{working.variable(bv[0]), working.variable(bv[1])},
+                            {working.variable(bv[6]), working.variable(bv[7])}};
+                    final int[][] bEndVars = {{bv[0], bv[1]}, {bv[6], bv[7]}};
+                    for (int i = 0; i < bEnds.length; i++) {
+                        final double d = Math.hypot(u - bEnds[i][0], v - bEnds[i][1]);
+                        if (d <= bestDistance) {
+                            bestDistance = d;
+                            best = new KeyPoint(bEnds[i][0], bEnds[i][1], KeyKind.ENDPOINT,
+                                    entity, bEndVars[i][0], bEndVars[i][1]);
+                        }
+                    }
+                }
                 default -> {
                 }
             }
@@ -1588,6 +1652,16 @@ public final class SketchSession {
                     return true;
                 }
             }
+            case BEZIER -> {
+                // 需求 ⑤：P0 → C1 → P3 → C2 四次点击 ✓
+                pending.add(new double[] {u, v});
+                if (pending.size() == 4) {
+                    addBezierFromFourPoints(pending.get(0), pending.get(1),
+                            pending.get(2), pending.get(3));
+                    pending.clear();
+                    return true;
+                }
+            }
             default -> {
                 return false;
             }
@@ -1766,12 +1840,38 @@ public final class SketchSession {
                 "c=(%.2f,%.2f) s=(%.2f,%.2f) e=(%.2f,%.2f) a0=%.1f a1=%.1f d=%.1f cw=%s",
                 center[0], center[1], start[0], start[1], end[0], end[1],
                 Math.toDegrees(a0), Math.toDegrees(a1), Math.toDegrees(delta), clockwise);
+        // ★ 修"圆弧圆心钉不住"同样的坑 ✓：**建弧之前**先把圆心该吸的关键点拾好 ✓
+        //   （建完弧再拾 ⇒ 拾到的是弧自己的圆心、距离 0 ⇒ 被退化保护丢掉 ✗）
+        final KeyPoint kpCenter = pickKeyPoint(center[0], center[1], 0.15);
         final Sketch.Entity arc = working.addArcPoints(center[0], center[1],
                 start[0], start[1], end[0], end[1], clockwise);
-        // ★★ 修实测"圆弧圆心没有钉住" ✓✓ —— 圆心按**自己的坐标**拾关键点并落约束 ✓
-        //   （原来走 constrainToSnap ⇒ 拿到的是第 3 次点击的**终点**吸附 ✗ 圆心永远落不上 ✓）
+        // ★ 需求 ④：圆弧改为"**由两条辅助线生成**" ✓（客户端开启；默认关 ⇒ 离线用例不变 ✓）
+        if (arcHandles) {
+            working.ensureArcHandles(arc);
+        }
         final int[] v = arc.vars();
-        constrainAt(new int[] {v[0], v[1]}, center[0], center[1]);
+        this.pendingSnap = kpCenter;
+        constrainToSnap(new int[] {v[0], v[1]});
+    }
+
+    /**
+     * 由**四次点击**造一条三次贝塞尔 ✓（需求 ⑤）：
+     * {@code P0(手柄1起点) → C1(手柄1终点) → P3(手柄2起点) → C2(手柄2终点)} ✓
+     *
+     * <p>两个手柄是**辅助线**，与曲线**共享变量** ⇒ 拖手柄曲线立刻跟着变 ✓
+     * 端点吸附和直线一样落重合约束 ✓（**建之前**先拾关键点，避免拾到自己 ✗）
+     */
+    private void addBezierFromFourPoints(final double[] p0, final double[] c1,
+                                         final double[] p3, final double[] c2) {
+        final KeyPoint kp0 = pickKeyPoint(p0[0], p0[1], 0.15);
+        final KeyPoint kp3 = pickKeyPoint(p3[0], p3[1], 0.15);
+        final Sketch.Entity curve = working.addBezier(
+                p0[0], p0[1], c1[0], c1[1], c2[0], c2[1], p3[0], p3[1], bezierHandles);
+        final int[] v = curve.vars();
+        this.pendingSnap = kp0;
+        constrainToSnap(new int[] {v[0], v[1]});
+        this.pendingSnap = kp3;
+        constrainToSnap(new int[] {v[6], v[7]});
     }
 
     /**

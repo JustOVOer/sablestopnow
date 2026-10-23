@@ -1037,6 +1037,7 @@ public final class SketchHud {
             case CIRCLE -> "圆";
             case ARC -> "圆弧";
             case POINT -> "点";
+            case BEZIER -> "贝塞尔";
         };
         final String label = base + same;
         final int tx = (int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() + 14;

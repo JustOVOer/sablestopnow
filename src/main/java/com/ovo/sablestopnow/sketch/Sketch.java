@@ -56,7 +56,18 @@ public final class Sketch {
          * （不像"两点定弧"有歧义）。这就是选"圆心+起点+终点"输入法的好处：
          * 表示唯一，不必靠"走哪边"来消歧义。
          */
-        ARC(6);
+        ARC(6),
+        /**
+         * **三次贝塞尔曲线** ✓（需求 ⑤）：{@code P0 → C1 → C2 → P3}，8 个变量
+         * {@code (x0,y0, c1x,c1y, c2x,c2y, x3,y3)}。
+         *
+         * <p>两个手柄是**辅助线**（与圆弧同一思路）：手柄1 = {@code P0→C1}（变量 0,1,2,3 ✓）、
+         * 手柄2 = {@code P3→C2}（变量 6,7,4,5 ✓）⇒ **共享曲线变量** ⇒ 拖手柄曲线跟着动 ✓
+         * 不需要额外约束、也不会过定义 ✓
+         *
+         * <p>曲线**参与轮廓** ✓（用户明确要求 ✓）⇒ 可拉伸、参与碰撞 ✓
+         */
+        BEZIER(8);
 
         private final int varCount;
 
@@ -267,9 +278,99 @@ public final class Sketch {
         return addEntity(EntityKind.LINE, ax, ay, bx, by);
     }
 
+    /**
+     * 用**已存在的变量下标**造一条线 ✓（需求 ④：圆弧的两条辅助线要**共享圆心变量** ✓）。
+     *
+     * <p>为什么必须共享 ✗✓：共享 ⇒ "圆心端重合"是**结构事实** ✓ 不需要额外的重合约束 ✓
+     * ⇒ 自由度 = 6 个变量 − 1 条等长约束 = **5** ✓ 正好是圆弧的真实自由度
+     * （圆心 2 + 半径 1 + 两个角度 2）⇒ **不会过定义** ✓（用户特意问过这点 ✓）
+     */
+    public Entity addLineVars(final int ax, final int ay, final int bx, final int by) {
+        final Entity e = new Entity(EntityKind.LINE, new int[] {ax, ay, bx, by});
+        entities.add(e);
+        return e;
+    }
+
     /** 加一个自由点。 */
     public Entity addPoint(final double x, final double y) {
         return addEntity(EntityKind.POINT, x, y);
+    }
+
+    /**
+     * 加一条**三次贝塞尔曲线** ✓（需求 ⑤：{@code P0 → C1 → C2 → P3} 四次点击）。
+     *
+     * @param withHandles 是否同时生成两条**手柄辅助线** ✓（客户端开 ✓ 离线用例关 ✓）
+     */
+    public Entity addBezier(final double x0, final double y0,
+                            final double c1x, final double c1y,
+                            final double c2x, final double c2y,
+                            final double x3, final double y3,
+                            final boolean withHandles) {
+        final Entity curve = addEntity(EntityKind.BEZIER, x0, y0, c1x, c1y, c2x, c2y, x3, y3);
+        if (!withHandles) {
+            return curve;
+        }
+        final int[] v = curve.vars();
+        // 手柄1：P0 → C1 ✓   手柄2：P3 → C2 ✓（**共享曲线变量** ⇒ 拖动即改曲线 ✓）
+        final Entity h1 = addLineVars(v[0], v[1], v[2], v[3]);
+        final Entity h2 = addLineVars(v[6], v[7], v[4], v[5]);
+        setConstruction(h1, true);
+        setConstruction(h2, true);
+        return curve;
+    }
+
+    /** 贝塞尔的**轴对齐包围盒**（用于快速剔除/拾取）✓；不是贝塞尔则 null ✓。 */
+    @Nullable
+    public double[] bezierBounds(final Entity curve) {
+        if (curve == null || curve.kind() != EntityKind.BEZIER) {
+            return null;
+        }
+        final int[] v = curve.vars();
+        double minU = Double.MAX_VALUE;
+        double maxU = -Double.MAX_VALUE;
+        double minV = Double.MAX_VALUE;
+        double maxV = -Double.MAX_VALUE;
+        for (int i = 0; i <= 16; i++) {
+            final double[] p = bezierPoint(curve, i / 16.0);
+            if (p == null) {
+                continue;
+            }
+            minU = Math.min(minU, p[0]);
+            maxU = Math.max(maxU, p[0]);
+            minV = Math.min(minV, p[1]);
+            maxV = Math.max(maxV, p[1]);
+        }
+        return new double[] {minU, minV, maxU, maxV};
+    }
+
+    /** 贝塞尔上参数 {@code t∈[0,1]} 处的点 ✓；不是贝塞尔则 null ✓。 */
+    @Nullable
+    public double[] bezierPoint(final Entity curve, final double t) {
+        if (curve == null || curve.kind() != EntityKind.BEZIER) {
+            return null;
+        }
+        final int[] v = curve.vars();
+        final double mt = 1.0 - t;
+        final double a = mt * mt * mt;
+        final double b = 3.0 * mt * mt * t;
+        final double c = 3.0 * mt * t * t;
+        final double d = t * t * t;
+        return new double[] {
+                a * variable(v[0]) + b * variable(v[2]) + c * variable(v[4]) + d * variable(v[6]),
+                a * variable(v[1]) + b * variable(v[3]) + c * variable(v[5]) + d * variable(v[7])};
+    }
+
+    /** 贝塞尔的两个端点 ✓（起点 P0、终点 P3）；不是贝塞尔则 null ✓。 */
+    @Nullable
+    public double[][] bezierEndpoints(final Entity curve) {
+        if (curve == null || curve.kind() != EntityKind.BEZIER) {
+            return null;
+        }
+        final int[] v = curve.vars();
+        return new double[][] {
+                {variable(v[0]), variable(v[1])},
+                {variable(v[6]), variable(v[7])},
+        };
     }
 
     /** 加一个圆，{@code (cx, cy)} 是圆心、{@code r} 是半径。 */
@@ -493,6 +594,27 @@ public final class Sketch {
             }
             return false;
         });
+        // ★ 需求 ④：删弧时把它的**两条辅助线一起删掉** ✓
+        //   它们共享弧的变量 ⇒ 留着就是两条"不知从哪来的虚线" ✗ 玩家会当成 bug ✓
+        if (entity.kind() == EntityKind.ARC) {
+            final int[] av = entity.vars();
+            final List<Entity> handles = new ArrayList<>();
+            for (final Entity e : this.entities) {
+                if (e.kind() != EntityKind.LINE) {
+                    continue;
+                }
+                final int[] hv = e.vars();
+                if (hv[0] == av[0] && hv[1] == av[1]
+                        && ((hv[2] == av[2] && hv[3] == av[3])
+                        || (hv[2] == av[4] && hv[3] == av[5]))) {
+                    handles.add(e);
+                }
+            }
+            for (final Entity h : handles) {
+                this.entities.remove(h);
+                this.construction.remove(constructionKey(h));
+            }
+        }
         return true;
     }
 
@@ -541,20 +663,42 @@ public final class Sketch {
     // ================= 辅助线（construction geometry ✓ SolidWorks 的构造几何 ✓）=============
 
     /**
-     * 被标记为**辅助线**的图元 ✓（用"第一个变量下标"当身份 ✓）。
+     * 被标记为**辅助线**的图元 ✓（用"种类 + 全部变量下标"当身份 ✓）。
      *
-     * <p>为什么不给 {@link Entity} 加字段 ✗✓：它是 record ✓ 加字段要改**所有**构造点 ✗
-     * 而变量下标在一条草图里**唯一标识一个图元** ✓（每个图元的变量是连续分配的 ✓）
-     * ⇒ 用 {@code Set<Integer>} 记身份最省事 ✓ 也不动序列化格式 ✓✓。
+     * <p>⚠ 原来只用 {@code vars[0]} 当身份 ✗ —— 需求 ④ 之后**圆弧的两条辅助线与弧共享圆心变量** ⇒
+     * 三者 {@code vars[0]} 完全相同 ⇒ 键会撞车（给辅助线打标记会把弧也标上）✗
+     * ⇒ 改成"kind + 全部变量"的字符串键 ✓ 唯一且稳定 ✓
      *
      * <p>语义（与 SolidWorks 一致 ✓）：辅助线只作**参考/约束基准** ✓
      * **不参与轮廓** ✗ ⇒ 拉伸/旋转不会把它算进面里 ✓（{@code SketchProfiles} 那边要跳过它 ✓）。
      */
-    private final java.util.Set<Integer> construction = new java.util.HashSet<>();
+    private final java.util.Set<String> construction = new java.util.HashSet<>();
+
+    /** 辅助线的稳定身份键 ✓（kind + 全部变量下标）。 */
+    public static String constructionKey(final Entity entity) {
+        final StringBuilder sb = new StringBuilder(entity.kind().name());
+        for (final int v : entity.vars()) {
+            sb.append(':').append(v);
+        }
+        return sb.toString();
+    }
 
     /** 这条图元是不是辅助线 ✓。 */
     public boolean isConstruction(final Entity entity) {
-        return entity != null && this.construction.contains(entity.vars()[0]);
+        return entity != null && this.construction.contains(constructionKey(entity));
+    }
+
+    /** 直接设置/清除辅助线标记 ✓（需求 ④ 建弧时用 ✓）。 */
+    public void setConstruction(final Entity entity, final boolean value) {
+        if (entity == null) {
+            return;
+        }
+        final String key = constructionKey(entity);
+        if (value) {
+            this.construction.add(key);
+        } else {
+            this.construction.remove(key);
+        }
     }
 
     /** 切换辅助线标记 ✓（UI 上的"构造几何"开关 ✓）。 */
@@ -562,7 +706,7 @@ public final class Sketch {
         if (entity == null) {
             return false;
         }
-        final int key = entity.vars()[0];
+        final String key = constructionKey(entity);
         if (!this.construction.remove(key)) {
             this.construction.add(key);
             return true;
@@ -570,15 +714,108 @@ public final class Sketch {
         return false;
     }
 
+    /** 全部辅助线的身份键 ✓（存档用 ✓）。 */
+    public java.util.List<String> constructionKeys() {
+        return new java.util.ArrayList<>(this.construction);
+    }
+
+    /** 读档时恢复一个身份键 ✓。 */
+    public void addConstructionKey(final String key) {
+        if (key != null && !key.isBlank()) {
+            this.construction.add(key);
+        }
+    }
+
     /** 全部辅助线 ✓（渲染时画虚线/暗色 ✓ 轮廓计算时跳过 ✓）。 */
     public java.util.List<Entity> constructionEntities() {
         final java.util.List<Entity> out = new java.util.ArrayList<>();
         for (final Entity e : entities()) {
-            if (this.construction.contains(e.vars()[0])) {
+            if (isConstruction(e)) {
                 out.add(e);
             }
         }
         return out;
+    }
+
+    // ================= 圆弧的两条辅助线（需求 ④） =================
+
+    /**
+     * 给一段圆弧补上**两条辅助线** ✓（圆心→起点、圆心→终点）。
+     *
+     * <p>两条线**共享弧的圆心变量** ⇒ "圆心端重合"是**结构事实** ✓ 不加额外重合约束 ✓
+     * 只加一条 {@code EQUAL_LEN} ✓ ⇒ 自由度 6−1 = **5** = 圆心2 + 半径1 + 两角度2 ✓
+     * **不会过定义** ✓（用户特意问过这一点 ✓）
+     *
+     * @return 实际新加的图元（已经存在则返回空列表 ✓ 幂等 ✓）
+     */
+    public java.util.List<Entity> ensureArcHandles(final Entity arc) {
+        final java.util.List<Entity> added = new java.util.ArrayList<>();
+        if (arc == null || arc.kind() != EntityKind.ARC) {
+            return added;
+        }
+        final int[] av = arc.vars();
+        if (av.length < 6) {
+            return added;
+        }
+        final boolean hasA = hasLineVars(av[0], av[1], av[2], av[3]);
+        final boolean hasB = hasLineVars(av[0], av[1], av[4], av[5]);
+        if (!hasA) {
+            final Entity l = addLineVars(av[0], av[1], av[2], av[3]);
+            setConstruction(l, true);
+            added.add(l);
+        }
+        if (!hasB) {
+            final Entity l = addLineVars(av[0], av[1], av[4], av[5]);
+            setConstruction(l, true);
+            added.add(l);
+        }
+        if (!added.isEmpty() && !hasEqualLen(av)) {
+            addConstraint(SketchSolver.EQUAL_LEN, 0.0,
+                    av[0], av[1], av[2], av[3], av[0], av[1], av[4], av[5]);
+        }
+        return added;
+    }
+
+    /** 是否已经有"这四个变量"的线段 ✓（幂等判断用）。 */
+    public boolean hasLineVars(final int ax, final int ay, final int bx, final int by) {
+        for (final Entity e : entities) {
+            if (e.kind() != EntityKind.LINE) {
+                continue;
+            }
+            final int[] v = e.vars();
+            if (v[0] == ax && v[1] == ay && v[2] == bx && v[3] == by) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 这两条"圆心→端点"的线是否已经有等长约束 ✓。 */
+    private boolean hasEqualLen(final int[] av) {
+        for (final Constraint c : constraints) {
+            if (c.kind() != SketchSolver.EQUAL_LEN) {
+                continue;
+            }
+            final int[] o = c.operands();
+            if (o.length >= 8 && o[0] == av[0] && o[1] == av[1] && o[2] == av[2] && o[3] == av[3]
+                    && o[4] == av[0] && o[5] == av[1] && o[6] == av[4] && o[7] == av[5]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 全部圆弧都补上辅助线 ✓（读旧存档时迁移用）。 */
+    public void ensureAllArcHandles() {
+        final List<Entity> arcs = new ArrayList<>();
+        for (final Entity e : entities) {
+            if (e.kind() == EntityKind.ARC) {
+                arcs.add(e);
+            }
+        }
+        for (final Entity arc : arcs) {
+            ensureArcHandles(arc);
+        }
     }
 
     public Constraint addConstraint(final int kind, final double value, final int... operands) {

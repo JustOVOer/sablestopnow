@@ -672,6 +672,23 @@ public final class SketchRenderer {
                         prev = cur;
                     }
                 }
+                case BEZIER -> {
+                    // ★ 需求 ⑤：三次贝塞尔 ⇒ 采样成折线画 ✓（48 段足够平滑 ✓）
+                    final int bezSegs = 48;
+                    Vec3 prevB = null;
+                    for (int i = 0; i <= bezSegs; i++) {
+                        final double[] bp = sketch.bezierPoint(entity, (double) i / bezSegs);
+                        if (bp == null) {
+                            break;
+                        }
+                        final Vec3 curB = world(cameraPos, renderPose, sketch, bp[0], bp[1]);
+                        if (prevB != null) {
+                            line(vc, pose, prevB, curB, entityColor);
+                            lines++;
+                        }
+                        prevB = curB;
+                    }
+                }
                 default -> {
                     // 将来加了新图元种类，这里不画但也不崩
                 }
@@ -937,6 +954,43 @@ public final class SketchRenderer {
                         // 不画这条线玩家会以为终点的距离也参与定义。
                         previewLine(vc, pose, cameraPos, renderPose, sketch,
                                 centre[0], centre[1], bu, bv);
+                    }
+                }
+            }
+            case BEZIER -> {
+                // ★ 需求 ⑤：四次点击 P0 → C1 → P3 → C2 的实时预览 ✓
+                //   落下第 3 点（P3）之后就要能看到**曲线** ✓（用户明确要求 ✓）
+                final double[] p0 = pending.get(0);
+                if (pending.size() == 1) {
+                    // 只有 P0：光标在定手柄1的终点 C1
+                    previewLine(vc, pose, cameraPos, renderPose, sketch, p0[0], p0[1], bu, bv);
+                } else {
+                    final double[] c1 = pending.get(1);
+                    previewLine(vc, pose, cameraPos, renderPose, sketch, p0[0], p0[1], c1[0], c1[1]);
+                    if (pending.size() == 2) {
+                        // 已有 P0、C1：光标在定曲线的起点 P3 ⇒ 先画一条引导线
+                        previewLine(vc, pose, cameraPos, renderPose, sketch, c1[0], c1[1], bu, bv);
+                    } else {
+                        // 已有 P0、C1、P3：光标在定 C2 ⇒ **画曲线预览** ✓ + 手柄2预览 ✓
+                        final double[] p3 = pending.get(2);
+                        previewLine(vc, pose, cameraPos, renderPose, sketch, p3[0], p3[1], bu, bv);
+                        Vec3 prev = null;
+                        final int segs = 40;
+                        for (int i = 0; i <= segs; i++) {
+                            final double t = (double) i / segs;
+                            final double mt = 1.0 - t;
+                            final double f0 = mt * mt * mt;
+                            final double f1 = 3.0 * mt * mt * t;
+                            final double f2 = 3.0 * mt * t * t;
+                            final double f3 = t * t * t;
+                            final double uu = f0 * p0[0] + f1 * c1[0] + f2 * bu + f3 * p3[0];
+                            final double vv = f0 * p0[1] + f1 * c1[1] + f2 * bv + f3 * p3[1];
+                            final Vec3 p = world(cameraPos, renderPose, sketch, uu, vv);
+                            if (prev != null) {
+                                line(vc, pose, prev, p, PREVIEW_COLOR);
+                            }
+                            prev = p;
+                        }
                     }
                 }
             }

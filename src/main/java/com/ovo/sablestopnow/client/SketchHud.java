@@ -444,22 +444,61 @@ public final class SketchHud {
                     //   原来标签取图元中点 ✗ ⇒ 尺寸线正好压在实体线上 ⇒ 数字盖住线、箭头贴着线 ✗
                     //   做法 ✓：沿**垂直于尺寸方向**偏 18px ✓（screen 被下面的平移数学复用 ✓
                     //   所以文字与尺寸线会**一起**偏 ✓；双击命中也走 textX/textY ✓ 三者始终一致 ✓）
-                    final double perpX = sb[1] - sa[1];
-                    final double perpY = -(sb[0] - sa[0]);
-                    final double perpLen = Math.hypot(perpX, perpY);
+                    // ★ 需求 ③：标签偏移方向**随尺寸类型** ✓
+                    //   · 距离（对齐）⇒ 垂直于参考连线（原样式 ✓）
+                    //   · 水平尺寸 ⇒ **竖直**方向偏移（尺寸线水平 ✓ 界线竖直 ✓）
+                    //   · 竖直尺寸 ⇒ **水平**方向偏移（尺寸线竖直 ✓ 界线水平 ✓）
+                    final String lkType = d.labelKey() == null ? "" : d.labelKey();
+                    final boolean dimHoriz = lkType.contains("horizontal");
+                    final boolean dimVert = lkType.contains("vertical");
+                    double offX;
+                    double offY;
+                    if (dimHoriz) {
+                        offX = 0.0;
+                        offY = -1.0;
+                    } else if (dimVert) {
+                        offX = -1.0;
+                        offY = 0.0;
+                    } else {
+                        final double px = sb[1] - sa[1];
+                        final double py = -(sb[0] - sa[0]);
+                        final double pl = Math.hypot(px, py);
+                        offX = pl < 1.0e-6 ? 0.0 : px / pl;
+                        offY = pl < 1.0e-6 ? -1.0 : py / pl;
+                    }
                     // ⚠ 只对"**没被手动拖过**"的标签生效 ✓：拖过的以玩家拖到的位置为准 ✓（否则会再偏 18px ✗）
-                    if (perpLen > 1.0e-6 && !LABEL_OVERRIDE.containsKey(d.constraintIndex())) {
-                        screen[0] += perpX / perpLen * 18.0;
-                        screen[1] += perpY / perpLen * 18.0;
+                    if (!LABEL_OVERRIDE.containsKey(d.constraintIndex())) {
+                        screen[0] += offX * 18.0;
+                        screen[1] += offY * 18.0;
                     }
                     final double mx = (sa[0] + sb[0]) * 0.5;
                     final double my = (sa[1] + sb[1]) * 0.5;
                     final double ox = screen[0] - mx;
                     final double oy = screen[1] - my;
-                    final double ax = sa[0] + ox;
-                    final double ay = sa[1] + oy;
-                    final double bx = sb[0] + ox;
-                    final double by = sb[1] + oy;
+                    // ★ 需求 ③：尺寸线的**方向**随类型 ✓
+                    //   距离 ⇒ 沿参考点连线平移（原样式 ✓）
+                    //   水平 ⇒ **水平**线（y 取标签所在的那条横线 ✓）⇒ 界线自然竖直 ✓
+                    //   竖直 ⇒ **竖直**线（x 取标签所在的那条竖线 ✓）⇒ 界线自然水平 ✓
+                    final double ax;
+                    final double ay;
+                    final double bx;
+                    final double by;
+                    if (dimHoriz) {
+                        ax = sa[0];
+                        ay = screen[1];
+                        bx = sb[0];
+                        by = screen[1];
+                    } else if (dimVert) {
+                        ax = screen[0];
+                        ay = sa[1];
+                        bx = screen[0];
+                        by = sb[1];
+                    } else {
+                        ax = sa[0] + ox;
+                        ay = sa[1] + oy;
+                        bx = sb[0] + ox;
+                        by = sb[1] + oy;
+                    }
                     final int lineArgb = d.driving() ? 0xCCE6E6E6 : 0x998C93A8;
                     // 界线：从参考点拉到尺寸线两端（留一点缝，SW 也这样 ✓）
                     // ★ 界线按参考图画 ✓：与几何**留小缝**（4px ✓）· **超出**尺寸线一小段（6px ✓）
@@ -648,12 +687,39 @@ public final class SketchHud {
                     final double offX = perpX;
                     final double offY = perpY;
                     // 平移后的两端与断口 ✓
-                    final double paX = psa[0] + offX;
-                    final double paY = psa[1] + offY;
-                    final double pbX = psb[0] + offX;
-                    final double pbY = psb[1] + offY;
-                    final double midX = midBaseX + offX + ux * along;
-                    final double midY = midBaseY + offY + uy * along;
+                    // ★ 需求 ③：预览也要**按类型摆正** ✓（与落下后的画法完全一致 ✓）
+                    //   水平 ⇒ 尺寸线水平、过指针；竖直 ⇒ 尺寸线竖直、过指针 ✓
+                    final String plk = shown.labelKey() == null ? "" : shown.labelKey();
+                    final boolean pHoriz = plk.contains("horizontal");
+                    final boolean pVert = !pHoriz && plk.contains("vertical");
+                    final double paX;
+                    final double paY;
+                    final double pbX;
+                    final double pbY;
+                    final double midX;
+                    final double midY;
+                    if (pHoriz) {
+                        paX = psa[0];
+                        paY = curY;
+                        pbX = psb[0];
+                        pbY = curY;
+                        midX = curX;
+                        midY = curY;
+                    } else if (pVert) {
+                        paX = curX;
+                        paY = psa[1];
+                        pbX = curX;
+                        pbY = psb[1];
+                        midX = curX;
+                        midY = curY;
+                    } else {
+                        paX = psa[0] + offX;
+                        paY = psa[1] + offY;
+                        pbX = psb[0] + offX;
+                        pbY = psb[1] + offY;
+                        midX = midBaseX + offX + ux * along;
+                        midY = midBaseY + offY + uy * along;
+                    }
                     com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
                             paX, paY, midX - ux * gap * 0.5, midY - uy * gap * 0.5,
                             1.0f, pArgb);
@@ -666,13 +732,29 @@ public final class SketchHud {
                     //   原实现把界线画在**尺寸线方向上**（3px→9px ✗）⇒ 看起来是"顺着线"而非"引出" ✗
                     //   现在：从测量点出发、垂直于尺寸线走到平移后的尺寸线 ✓
                     //   几何端留 4px 缝 ✓ 尺寸线端超出 6px ✓（与已放置尺寸同一套规则 ✓）
-                    if (Math.hypot(offX, offY) > 6.0) {
-                        final double nx = offX / Math.hypot(offX, offY);
-                        final double ny = offY / Math.hypot(offX, offY);
-                        extLine(g, psa[0] + nx * 4.0, psa[1] + ny * 4.0,
-                                paX + nx * 6.0, paY + ny * 6.0, pArgb);
-                        extLine(g, psb[0] + nx * 4.0, psb[1] + ny * 4.0,
-                                pbX + nx * 6.0, pbY + ny * 6.0, pArgb);
+                    // ★ 需求 ③：界线从"测量点"垂直引到**尺寸线**上 ✓
+                    //   （与已放置尺寸同一套规则：几何端 4px 缝、尺寸线端超出 6px ✓）
+                    //   ⚠ 不能再用 offX/offY 当法向 ✗ —— 那个是"参考连线的垂向"，
+                    //     水平/竖直尺寸下它与尺寸线不垂直 ⇒ 界线会斜 ✗
+                    final double dlx2 = pbX - paX;
+                    final double dly2 = pbY - paY;
+                    final double dlen22 = dlx2 * dlx2 + dly2 * dly2;
+                    if (dlen22 > 1.0e-6) {
+                        for (final double[] pt : new double[][] {
+                                {psa[0], psa[1]}, {psb[0], psb[1]}}) {
+                            final double t = ((pt[0] - paX) * dlx2 + (pt[1] - paY) * dly2) / dlen22;
+                            final double fx = paX + t * dlx2;
+                            final double fy = paY + t * dly2;
+                            final double vx2 = fx - pt[0];
+                            final double vy2 = fy - pt[1];
+                            final double vl2 = Math.hypot(vx2, vy2);
+                            if (vl2 > 6.0) {
+                                final double nnx2 = vx2 / vl2;
+                                final double nny2 = vy2 / vl2;
+                                extLine(g, pt[0] + nnx2 * 4.0, pt[1] + nny2 * 4.0,
+                                        fx + nnx2 * 6.0, fy + nny2 * 6.0, pArgb);
+                            }
+                        }
                     }
                 }
             }

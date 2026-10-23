@@ -1018,25 +1018,39 @@ public final class SketchMeasure {
         if (all.size() == 1) {
             return all.get(0);
         }
-        // 两点类候选（平行/水平/竖直 ✓）：按指针相对中点的方位捕捉 ✓
+        // ★ 需求 ③：按**区域**判定（参考图 `智能尺寸参考图/直线尺寸判定范围.png`）✓
+        //   规则（用户确认：45° 界线按**坐标轴**）：
+        //     ① 指针落在"过两端点、垂直于该线"的两条界线**之间** ⇒ **距离**（对齐）✓
+        //     ② 否则取**最近端点**，比较 |dx| 与 |dy|（坐标轴）：|dx| > |dy| ⇒ **水平** ✓ 否则 **竖直** ✓
+        //   ⚠ 上一版用的是"指针相对**中点**的 dx/dy，且要 >2 倍才判水平/竖直" ✗
+        //     ⇒ 判定范围与参考图对不上（用户实测"落下尺寸时的判定范围有问题"✗）
         final Variant parallel = all.get(0);
         final int[] v = parallel.vars();
         if (v == null || v.length < 4) {
             return parallel;
         }
-        final double midX = (sketch.variable(v[0]) + sketch.variable(v[2])) * 0.5;
-        final double midY = (sketch.variable(v[1]) + sketch.variable(v[3])) * 0.5;
-        final double dx = Math.abs(hoverU - midX);
-        final double dy = Math.abs(hoverV - midY);
-        if (dx > dy * 2.0) {
-            for (final Variant c : all) {
-                if (c.solverKind() == SketchSolver.HORIZONTAL_DISTANCE) {
-                    return c;
-                }
+        final double axv = sketch.variable(v[0]);
+        final double ayv = sketch.variable(v[1]);
+        final double bxv = sketch.variable(v[2]);
+        final double byv = sketch.variable(v[3]);
+        final double dxl = bxv - axv;
+        final double dyl = byv - ayv;
+        final double len = Math.hypot(dxl, dyl);
+        if (len > 1.0e-9) {
+            // s = 指针在"线方向"上的投影长度（0..len 就表示夹在两条垂线之间 ✓）
+            final double s = ((hoverU - axv) * dxl + (hoverV - ayv) * dyl) / len;
+            if (s >= 0.0 && s <= len) {
+                return parallel; // ① 两垂线之间 ⇒ 距离 ✓
             }
-        } else if (dy > dx * 2.0) {
+            // ② 最近端点 + 45°（按坐标轴）✓
+            final double ex = s < 0.0 ? axv : bxv;
+            final double ey = s < 0.0 ? ayv : byv;
+            final double adx = Math.abs(hoverU - ex);
+            final double ady = Math.abs(hoverV - ey);
+            final int want = adx > ady
+                    ? SketchSolver.HORIZONTAL_DISTANCE : SketchSolver.VERTICAL_DISTANCE;
             for (final Variant c : all) {
-                if (c.solverKind() == SketchSolver.VERTICAL_DISTANCE) {
+                if (c.solverKind() == want) {
                     return c;
                 }
             }

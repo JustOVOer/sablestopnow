@@ -303,6 +303,12 @@ public final class SketchHud {
             lastArcDiagLogged = arcDiag;
             com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-arc] {}", arcDiag);
         }
+        // ★ 贝塞尔诊断 ✓（实测"预览正常、落下变线段"✗）
+        final String bezDiag = SketchSession.lastBezierDiag;
+        if (!bezDiag.equals(lastBezierDiagLogged)) {
+            lastBezierDiagLogged = bezDiag;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-bezier] {}", bezDiag);
+        }
         // 辅助线用**虚线**画一遍 ✓（SolidWorks 的构造几何就是虚线 ✓ 创建方式与直线一致 ✓）
         // 不参与轮廓/拉伸 ✓（SketchProfiles ×2 + Extrude ×1 已跳过 ✓）
         // ★ 需求 ①：辅助线的虚线改在**世界渲染层**画（`SketchRenderer.drawConstruction`）✓
@@ -1005,6 +1011,7 @@ public final class SketchHud {
     private static String lastSnapDiagLogged = "";
     private static String lastLineDiagLogged = "";
     private static String lastArcDiagLogged = "";
+    private static String lastBezierDiagLogged = "";
 
     private static void drawHoverName(final net.minecraft.client.gui.GuiGraphics g,
                                       final Minecraft mc) {

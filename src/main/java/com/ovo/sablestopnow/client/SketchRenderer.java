@@ -599,7 +599,10 @@ public final class SketchRenderer {
             if (selected) {
                 entityColor = SELECTED_COLOR;
             } else if (entity.equals(hovered)) {
-                entityColor = HOVER_COLOR;
+                // ★ 需求 ⑦：**将要选到的是"点"** ⇒ 直接**橙色**高亮 ✓
+                //   （橙色本来就是"选中"色 ⇒ 玩家一眼看出"这次会选到点、不是它所在的线"✓）
+                entityColor = hovered.kind() == Sketch.EntityKind.POINT
+                        ? SELECTED_COLOR : HOVER_COLOR;
             } else if (dofFree == null) {
                 entityColor = color;
             } else if (conflicted) {
@@ -735,8 +738,11 @@ public final class SketchRenderer {
                     }
                     final double ux = dx / len;
                     final double uy = dy / len;
-                    final double dash = 0.10;
-                    final double gap = 0.07;
+                    // ★ 修实测"辅助线还是实线" ✗ —— 原来虚线段只有 0.10 格（≈几像素），
+                    //   空隙 0.07 格 ⇒ 肉眼基本连成一条实线 ✓
+                    //   ⇒ 改成与推理虚线同一档（0.35 实 / 0.25 空）✓
+                    final double dash = 0.35;
+                    final double gap = 0.25;
                     double at = 0.0;
                     while (at < len) {
                         final double end = Math.min(len, at + dash);

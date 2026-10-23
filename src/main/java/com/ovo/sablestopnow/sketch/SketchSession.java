@@ -268,6 +268,9 @@ public final class SketchSession {
     /** 上一次画弧的**三点与角度差诊断** ✓（给客户端打日志用 ✓）。 */
     public static String lastArcDiag = "none";
 
+    /** 上一次画贝塞尔的**变量与采样点诊断** ✓（给客户端打日志用 ✓）。 */
+    public static String lastBezierDiag = "none";
+
     public Stage stage() {
         return stage;
     }
@@ -1868,6 +1871,22 @@ public final class SketchSession {
         final Sketch.Entity curve = working.addBezier(
                 p0[0], p0[1], c1[0], c1[1], c2[0], c2[1], p3[0], p3[1], bezierHandles);
         final int[] v = curve.vars();
+        // ★ 诊断（实测"贝塞尔预览正常、落下却变成一条线段"✗）：
+        //   把 8 个变量与曲线上几个采样点打出来 ✓ ⇒ 一看就知道是"存错了"还是"画错了"✓
+        final StringBuilder dg = new StringBuilder("vars=[");
+        for (final int vi : v) {
+            dg.append(vi).append(' ');
+        }
+        dg.append("] pts=");
+        for (final double t : new double[] {0.0, 0.25, 0.5, 0.75, 1.0}) {
+            final double[] bp = working.bezierPoint(curve, t);
+            if (bp == null) {
+                dg.append("null ");
+            } else {
+                dg.append(String.format(java.util.Locale.ROOT, "(%.2f,%.2f) ", bp[0], bp[1]));
+            }
+        }
+        lastBezierDiag = dg.toString();
         this.pendingSnap = kp0;
         constrainToSnap(new int[] {v[0], v[1]});
         this.pendingSnap = kp3;

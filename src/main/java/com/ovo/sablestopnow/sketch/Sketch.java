@@ -770,8 +770,11 @@ public final class Sketch {
             added.add(l);
         }
         if (!added.isEmpty() && !hasEqualLen(av)) {
-            addConstraint(SketchSolver.EQUAL_LEN, 0.0,
-                    av[0], av[1], av[2], av[3], av[0], av[1], av[4], av[5]);
+            // ⚠ 需求 ④ 实测反馈："加了辅助线就**过定义**、半径与圆心角也不对" ✗
+            //   ⇒ **不再加 EQUAL_LEN** ✓
+            //   两条线**共享弧的圆心变量** ⇒ "圆心端重合"是结构事实 ✓
+            //   半径 = |圆心→起点| = |圆心→终点|（弧的终点本来就在这个圆上 ✓）
+            //   ⇒ 少一条约束 ⇒ 不会过定义 ✓ 半径/弧角的读法也不受影响 ✓
         }
         return added;
     }

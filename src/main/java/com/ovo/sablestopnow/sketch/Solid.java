@@ -612,45 +612,129 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     }
 
     /**
-     * 网格**按切割盒剔除三角形** ✓（需求 ⑥ 的渲染侧）。
+     * 网格**按切割盒精确裁剪** ✓（需求 ⑥：用户明确"重心在显示/渲染"）。
      *
-     * <p>取三角形重心，落在任意 cutter 盒内就丢掉 ✓ —— 边界不是精确裁剪（会留一圈毛边），
-     * 但**贴图仍在**、洞真的看得见 ✓ 比"整块实体消失"好得多 ✓（v1 取舍 ✓）
+     * <h2>为什么可以做到精确</h2>
+     * 我们的切割体**不是任意网格**：它由 {@code Extrude.boxesOf} 生成 ⇒ 是一堆**盒子**。
+     * 三角形（凸）减一个盒子（凸）可以**精确分解**成"凸多边形"：
+     * <pre>
+     *   T \ B = T \ (H1 ∩ … ∩ H6) = ∪  (T ∩ ¬Hi ∩ H1 ∩ … ∩ H(i−1))
+     * </pre>
+     * 每一项都是**凸的**（半空间与凸多边形求交）⇒ 用 Sutherland–Hodgman 逐平面切即可 ✓
+     *
+     * <p>每个三角形对每个盒子最多变成 6 块；顶点带法线与 UV，插值后贴图仍然连续 ✓
+     * （之前是"重心落在盒内就整块丢掉"⇒ 洞边是锯齿；现在边界是**真正裁出来的** ✓）
      */
     public static SolidMesh.Mesh clipMesh(final SolidMesh.Mesh mesh,
                                           final List<double[]> cutters) {
         if (mesh == null || mesh.isEmpty() || cutters == null || cutters.isEmpty()) {
             return mesh;
         }
-        final List<Integer> keep = new ArrayList<>();
         final List<SolidMesh.Vertex> vs = mesh.vertices();
         final int[] idx = mesh.indices();
+        final List<SolidMesh.Vertex> outV = new ArrayList<>();
+        final List<Integer> outI = new ArrayList<>();
         for (int i = 0; i + 2 < idx.length; i += 3) {
-            final Vector3d a = vs.get(idx[i]).position();
-            final Vector3d b = vs.get(idx[i + 1]).position();
-            final Vector3d c = vs.get(idx[i + 2]).position();
-            final double cx = (a.x + b.x + c.x) / 3.0;
-            final double cy = (a.y + b.y + c.y) / 3.0;
-            final double cz = (a.z + b.z + c.z) / 3.0;
-            boolean inside = false;
+            List<CVert[]> polys = new ArrayList<>();
+            polys.add(new CVert[] {
+                    cv(vs.get(idx[i])), cv(vs.get(idx[i + 1])), cv(vs.get(idx[i + 2]))});
             for (final double[] cut : cutters) {
-                if (cx > cut[0] && cx < cut[3] && cy > cut[1] && cy < cut[4]
-                        && cz > cut[2] && cz < cut[5]) {
-                    inside = true;
+                final List<CVert[]> next = new ArrayList<>();
+                for (final CVert[] poly : polys) {
+                    subtractBox(poly, cut, next);
+                }
+                polys = next;
+                if (polys.isEmpty()) {
                     break;
                 }
             }
-            if (!inside) {
-                keep.add(idx[i]);
-                keep.add(idx[i + 1]);
-                keep.add(idx[i + 2]);
+            for (final CVert[] poly : polys) {
+                if (poly.length < 3) {
+                    continue;
+                }
+                final int base = outV.size();
+                for (final CVert v : poly) {
+                    outV.add(new SolidMesh.Vertex(
+                            new Vector3d(v.x, v.y, v.z),
+                            new Vector3d(v.nx, v.ny, v.nz), v.u, v.v));
+                }
+                for (int k = 1; k + 1 < poly.length; k++) {
+                    outI.add(base);
+                    outI.add(base + k);
+                    outI.add(base + k + 1);
+                }
             }
         }
-        final int[] next = new int[keep.size()];
-        for (int i = 0; i < next.length; i++) {
-            next[i] = keep.get(i);
+        final int[] ni = new int[outI.size()];
+        for (int i = 0; i < ni.length; i++) {
+            ni[i] = outI.get(i);
         }
-        return new SolidMesh.Mesh(vs, next);
+        return new SolidMesh.Mesh(outV, ni);
+    }
+
+    /** 裁剪用的顶点（位置 + 法线 + UV ✓ 与 {@link SolidMesh.Vertex} 一一对应）。 */
+    private record CVert(double x, double y, double z, double nx, double ny, double nz,
+                         double u, double v) {
+    }
+
+    private static CVert cv(final SolidMesh.Vertex v) {
+        return new CVert(v.position().x, v.position().y, v.position().z,
+                v.normal().x, v.normal().y, v.normal().z, v.u(), v.v());
+    }
+
+    /** 三角形（凸多边形）减一个盒子 ⇒ 把剩余的凸块追加进 {@code out} ✓。 */
+    private static void subtractBox(final CVert[] poly, final double[] box,
+                                    final List<CVert[]> out) {
+        // 盒子的 6 个"内部"半空间：a*x+b*y+c*z <= d ✓
+        final double[][] planes = {
+                {-1, 0, 0, -box[0]}, {1, 0, 0, box[3]},
+                {0, -1, 0, -box[1]}, {0, 1, 0, box[4]},
+                {0, 0, -1, -box[2]}, {0, 0, 1, box[5]},
+        };
+        CVert[] inside = poly;
+        for (final double[] pl : planes) {
+            if (inside.length < 3) {
+                return;
+            }
+            final CVert[] outsidePart = clip(inside, pl, false);
+            if (outsidePart.length >= 3) {
+                out.add(outsidePart); // ¬Hi ∩ H1..H(i−1) 的那一块 ✓
+            }
+            inside = clip(inside, pl, true); // 继续往"盒内"那一侧收 ✓
+        }
+        // 剩下的 inside 就是被盒子挖掉的部分 ⇒ 丢弃 ✓
+    }
+
+    /** Sutherland–Hodgman：按半空间裁剪凸多边形 ✓（{@code keepInside} 决定保留哪一侧）。 */
+    private static CVert[] clip(final CVert[] poly, final double[] pl,
+                                final boolean keepInside) {
+        if (poly.length == 0) {
+            return poly;
+        }
+        final List<CVert> res = new ArrayList<>();
+        for (int i = 0; i < poly.length; i++) {
+            final CVert cur = poly[i];
+            final CVert nxt = poly[(i + 1) % poly.length];
+            final double dc = pl[0] * cur.x + pl[1] * cur.y + pl[2] * cur.z - pl[3];
+            final double dn = pl[0] * nxt.x + pl[1] * nxt.y + pl[2] * nxt.z - pl[3];
+            final boolean inCur = keepInside ? dc <= 0 : dc >= 0;
+            final boolean inNxt = keepInside ? dn <= 0 : dn >= 0;
+            if (inCur) {
+                res.add(cur);
+            }
+            if (inCur != inNxt) {
+                final double t = dc / (dc - dn);
+                res.add(lerp(cur, nxt, t));
+            }
+        }
+        return res.toArray(new CVert[0]);
+    }
+
+    private static CVert lerp(final CVert a, final CVert b, final double t) {
+        return new CVert(
+                a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t,
+                a.nx + (b.nx - a.nx) * t, a.ny + (b.ny - a.ny) * t, a.nz + (b.nz - a.nz) * t,
+                a.u + (b.u - a.u) * t, a.v + (b.v - a.v) * t);
     }
 
     /**

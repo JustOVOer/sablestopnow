@@ -162,13 +162,15 @@ public final class SketchMeasure {
             } else if ((c.kind() == SketchSolver.HORIZONTAL_DISTANCE
                     || c.kind() == SketchSolver.VERTICAL_DISTANCE) && c.operands().length >= 4) {
                 // 水平/竖直尺寸：标签画在两点中点 ✓
+                // ★ 实测修正：kind 15 约束的是 **Δy**、kind 16 约束的是 **Δx** ✓（与命名相反 ✓）
+                //   ⇒ 实测值与标签都按这个真实语义来 ✓ 否则会出现"显示竖直、约束水平"✓
                 final int[] v = c.operands();
-                final double measured = c.kind() == SketchSolver.HORIZONTAL_DISTANCE
+                final boolean xAxis = c.kind() == SketchSolver.VERTICAL_DISTANCE;
+                final double measured = xAxis
                         ? Math.abs(sketch.variable(v[2]) - sketch.variable(v[0]))
                         : Math.abs(sketch.variable(v[3]) - sketch.variable(v[1]));
                 out.add(new Dimension(i, c.kind(), c.value(), measured, true,
-                        c.kind() == SketchSolver.HORIZONTAL_DISTANCE
-                                ? "model.dim.horizontal" : "model.dim.vertical",
+                        xAxis ? "model.dim.horizontal" : "model.dim.vertical",
                         (sketch.variable(v[0]) + sketch.variable(v[2])) * 0.5,
                         (sketch.variable(v[1]) + sketch.variable(v[3])) * 0.5));
             } else if (c.kind() == SketchSolver.LINES_ANGLE && c.operands().length >= 8) {
@@ -1050,10 +1052,11 @@ public final class SketchMeasure {
             final double ey = s < 0.0 ? ayv : byv;
             final double adx = Math.abs(hoverU - ex);
             final double ady = Math.abs(hoverV - ey);
-            final int want = adx > ady
-                    ? SketchSolver.HORIZONTAL_DISTANCE : SketchSolver.VERTICAL_DISTANCE;
+            // ★ 按**显示名**挑候选 ✓（不按 kind 编号 —— kind 15/16 的实际语义与命名相反 ✓）
+            final String wantLabel = adx > ady
+                    ? "model.dim.horizontal" : "model.dim.vertical";
             for (final Variant c : all) {
-                if (c.solverKind() == want) {
+                if (wantLabel.equals(c.labelKey())) {
                     return c;
                 }
             }
@@ -1168,9 +1171,14 @@ public final class SketchMeasure {
                 // 两点距离 ✓：平行（默认 ✓）→ 水平 ✓ → 竖直 ✓
                 out.add(new Variant("model.dim.distance", SketchSolver.DISTANCE, v, dim.value()));
                 if (v.length >= 4) {
-                    out.add(new Variant("model.dim.horizontal", SketchSolver.HORIZONTAL_DISTANCE, v,
+                    // ★ 修实测"选'竖直'落下却是水平、选'水平'落下却是竖直" ✗
+                    //   求解器里 kind 15/16 的实际语义与我们原来的命名**相反**：
+                    //     15 (HORIZONTAL_DISTANCE) 实际约束的是 **Δy**
+                    //     16 (VERTICAL_DISTANCE)   实际约束的是 **Δx**
+                    //   ⇒ 显示名跟**实际量**走：水平(Δx) 用 kind 16、竖直(Δy) 用 kind 15 ✓
+                    out.add(new Variant("model.dim.horizontal", SketchSolver.VERTICAL_DISTANCE, v,
                             Math.abs(sketch.variable(v[2]) - sketch.variable(v[0]))));
-                    out.add(new Variant("model.dim.vertical", SketchSolver.VERTICAL_DISTANCE, v,
+                    out.add(new Variant("model.dim.vertical", SketchSolver.HORIZONTAL_DISTANCE, v,
                             Math.abs(sketch.variable(v[3]) - sketch.variable(v[1]))));
                 }
             }

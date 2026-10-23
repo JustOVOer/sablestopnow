@@ -361,6 +361,18 @@ public final class ModelUi {
                 com.ovo.sablestopnow.sketch.Extrude.Mode.SYMMETRIC));
         body.add(modeRow);
 
+        // ★ 需求 ⑥：**切割台体**开关 ✓（拉伸出一个体，给同一 body 内与它相交的实体打洞 ✓）
+        //   参考 SolidWorks 的"拉伸-切除"：同一个深度/方式面板，只是结果不做材料而是做减法 ✓
+        final var cutBtn = new com.ovo.sablestopnow.client.gui.lib.Button(
+                Component.translatable(cutMode ? "model.extrude.cut_on" : "model.extrude.cut"),
+                () -> {
+                    cutMode = !cutMode;
+                    refreshLeftPanel();
+                });
+        cutBtn.prefW = com.ovo.sablestopnow.client.gui.lib.Widget.FILL;
+        cutBtn.toggled = cutMode;
+        body.add(cutBtn);
+
         com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_EXTRUDE_DEPTH);
         final String depthKey = extrudeMode == com.ovo.sablestopnow.sketch.Extrude.Mode.SYMMETRIC
                 ? "model.extrude.total_depth" : "model.extrude.depth";
@@ -1383,8 +1395,13 @@ public final class ModelUi {
      * <p>⚠ 必须进 {@code leftPanelSignature()} —— 不进的话切了方式左栏不重建，
      * 深度输入框的数量不会变（"两侧"要多一个反向深度框），看起来就是"点了没反应"。
      */
-    private static com.ovo.sablestopnow.sketch.Extrude.Mode extrudeMode =
-            com.ovo.sablestopnow.sketch.Extrude.Mode.ONE_SIDED;
+    private static com.ovo.sablestopnow.sketch.Extrude.Mode extrudeMode =            com.ovo.sablestopnow.sketch.Extrude.Mode.ONE_SIDED;
+
+    /**
+     * **切割模式** ✓（需求 ⑥）：开启后"确定"建出来的是**切割体**而不是材料 ✓
+     * （同一 body 内与它相交的实体被挖掉 ✓ 完全贯穿 = 深度拉大 ✓）
+     */
+    private static boolean cutMode;
 
     /** 当前是在配"拉伸"还是"旋转"。 */
     private static boolean revolveMode;
@@ -1690,8 +1707,11 @@ public final class ModelUi {
                 index = Math.max(index, s.index() + 1);
             }
         }
-        final com.ovo.sablestopnow.sketch.Solid solid = com.ovo.sablestopnow.sketch.Solid.create(
-                source.body(), source.id(), index, params);
+        final com.ovo.sablestopnow.sketch.Solid solid = cutMode
+                ? com.ovo.sablestopnow.sketch.Solid.createCut(
+                        source.body(), source.id(), index, params)
+                : com.ovo.sablestopnow.sketch.Solid.create(
+                        source.body(), source.id(), index, params);
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(solid);
         ModelMode.prompt("model.prompt.extrude_created");
         refreshLeftPanel();
@@ -1752,6 +1772,8 @@ public final class ModelUi {
         // ⚠ 拉伸方式也要进指纹：切方式时"两侧"要多出一个反向深度输入框，
         // 指纹不变就不重建 → 框不会出现 → 看起来就是"点了没反应"。
         sb.append('#').append(extrudeMode);
+        // ★ 需求 ⑥：切割开关也进指纹 ✓（否则点它左栏不重建 ⇒ 看起来"没反应"✗）
+        sb.append('#').append(cutMode);
         // ⚠ 旋转那套也要进指纹：切到旋转会换掉整组控件（轴列表/角度/旋向），
         // 选了另一条轴要高亮，旋向要能看出选中态。不进指纹这些全是"点了没反应"。
         sb.append('#').append(revolveMode);

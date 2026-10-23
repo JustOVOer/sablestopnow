@@ -683,5 +683,7 @@
   "model.coupling.ratio_value": "传动比 %1$s（A 转 1 圈 B 反向转 %2$s 圈） | ratio %1$s",
   "model.coupling.remove": "删除该耦合 | Delete coupling",
   "model.relation.concentric": "同心",
-  "model.sketch.tool.bezier": "贝塞尔"
+  "model.sketch.tool.bezier": "贝塞尔",
+  "model.extrude.cut": "切割台体",
+  "model.extrude.cut_on": "切割台体 ✓"
 }

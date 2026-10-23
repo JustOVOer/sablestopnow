@@ -47,6 +47,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
 
         /** 绕草图平面内的一条轴旋转。 */
+        /**
+         * **切割体**（需求 ⑥）：拉伸出一个体，用来给**同一 body 内与它相交的实体打洞** ✓
+         *
+         * <p>它本身**不产生材料**（boxes/mesh/edges 都是空的）✓
+         * 真正的减法在 {@link #placeAll} 里做：把同一 body 的切割体盒子从目标盒子里减掉 ✓
+         * （盒子层布尔：稳、快、与碰撞天然一致 ✓）
+         */
+        record Cut(Extrude.Params params) implements Shape {
+        }
+
         record Revolution(Revolve.Params params) implements Shape {
             public Revolution {
                 Objects.requireNonNull(params, "旋转参数不能为空");
@@ -82,10 +92,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 new Shape.Extrusion(params), look);
     }
 
+    /** 新建一个**切割体** ✓（需求 ⑥：拉伸出来给同一 body 内相交的实体打洞 ✓）。 */
+    public static Solid createCut(final UUID body, final UUID sketchId, final int index,
+                                  final Extrude.Params params) {
+        return new Solid(UUID.randomUUID(), body, sketchId, index,
+                new Shape.Cut(params), SolidAppearance.EMPTY);
+    }
+
     /** 新建一个**旋转**实体。 */
     public static Solid createRevolution(final UUID body, final UUID sketchId, final int index,
-                                         final Revolve.Params params) {
-        return createRevolution(body, sketchId, index, params, SolidAppearance.EMPTY);
+                                         final Revolve.Params params) {        return createRevolution(body, sketchId, index, params, SolidAppearance.EMPTY);
     }
 
     /** 新建一个旋转实体，并指定外观（贴图）。 */
@@ -167,6 +183,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             return List.of();
         }
         final List<SolidCollision.OrientedBox> raw = switch (shape) {
+            case Shape.Cut c -> List.of(); // 切割体没有自己的碰撞 ✓
             case Shape.Extrusion e -> {
                 // ⚠ **曲面走棱盒（OBB），轴对齐轮廓走扫描线。** 判据是刻意的：
                 //   矩形/L 形的扫描线分解是**精确**的、盒子也最少，没有理由给它加朝向；
@@ -260,6 +277,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 yield area * Math.abs(range[1] - range[0]);
             }
             case Shape.Revolution r -> volumeOfRevolution(r.params(), regions, area);
+            case Shape.Cut c -> 0.0; // 切割体不提供材料体积 ✓
         };
     }
 
@@ -368,6 +386,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         return switch (shape) {
             case Shape.Extrusion e -> SolidMesh.build(sketch, e.params());
             case Shape.Revolution r -> Revolve.mesh(sketch, r.params());
+            case Shape.Cut c -> EMPTY_MESH; // 切割体不渲染 ✓
         };
     }
 
@@ -384,6 +403,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         return switch (shape) {
             case Shape.Extrusion e -> Extrude.prismEdges(sketch, e.params());
             case Shape.Revolution r -> Revolve.edges(sketch, r.params());
+            case Shape.Cut c -> List.of(); // 切割体不画线框 ✓
         };
     }
 
@@ -502,8 +522,25 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     /** 把一批实体解析成"实体 + 它的盒子 + 它的渲染线框 + 贴图网格"，供渲染与碰撞共用。 */
     public static List<Placed> placeAll(final Collection<Solid> solids,
                                         final Collection<Sketch> sketches) {
+        // ★ 需求 ⑥：先按 body 收集**切割体**的盒子（这些就是要从别的实体上挖掉的洞 ✓）
+        //   盒子层布尔：稳、快、与碰撞天然一致（物理只吃盒子 ✓）
+        final java.util.Map<UUID, List<double[]>> cutters = new java.util.HashMap<>();
+        for (final Solid solid : solids) {
+            if (!(solid.shape() instanceof Shape.Cut cut)) {
+                continue;
+            }
+            final Sketch cs = solid.resolve(sketches);
+            if (cs == null) {
+                continue;
+            }
+            cutters.computeIfAbsent(solid.body(), k -> new ArrayList<>())
+                    .addAll(Extrude.boxesOf(cs, cut.params()));
+        }
         final List<Placed> out = new ArrayList<>(solids.size());
         for (final Solid solid : solids) {
+            if (solid.shape() instanceof Shape.Cut) {
+                continue; // 切割体本身不产生材料/线框/网格 ✓
+            }
             final Sketch sketch = solid.resolve(sketches);
             final List<Vector3d[]> edges = solid.edges(sketch);
             if (edges.isEmpty()) {
@@ -512,9 +549,108 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             // 网格与平面法线只为**贴图**准备；没有贴图时调用方不看它们。
             // ⚠ 平面法线要带上：SolidMesh.faceKind 靠它判断"这个面是盖子还是侧面"。
             final Vector3d normal = sketch == null ? null : sketch.plane().normal();
-            out.add(new Placed(solid, solid.boxes(sketch), edges, solid.mesh(sketch), normal));
+            final List<double[]> rawBoxes = solid.boxes(sketch);
+            final List<double[]> bodyCutters = cutters.get(solid.body());
+            final boolean cut = bodyCutters != null && !bodyCutters.isEmpty();
+            final List<double[]> boxes = cut ? subtractBoxes(rawBoxes, bodyCutters) : rawBoxes;
+            final SolidMesh.Mesh mesh = cut
+                    ? clipMesh(solid.mesh(sketch), bodyCutters) : solid.mesh(sketch);
+            out.add(new Placed(solid, boxes, edges, mesh, normal));
         }
         return out;
+    }
+
+    /**
+     * **盒子减法** ✓（需求 ⑥）：把 {@code target} 里每个盒子减去所有 cutter 覆盖的部分。
+     *
+     * <p>一个轴对齐盒被另一个盒切，最多剩下 6 块（左/右/下/上/前/后）✓
+     * 这是"盒子层布尔"的核心 —— 与碰撞用同一套盒子 ⇒ 视觉与物理必然一致 ✓
+     */
+    public static List<double[]> subtractBoxes(final List<double[]> target,
+                                               final List<double[]> cutters) {
+        List<double[]> current = new ArrayList<>(target);
+        for (final double[] cut : cutters) {
+            final List<double[]> next = new ArrayList<>();
+            for (final double[] box : current) {
+                subtractOne(box, cut, next);
+            }
+            current = next;
+            if (current.isEmpty()) {
+                break;
+            }
+        }
+        return current;
+    }
+
+    /** 一个盒子减一个盒子 ⇒ 0..6 块 ✓（盒子格式 {x0,y0,z0,x1,y1,z1} ✓）。 */
+    private static void subtractOne(final double[] box, final double[] cut,
+                                    final List<double[]> out) {
+        if (cut[0] >= box[3] || cut[3] <= box[0]
+                || cut[1] >= box[4] || cut[4] <= box[1]
+                || cut[2] >= box[5] || cut[5] <= box[2]) {
+            out.add(box); // 不相交 ⇒ 原样保留 ✓
+            return;
+        }
+        if (cut[0] <= box[0] && cut[1] <= box[1] && cut[2] <= box[2]
+                && cut[3] >= box[3] && cut[4] >= box[4] && cut[5] >= box[5]) {
+            return; // 完全被吞掉 ✓
+        }
+        addIfPositive(out, box[0], box[1], box[2], Math.min(box[3], cut[0]), box[4], box[5]);
+        addIfPositive(out, Math.max(box[0], cut[3]), box[1], box[2], box[3], box[4], box[5]);
+        addIfPositive(out, box[0], box[1], box[2], box[3], Math.min(box[4], cut[1]), box[5]);
+        addIfPositive(out, box[0], Math.max(box[1], cut[4]), box[2], box[3], box[4], box[5]);
+        addIfPositive(out, box[0], box[1], box[2], box[3], box[4], Math.min(box[5], cut[2]));
+        addIfPositive(out, box[0], box[1], Math.max(box[2], cut[5]), box[3], box[4], box[5]);
+    }
+
+    private static void addIfPositive(final List<double[]> out, final double x0, final double y0,
+                                      final double z0, final double x1, final double y1,
+                                      final double z1) {
+        if (x1 - x0 > 1.0e-9 && y1 - y0 > 1.0e-9 && z1 - z0 > 1.0e-9) {
+            out.add(new double[] {x0, y0, z0, x1, y1, z1});
+        }
+    }
+
+    /**
+     * 网格**按切割盒剔除三角形** ✓（需求 ⑥ 的渲染侧）。
+     *
+     * <p>取三角形重心，落在任意 cutter 盒内就丢掉 ✓ —— 边界不是精确裁剪（会留一圈毛边），
+     * 但**贴图仍在**、洞真的看得见 ✓ 比"整块实体消失"好得多 ✓（v1 取舍 ✓）
+     */
+    public static SolidMesh.Mesh clipMesh(final SolidMesh.Mesh mesh,
+                                          final List<double[]> cutters) {
+        if (mesh == null || mesh.isEmpty() || cutters == null || cutters.isEmpty()) {
+            return mesh;
+        }
+        final List<Integer> keep = new ArrayList<>();
+        final List<SolidMesh.Vertex> vs = mesh.vertices();
+        final int[] idx = mesh.indices();
+        for (int i = 0; i + 2 < idx.length; i += 3) {
+            final Vector3d a = vs.get(idx[i]).position();
+            final Vector3d b = vs.get(idx[i + 1]).position();
+            final Vector3d c = vs.get(idx[i + 2]).position();
+            final double cx = (a.x + b.x + c.x) / 3.0;
+            final double cy = (a.y + b.y + c.y) / 3.0;
+            final double cz = (a.z + b.z + c.z) / 3.0;
+            boolean inside = false;
+            for (final double[] cut : cutters) {
+                if (cx > cut[0] && cx < cut[3] && cy > cut[1] && cy < cut[4]
+                        && cz > cut[2] && cz < cut[5]) {
+                    inside = true;
+                    break;
+                }
+            }
+            if (!inside) {
+                keep.add(idx[i]);
+                keep.add(idx[i + 1]);
+                keep.add(idx[i + 2]);
+            }
+        }
+        final int[] next = new int[keep.size()];
+        for (int i = 0; i < next.length; i++) {
+            next[i] = keep.get(i);
+        }
+        return new SolidMesh.Mesh(vs, next);
     }
 
     /**

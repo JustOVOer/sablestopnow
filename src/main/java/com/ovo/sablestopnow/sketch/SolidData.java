@@ -192,6 +192,13 @@ public class SolidData extends SavedData {
                 entry.putDouble("angle", r.params().angleDeg());
                 entry.putInt("direction", r.params().direction());
             }
+            case Solid.Shape.Cut c -> {
+                // ★ 需求 ⑥：切割体 ✓（参数与拉伸相同：mode/d1/d2 ✓）
+                entry.putString("shape", "cut");
+                entry.putString("mode", c.params().mode().name());
+                entry.putDouble("d1", c.params().depth1());
+                entry.putDouble("d2", c.params().depth2());
+            }
         }
         // 外观（贴图）：用 SolidAppearance 自己的编码，本层不解释任何规则
         final String[] look = solid.appearance().encode();
@@ -234,6 +241,10 @@ public class SolidData extends SavedData {
                         entry.getDouble("au"), entry.getDouble("av"),
                         entry.getDouble("du"), entry.getDouble("dv"),
                         entry.getDouble("angle"), entry.getInt("direction")));
+                // ★ 需求 ⑥：切割体 ✓
+                case "cut" -> new Solid.Shape.Cut(new Extrude.Params(
+                        Extrude.Mode.valueOf(entry.getString("mode")),
+                        entry.getDouble("d1"), entry.getDouble("d2")));
                 default -> new Solid.Shape.Extrusion(new Extrude.Params(
                         Extrude.Mode.valueOf(entry.getString("mode")),
                         entry.getDouble("d1"), entry.getDouble("d2")));

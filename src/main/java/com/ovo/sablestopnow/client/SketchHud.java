@@ -517,7 +517,9 @@ public final class SketchHud {
                         by = sb[1] + oy;
                     }
                     // ★ 用户要求：尺寸线风格与背景网格一致 ⇒ **不透明白色** ✓
-                      final int lineArgb = d.driving() ? 0xFFFFFFFF : 0x99FFFFFF;
+                      // ★ 尺寸几何已改由**世界层的 3D 线条**绘制（见 SketchRenderer.drawDimensions3D）✓
+                      //   ⇒ HUD 这边把尺寸线/界线/箭头设成**全透明**（只保留文字与输入框）✓
+                      final int lineArgb = 0x00FFFFFF;
                     // 界线：从参考点拉到尺寸线两端（留一点缝，SW 也这样 ✓）
                     // ★ 界线按参考图画 ✓：与几何**留小缝**（4px ✓）· **超出**尺寸线一小段（6px ✓）
                     //   （参考图 1/3/4 都明显超出 ✓ 我原来"贴到尺寸线就停"✗）

@@ -352,6 +352,7 @@ public final class SketchRenderer {
                 drawSketchGrid(vcGrid, pose, cameraPos, wsub.renderPose(), working);
                 gridBuf.endBatch();
                 drawn += drawSketch(vcq, pose, cameraPos, wsub.renderPose(), working, EDITING_COLOR);
+                drawn += drawDimensions3D(vcq, pose, cameraPos, wsub.renderPose(), working);
                 // 旋转轴的高亮画在草图之后：它是"参考"，被图元压住就白画了
                 drawn += drawRevolveAxis(vcq, pose, cameraPos, wsub.renderPose(), working);
                 // 吸附生效时在**吸附到的那个关键点**上打标记。
@@ -1379,6 +1380,134 @@ public final class SketchRenderer {
                                      final Vec3 p, final float[] c) {
         vc.addVertex(pose, (float) p.x, (float) p.y, (float) p.z)
                 .setColor(c[0], c[1], c[2], c[3]);
+    }
+
+    /** 尺寸线相对几何的偏移（格）✓、界线留缝 / 超出（格）✓、箭头尺寸（格）✓ */
+    private static final double DIM_OFFSET = 0.35;
+    private static final double DIM_GAP = 0.06;
+    private static final double DIM_OVER = 0.12;
+    private static final double DIM_ARROW = 0.15;
+
+    /**
+     * **3D 尺寸线** ✓ —— 尺寸线 / 界线 / 箭头都按"草图平面里的几何"算，
+     * 再换算到世界并画成细长四边形（与背景网格同一种呈现 ✓）。
+     *
+     * <p>只处理**线性尺寸**（距离 / 水平 / 竖直 / 点到线 / 线线距 / 半径直径）✓；
+     * 角度尺寸仍是 HUD 里的弧线（它的几何是圆弧，另做）。
+     */
+    private static int drawDimensions3D(final VertexConsumer vcq, final PoseStack.Pose pose,
+                                        final Vec3 cameraPos, final Pose3dc renderPose,
+                                        final Sketch sketch) {
+        int drawn = 0;
+        final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.Dimension> dims =
+                com.ovo.sablestopnow.sketch.SketchMeasure.existingDimensions(sketch);
+        if (dims.isEmpty()) {
+            return 0;
+        }
+        final float[] white = {1.0f, 1.0f, 1.0f};
+        for (final var d : dims) {
+            if (d.labelKey() != null && d.labelKey().contains("angle")) {
+                continue; // 角度：保持 HUD 弧线 ✓
+            }
+            final double[] ends = com.ovo.sablestopnow.sketch.SketchMeasure.endpointsOf(sketch, d);
+            if (ends == null) {
+                continue;
+            }
+            final double u1 = ends[0];
+            final double v1 = ends[1];
+            final double u2 = ends[2];
+            final double v2 = ends[3];
+            final String lk = d.labelKey() == null ? "" : d.labelKey();
+            final boolean horiz = lk.contains("horizontal");
+            final boolean vert = lk.contains("vertical");
+            // 偏移方向：水平尺寸沿 v 偏、竖直尺寸沿 u 偏、其它沿"垂直连线"偏 ✓
+            double du = 0;
+            double dv = 0;
+            if (horiz) {
+                dv = DIM_OFFSET;
+            } else if (vert) {
+                du = DIM_OFFSET;
+            } else {
+                final double ex = u2 - u1;
+                final double ey = v2 - v1;
+                final double el = Math.hypot(ex, ey);
+                if (el > 1.0e-6) {
+                    du = -ey / el * DIM_OFFSET;
+                    dv = ex / el * DIM_OFFSET;
+                } else {
+                    dv = DIM_OFFSET;
+                }
+            }
+            // 尺寸线两端（几何点 + 偏移）✓
+            final double a1 = u1 + du;
+            final double b1 = v1 + dv;
+            final double a2 = u2 + du;
+            final double b2 = v2 + dv;
+            // 尺寸线本体
+            seg3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2, white);
+            drawn++;
+            // 界线：几何点 → 尺寸线（留缝 / 超出）✓
+            ext3(vcq, pose, cameraPos, renderPose, sketch, u1, v1, a1, b1, white);
+            ext3(vcq, pose, cameraPos, renderPose, sketch, u2, v2, a2, b2, white);
+            drawn += 2;
+            // 箭头（两端各两条短线，±25°）✓
+            drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2, white);
+            drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a2, b2, a1, b1, white);
+        }
+        return drawn;
+    }
+
+    /** 平面里的一条线段 ⇒ 世界细条 ✓。 */
+    private static void seg3(final VertexConsumer vcq, final PoseStack.Pose pose,
+                             final Vec3 cameraPos, final Pose3dc renderPose, final Sketch sketch,
+                             final double ua, final double va, final double ub, final double vb,
+                             final float[] colour) {
+        final Vec3 a = rel(world(cameraPos, renderPose, sketch, ua, va), cameraPos);
+        final Vec3 b = rel(world(cameraPos, renderPose, sketch, ub, vb), cameraPos);
+        quadLine(vcq, pose, a, b, colour);
+    }
+
+    /** 界线：从几何点引到尺寸线端点（两端各留缝/超出）✓。 */
+    private static void ext3(final VertexConsumer vcq, final PoseStack.Pose pose,
+                             final Vec3 cameraPos, final Pose3dc renderPose, final Sketch sketch,
+                             final double pu, final double pv,
+                             final double qu, final double qv, final float[] colour) {
+        final double dx = qu - pu;
+        final double dy = qv - pv;
+        final double len = Math.hypot(dx, dy);
+        if (len < DIM_GAP + DIM_OVER + 1.0e-6) {
+            seg3(vcq, pose, cameraPos, renderPose, sketch, pu, pv, qu, qv, colour);
+            return;
+        }
+        final double ux = dx / len;
+        final double uy = dy / len;
+        seg3(vcq, pose, cameraPos, renderPose, sketch,
+                pu + ux * DIM_GAP, pv + uy * DIM_GAP,
+                qu + ux * DIM_OVER, qv + uy * DIM_OVER, colour);
+    }
+
+    /** 尺寸线一端的箭头（两条斜线）✓。 */
+    private static int arrow3(final VertexConsumer vcq, final PoseStack.Pose pose,
+                              final Vec3 cameraPos, final Pose3dc renderPose, final Sketch sketch,
+                              final double tipU, final double tipV,
+                              final double fromU, final double fromV, final float[] colour) {
+        final double dx = tipU - fromU;
+        final double dy = tipV - fromV;
+        final double len = Math.hypot(dx, dy);
+        if (len < 1.0e-6) {
+            return 0;
+        }
+        final double ux = dx / len;
+        final double uy = dy / len;
+        final double px = -uy;
+        final double py = ux;
+        final double s = DIM_ARROW;
+        final double spread = 0.42;
+        seg3(vcq, pose, cameraPos, renderPose, sketch, tipU, tipV,
+                tipU - ux * s + px * s * spread, tipV - uy * s + py * s * spread, colour);
+        seg3(vcq, pose, cameraPos, renderPose, sketch, tipU, tipV,
+                tipU - ux * s - px * s * spread, tipV - uy * s - py * s * spread, colour);
+        return 2;
     }
 
     /** 细条半宽（格）✓ 与背景网格同一档。 */

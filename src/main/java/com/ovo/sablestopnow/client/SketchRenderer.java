@@ -1460,9 +1460,10 @@ public final class SketchRenderer {
             drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2, white);
             drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a2, b2, a1, b1, white);
         }
-        if (!diag.equals(lastDim3dDiag)) {
-            lastDim3dDiag = diag;
-            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[dim3d] {}", diag);
+        final String diagText = diag.toString();
+        if (!diagText.equals(lastDim3dDiag)) {
+            lastDim3dDiag = diagText;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[dim3d] {}", diagText);
         }
         return drawn;
     }

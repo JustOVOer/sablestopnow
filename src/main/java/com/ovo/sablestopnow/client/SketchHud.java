@@ -478,15 +478,20 @@ public final class SketchHud {
                         offX = pl < 1.0e-6 ? 0.0 : px / pl;
                         offY = pl < 1.0e-6 ? -1.0 : py / pl;
                     }
-                    // ⚠ 只对"**没被手动拖过**"的标签生效 ✓：拖过的以玩家拖到的位置为准 ✓（否则会再偏 18px ✗）
-                    if (!LABEL_OVERRIDE.containsKey(d.constraintIndex())) {
-                        screen[0] += offX * 18.0;
-                        screen[1] += offY * 18.0;
-                    }
+                    // ★★ 修实测"拖动尺寸位置时箭头被拖离开界线"✗✗
+                    //   原来尺寸线跟着标签走（ox = 标签 − 中点）⇒ 一拖标签，尺寸线与箭头
+                    //   就离开界线 ✗ ⇒ 现在两套位置：尺寸线/箭头/界线**钉在垂足**，
+                    //   标签仍在玩家拖到的位置 ✓
                     final double mx = (sa[0] + sb[0]) * 0.5;
                     final double my = (sa[1] + sb[1]) * 0.5;
-                    final double ox = screen[0] - mx;
-                    final double oy = screen[1] - my;
+                    final double baseX = mx + offX * 18.0;
+                    final double baseY = my + offY * 18.0;
+                    if (!LABEL_OVERRIDE.containsKey(d.constraintIndex())) {
+                        screen[0] = baseX;
+                        screen[1] = baseY;
+                    }
+                    final double ox = baseX - mx;
+                    final double oy = baseY - my;
                     // ★ 需求 ③：尺寸线的**方向**随类型 ✓
                     //   距离 ⇒ 沿参考点连线平移（原样式 ✓）
                     //   水平 ⇒ **水平**线（y 取标签所在的那条横线 ✓）⇒ 界线自然竖直 ✓
@@ -497,13 +502,13 @@ public final class SketchHud {
                     final double by;
                     if (dimHoriz) {
                         ax = sa[0];
-                        ay = screen[1];
+                        ay = baseY;
                         bx = sb[0];
-                        by = screen[1];
+                        by = baseY;
                     } else if (dimVert) {
-                        ax = screen[0];
+                        ax = baseX;
                         ay = sa[1];
-                        bx = screen[0];
+                        bx = baseX;
                         by = sb[1];
                     } else {
                         ax = sa[0] + ox;

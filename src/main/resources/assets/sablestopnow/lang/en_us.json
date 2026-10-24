@@ -689,5 +689,6 @@
   "model.tool.cut": "Cut body",
   "model.tool.cut.short": "Cut",
   "model.tool.cut.hint": "Pick a body and a sketch; the result cuts holes into intersecting solids",
-  "model.revolve.empty_profile": "A revolve needs a closed profile: close the sketch loop first"
+  "model.revolve.empty_profile": "A revolve needs a closed profile: close the sketch loop first",
+  "model.cut.item": "Cut %1$s"
 }

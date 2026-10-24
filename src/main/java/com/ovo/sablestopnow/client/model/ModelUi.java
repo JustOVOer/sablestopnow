@@ -2133,10 +2133,13 @@ public final class ModelUi {
                 com.ovo.sablestopnow.sketch.Solid.groupSketches(solids, byId.keySet());
 
         for (final com.ovo.sablestopnow.sketch.Solid solid : solids) {
-            final boolean revolve = solid.isRevolution();
-            final Component label = revolve
-                    ? Component.translatable("model.revolve.item", solid.index())
-                    : Component.translatable("model.extrude.item", solid.index());
+            // ★ 需求：切割在树里要叫**切割** ✓（以前一律显示"拉伸"✗）
+            final Component label = solid.shape()
+                    instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut
+                    ? Component.translatable("model.cut.item", solid.index())
+                    : (solid.isRevolution()
+                            ? Component.translatable("model.revolve.item", solid.index())
+                            : Component.translatable("model.extrude.item", solid.index()));
             final TreeView.TreeItem row = new TreeView.TreeItem(
                     "solid:" + bodyId + ":" + solid.id()).label(label);
             row.data = solid;

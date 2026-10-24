@@ -69,8 +69,40 @@ public final class SolidClientState {
      * <p>⚠ 这里必须用**同一个维度**的草图，而且解析不到的草图要被跳过 ——
      * 草图可能还没同步过来。渲染和碰撞都走这一个入口，免得两处各拼一次还算得不一样。
      */
+    /** 上次算 placed 时的内容签名 + 结果（**每帧重算会卡死** ⇒ 必须缓存 ✓）。 */
+    private static String placedSig = "";
+    private static List<Solid.Placed> placedCache = List.of();
+
+    /**
+     * 实体的"已放置"几何（盒子/线框/网格）✓ —— **带缓存**。
+     *
+     * <p>★ 修实测"含贝塞尔的切割创建后大量卡顿"✗：
+     * 这个方法被**渲染每帧**调用，而它内部会跑 {@link Solid#placeAll}（切割还要跑 CSG BSP）
+     * ⇒ 每帧一次布尔运算 ⇒ 直接卡成幻灯片 ✗
+     * ⇒ 按"内容签名"（实体 id/序号/hash + 草图变量与约束数）缓存 ✓ 只在真的变了才重算 ✓
+     */
     public static List<Solid.Placed> placed(final ResourceLocation dimension) {
-        return Solid.placeAll(in(dimension), SketchClientState.in(dimension));
+        final List<Solid> solids = in(dimension);
+        final List<Sketch> sketches = SketchClientState.in(dimension);
+        final StringBuilder sb = new StringBuilder(64);
+        for (final Solid s : solids) {
+            sb.append(s.id()).append(':').append(s.index()).append(':')
+                    .append(s.shape().hashCode()).append(';');
+        }
+        sb.append('|');
+        for (final Sketch k : sketches) {
+            sb.append(k.id()).append(':')
+                    .append(java.util.Arrays.hashCode(k.variables())).append(':')
+                    .append(k.constraints().size()).append(':')
+                    .append(k.entities().size()).append(';');
+        }
+        final String sig = sb.toString();
+        if (sig.equals(placedSig)) {
+            return placedCache;
+        }
+        placedSig = sig;
+        placedCache = Solid.placeAll(solids, sketches);
+        return placedCache;
     }
 
     public static List<Solid.Placed> placed(final Level level) {

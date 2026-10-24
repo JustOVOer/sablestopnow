@@ -689,5 +689,6 @@
   "model.tool.cut": "切割台体",
   "model.tool.cut.short": "切割",
   "model.tool.cut.hint": "选结构 + 选草图，拉出的体用来给同一结构内相交的实体打洞",
-  "model.revolve.empty_profile": "旋转需要闭合轮廓：请把草图轮廓连成闭环，或换一条闭合的草图"
+  "model.revolve.empty_profile": "旋转需要闭合轮廓：请把草图轮廓连成闭环，或换一条闭合的草图",
+  "model.cut.item": "切割%1$s"
 }

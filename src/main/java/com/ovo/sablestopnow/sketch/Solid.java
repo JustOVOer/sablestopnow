@@ -528,7 +528,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      * <p>盒子用来做碰撞侧的减法；草图+参数用来重新生成**网格**参与 CSG ✓。
      */
     /** CSG 渲染开关（修好 {@code Csg.Node} 之后再打开 ✓）。 */
-    public static final boolean CSG_RENDER_ENABLED = false;
+    public static final boolean CSG_RENDER_ENABLED = true;
 
     private record CutFeat(SketchPlane plane, Sketch sketch, Extrude.Params params,
                            List<double[]> boxes) {
@@ -579,8 +579,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             // ② 渲染：**CSG 真布尔** ✓ —— 外观保持原样（顶点带 normal+uv ⇒ 贴图照常）✓
             SolidMesh.Mesh mesh = solid.mesh(sketch);
             List<Vector3d[]> drawnEdges = edges;
-            // ⚠ CSG 渲染链路**暂未启用**：csg.js 移植的 Node 仍有 bug（差集恒为空），
-            //   在修好之前不能改变玩家看到的表现 ✗ ⇒ 先走旧的三角剔除 ✓ 无回归 ✓
+            // ★ CSG 渲染链路（csg.js 移植）✓ —— Node.clipTo 的"清空后再传入"坑修好后已可用 ✓
             if (cut && CSG_RENDER_ENABLED) {
                 List<Csg.Polygon> acc = CsgMesh.fromMesh(solid.mesh(sketch), null);
                 for (final CutFeat f : feats) {

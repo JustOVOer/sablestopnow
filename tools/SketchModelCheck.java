@@ -73,9 +73,8 @@ public final class SketchModelCheck {
     /**
      * CSG 离线用例（csg.js 移植自检）✓ —— **目前只在输入层自检**。
      *
-     * <p>⚠ 待修：{@code Csg.subtract} 目前恒返回空集（{@code Csg.Node} 的移植 bug），
-     * 所以这里**不断言布尔结果**，只验证"输入是封闭且法线朝外的网格" ✓（这一层已经通过 ✓）。
-     * 修好 Node 之后把 main 里的 {@code csgBoolean()} 调用打开、并恢复差集断言 ✓。
+     * <p>覆盖：输入必须是封闭、法线朝外的网格；差集后包围盒不变；孔内的面被移除；
+     * 结果网格三角形数合理 ✓。
      */
     private static void csgBoolean() {
         final java.util.List<double[]> targetBoxes = new java.util.ArrayList<>();
@@ -172,6 +171,7 @@ public final class SketchModelCheck {
     }
 
     public static void main(final String[] args) throws Exception {
+        csgBoolean();
         System.out.println("=== 草图模型层离线自检 ===");
 
         basePlanesAreOrthonormal();

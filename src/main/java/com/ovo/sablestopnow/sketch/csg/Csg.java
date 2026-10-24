@@ -240,8 +240,14 @@ public final class Csg {
         }
 
         public void clipTo(final Node bsp) {
+            // ⚠ 语句顺序坑 ✓✓：不能写成
+            //     polygons.clear();
+            //     polygons.addAll(bsp.clipPolygons(polygons));   ← 传进去的是**已被清空的表** ✗
+            //   那样每次 clipTo 都把本节点剪成空 ⇒ union/subtract/intersect **全都返回空** ✗
+            //   （实测：node(a) 单独有 12 个面 ✓ 但 union 后是 0 ✓ 就是这里 ✓）
+            final List<Polygon> clipped = bsp.clipPolygons(polygons);
             polygons.clear();
-            polygons.addAll(bsp.clipPolygons(polygons));
+            polygons.addAll(clipped);
             if (front != null) {
                 front.clipTo(bsp);
             }

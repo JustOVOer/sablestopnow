@@ -705,7 +705,7 @@ public final class SketchRenderer {
         //   以前这里是 `continue` 跳过、全靠 HUD 那层屏幕空间虚线 ✗
         //   ⇒ 那层没画（投影失败/被裁/被别的层盖住）时，辅助线就"看不见"或"看着是实线" ✓
         //   ⇒ 现在改在世界空间画虚线段 ✓ 与实体线同一套投影 ⇒ 必然对齐 ✓
-        lines += drawConstruction(vc, pose, cameraPos, renderPose, sketch);
+        lines += drawConstruction(vc, pose, cameraPos, renderPose, sketch, session, hovered);
         return lines;
     }
 
@@ -717,11 +717,24 @@ public final class SketchRenderer {
      */
     private static int drawConstruction(final VertexConsumer vc, final PoseStack.Pose pose,
                                         final Vec3 cameraPos, final Pose3dc renderPose,
-                                        final Sketch sketch) {
+                                        final Sketch sketch,
+                                        final SketchSession session,
+                                        final Sketch.Entity hovered) {
         int drawn = 0;
         for (final Sketch.Entity entity : sketch.entities()) {
             if (!sketch.isConstruction(entity)) {
                 continue;
+            }
+            // ★ 修实测"辅助线选中后不变颜色" ✗
+            //   辅助线在主线框里被 skip 了 ⇒ 选中/悬停色根本没机会生效 ✗
+            //   ⇒ 在这一层按 same 规则给色：选中=橙 / 悬停=亮 / 其它=构造灰 ✓
+            final float[] consColor;
+            if (session != null && session.isSelected(entity)) {
+                consColor = SELECTED_COLOR;
+            } else if (entity.equals(hovered)) {
+                consColor = HOVER_COLOR;
+            } else {
+                consColor = CONSTRUCTION_COLOR;
             }
             final int[] v = entity.vars();
             switch (entity.kind()) {
@@ -751,7 +764,7 @@ public final class SketchRenderer {
                                         x0 + ux * at, y0 + uy * at),
                                 world(cameraPos, renderPose, sketch,
                                         x0 + ux * end, y0 + uy * end),
-                                CONSTRUCTION_COLOR);
+                                consColor);
                         drawn++;
                         at = end + gap;
                     }
@@ -771,7 +784,7 @@ public final class SketchRenderer {
                                         cx + r * Math.cos(a0), cy + r * Math.sin(a0)),
                                 world(cameraPos, renderPose, sketch,
                                         cx + r * Math.cos(a1), cy + r * Math.sin(a1)),
-                                CONSTRUCTION_COLOR);
+                                consColor);
                         drawn++;
                     }
                 }
@@ -788,7 +801,7 @@ public final class SketchRenderer {
                         line(vc, pose,
                                 world(cameraPos, renderPose, sketch, p0[0], p0[1]),
                                 world(cameraPos, renderPose, sketch, p1[0], p1[1]),
-                                CONSTRUCTION_COLOR);
+                                consColor);
                         drawn++;
                     }
                 }

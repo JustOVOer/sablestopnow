@@ -352,10 +352,36 @@ public final class SketchSession {
         return -1;
     }
 
+    /**
+     * 把"显示值"换算成**求解器要的有符号值** ✓（水平/竖直尺寸专用）。
+     *
+     * <p>kind 15 实际约束 Δy、kind 16 实际约束 Δx（见 `SketchMeasure.variants` 的实测注释 ✓）。
+     * 玩家给的正数表示"**大小**" ⇒ 方向沿用**当前几何**的符号 ⇒ 落下/改值都不会镜像翻转 ✓
+     */
+    private double signedAxisValue(final int kind, final double value, final int[] vars) {
+        if (vars == null || vars.length < 4 || this.working == null) {
+            return value;
+        }
+        final double abs = Math.abs(value);
+        if (kind == SketchSolver.HORIZONTAL_DISTANCE) {
+            final double cur = this.working.variable(vars[3]) - this.working.variable(vars[1]);
+            return cur < 0 ? -abs : abs;
+        }
+        if (kind == SketchSolver.VERTICAL_DISTANCE) {
+            final double cur = this.working.variable(vars[2]) - this.working.variable(vars[0]);
+            return cur < 0 ? -abs : abs;
+        }
+        return value;
+    }
+
     public boolean dimensionWith(final int kind, final double value, final int[] vars) {
         if (this.working == null || vars == null || vars.length == 0 || kind == 0) {
             return false;
         }
+        // ★★ 修实测"水平/竖直尺寸落下后几何被镜像翻转、modify 框里是负数" ✓✓
+        //   求解器要的是**有符号**的 Δx / Δy，而玩家（和改值框）给的是**正的显示值**
+        //   ⇒ 这里按**当前几何的符号**换算：|值| 保留、方向不变 ✓ ⇒ 永不翻转 ✓
+        final double valueSigned = signedAxisValue(kind, value, vars);
         // ① 已有同几何同种约束 ⇒ 改它的值（编辑已有尺寸 ✓ 而不是新建 ✗）
         for (int i = 0; i < this.working.constraints().size(); i++) {
             final Sketch.Constraint c = this.working.constraints().get(i);
@@ -365,12 +391,13 @@ public final class SketchSession {
             if (sameOperands(c.operands(), vars)) {
                 // 注意 ✓ replaceConstraint 返回 void ✗ 而 solve() 不在 Sketch 上 ✗
                 // ⇒ 这里只改值 ✓ 求解交给上层（UI 落完后统一 mode.solve() ✓ 与既有流程一致 ✓）
-                this.working.replaceConstraint(i, new Sketch.Constraint(kind, vars.clone(), value));
+                this.working.replaceConstraint(i,
+                        new Sketch.Constraint(kind, vars.clone(), valueSigned));
                 return true;
             }
         }
         // ② 没有 ⇒ 新建 ✓
-        this.working.addConstraint(kind, value, vars.clone());
+        this.working.addConstraint(kind, valueSigned, vars.clone());
         return true;
     }
 

@@ -223,6 +223,13 @@ public final class Sketch {
     }
 
     public double variable(final int index) {
+        // ★ 防御（实测崩溃：Index 16 out of bounds for length 0 ✓）
+        //   进入新草图时若**上一张草图的选中集**还没清，`centreOf`/`between` 里就会用旧下标
+        //   去取新草图的变量表 ⇒ 越界 ⇒ 渲染线程崩 ✗
+        //   ⇒ 这里兜底返回 0 ✓（几何上等价于"这个点还在原点"，不会崩 ✓）
+        if (index < 0 || index >= variables.size()) {
+            return 0.0;
+        }
         return variables.get(index);
     }
 
@@ -312,10 +319,16 @@ public final class Sketch {
         }
         final int[] v = curve.vars();
         // 手柄1：P0 → C1 ✓   手柄2：P3 → C2 ✓（**共享曲线变量** ⇒ 拖动即改曲线 ✓）
-        final Entity h1 = addLineVars(v[0], v[1], v[2], v[3]);
-        final Entity h2 = addLineVars(v[6], v[7], v[4], v[5]);
-        setConstruction(h1, true);
-        setConstruction(h2, true);
+        // ★ 修实测"手柄长度会变成 0" ✗：控制点与端点重合时**不造那一条手柄** ✓
+        //   （否则会多一条 0 长虚线 + 一个看着像"点约束"的标记 ✓）
+        if (Math.hypot(c1x - x0, c1y - y0) > 1.0e-6) {
+            final Entity h1 = addLineVars(v[0], v[1], v[2], v[3]);
+            setConstruction(h1, true);
+        }
+        if (Math.hypot(c2x - x3, c2y - y3) > 1.0e-6) {
+            final Entity h2 = addLineVars(v[6], v[7], v[4], v[5]);
+            setConstruction(h2, true);
+        }
         return curve;
     }
 
@@ -759,12 +772,17 @@ public final class Sketch {
         }
         final boolean hasA = hasLineVars(av[0], av[1], av[2], av[3]);
         final boolean hasB = hasLineVars(av[0], av[1], av[4], av[5]);
-        if (!hasA) {
+        // ★ 修实测"第二条辅助线长度会变成 0" ✗ ⇒ 零长的那条**不造** ✓
+        if (!hasA
+                && Math.hypot(variable(av[2]) - variable(av[0]),
+                        variable(av[3]) - variable(av[1])) > 1.0e-6) {
             final Entity l = addLineVars(av[0], av[1], av[2], av[3]);
             setConstruction(l, true);
             added.add(l);
         }
-        if (!hasB) {
+        if (!hasB
+                && Math.hypot(variable(av[4]) - variable(av[0]),
+                        variable(av[5]) - variable(av[1])) > 1.0e-6) {
             final Entity l = addLineVars(av[0], av[1], av[4], av[5]);
             setConstruction(l, true);
             added.add(l);

@@ -343,10 +343,28 @@ public final class SketchClient {
         return true;
     }
 
+    private static long lastClickMs;
+    private static double lastClickX = Double.NaN;
+    private static double lastClickY = Double.NaN;
+
     public static boolean click(final Minecraft mc) {
         if (!MODE.active()) {
             return false;
         }
+        // ★★ 修实测"零长直线 / 手柄长度 0 / 贝塞尔变直线"的**共同根因** ✓✓
+        //   现象：一次点击被**处理两次**（同一位置、极短时间内的第二次到达）
+        //   ⇒ 每个点被落两次 ⇒ 手柄长度 0、贝塞尔控制点与端点重合（看着变直线）✓
+        //   ⇒ 这里做**去重**：70ms 内、3 像素内视为同一次点击，直接吞掉 ✓
+        final double mxNow = mc.mouseHandler.xpos();
+        final double myNow = mc.mouseHandler.ypos();
+        final long msNow = System.currentTimeMillis();
+        if (msNow - lastClickMs < 70L
+                && Math.hypot(mxNow - lastClickX, myNow - lastClickY) < 3.0) {
+            return true; // 重复到达 ⇒ 丢掉，但**消费掉**（不要让它变成别的操作）✓
+        }
+        lastClickMs = msNow;
+        lastClickX = mxNow;
+        lastClickY = myNow;
         final UUID body = MODE.session().body();
         final ClientSubLevel sub = body == null ? null : find(body);
         if (sub == null) {

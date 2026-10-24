@@ -116,7 +116,8 @@ public final class SketchRenderer {
      * <p>⚠ SolidWorks 用黑色，是因为它的背景是白的。这里是暗色世界，
      * 照搬黑色会直接看不见 —— 要的是"在视觉上退到后面"这个语义。
      */
-    private static final float[] FULLY_DEFINED_COLOR = {0.42f, 0.52f, 0.46f};
+    // ★ 用户要求：完全定义的线 = **亮草绿色** ✓
+    private static final float[] FULLY_DEFINED_COLOR = {0.35f, 1.00f, 0.32f};
     /** **欠定义**的图元颜色（亮蓝）—— 还没被约束钉住，需要玩家注意。 */
     private static final float[] UNDER_DEFINED_COLOR = {0.30f, 0.62f, 1.0f};
     /**
@@ -269,6 +270,11 @@ public final class SketchRenderer {
             final ClientSubLevel ssub = byId.get(placed.solid().body());
             if (ssub == null) {
                 continue; // 结构还没同步过来 —— 跳过，不要当成"结构没了"
+            }
+            // ★ 用户要求：编辑草图时，**这张草图对应的拉伸要隐藏** ✓
+            //   （其它模型半透明 10% ✓；自己那个体挡住视线就没法画了 ✗）
+            if (sketching && editingId != null && editingId.equals(placed.solid().sketchId())) {
+                continue;
             }
             final Pose3dc sPose = ssub.renderPose();
             // 贴图：先按方块 id 取三张 sprite 子矩形（带缓存），取不到就只画线框。

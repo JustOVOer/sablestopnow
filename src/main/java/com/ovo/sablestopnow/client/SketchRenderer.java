@@ -1487,8 +1487,12 @@ public final class SketchRenderer {
                              final Vec3 cameraPos, final Pose3dc renderPose, final Sketch sketch,
                              final double ua, final double va, final double ub, final double vb,
                              final float[] colour) {
-        final Vec3 a = rel(world(cameraPos, renderPose, sketch, ua, va), cameraPos);
-        final Vec3 b = rel(world(cameraPos, renderPose, sketch, ub, vb), cameraPos);
+        // ★★ 修崩溃级坐标 bug："转视角时尺寸线朝错误方向漂、看着像错误换算到屏幕"✗✗
+        //   `world(...)` 返回的**已经是相机相对坐标**（内部减过 cameraPos ✓）
+        //   ⇒ 这里**不能再 rel(..., cameraPos)** 减第二遍 ✗ 否则整条尺寸线被平移了 -cameraPos，
+        //     相机一动它就跑偏 ✓（"全是像素线"也是因为画到了远处/极近处）
+        final Vec3 a = world(cameraPos, renderPose, sketch, ua, va);
+        final Vec3 b = world(cameraPos, renderPose, sketch, ub, vb);
         quadLine(vcq, pose, a, b, colour);
     }
 

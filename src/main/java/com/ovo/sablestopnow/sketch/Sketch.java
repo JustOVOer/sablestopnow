@@ -990,8 +990,60 @@ public final class Sketch {
             return new SketchSolver.Result(false, result.converged(), result.iterations(),
                     Math.max(1, result.unsatisfied()), this.preSolve);
         }
+        // ★★ 修实测"0 长直线 / 弧半径错乱 / 贝塞尔被压成直线"的**共同根因** ✓✓
+        //   上面那道守卫只看**整张草图的范围** ⇒ 单独**一个图元**塌成 0 时它抓不到 ✗
+        //   （整张草图还有别的几何 ⇒ 范围几乎不变 ✓）
+        //   ⇒ 这里按**图元**判：解完后"退化图元"变多了 ⇒ 判定为退化解 ⇒ 回滚 ✓
+        //     宁可让玩家看到"约束没生效"，也不要让某条线/某段弧凭空塌掉 ✓
+        final int degenAfter = degenerateCount(vars);
+        final int degenBefore = degenerateCount(this.preSolve);
+        if (degenAfter > degenBefore) {
+            setVariables(this.preSolve);
+            return new SketchSolver.Result(false, result.converged(), result.iterations(),
+                    Math.max(1, result.unsatisfied()), this.preSolve);
+        }
         setVariables(vars);
         return result;
+    }
+
+    /**
+     * 退化图元的个数 ✓（长度/半径/端点距近乎为 0 的线、弧、贝塞尔）。
+     *
+     * <p>用来在求解后判断"有没有某个图元被解塌了" ✓ —— 这是用户实测三类问题
+     * （0 长直线 / 弧半径与圆心角错乱 / 贝塞尔变直线）的**共同根因** ✓
+     */
+    private int degenerateCount(final double[] vars) {
+        final double eps = 1.0e-3;
+        int count = 0;
+        for (final Entity e : entities) {
+            final int[] v = e.vars();
+            switch (e.kind()) {
+                case LINE -> {
+                    if (v.length >= 4
+                            && Math.hypot(vars[v[2]] - vars[v[0]],
+                            vars[v[3]] - vars[v[1]]) < eps) {
+                        count++;
+                    }
+                }
+                case ARC -> {
+                    if (v.length >= 6
+                            && Math.hypot(vars[v[2]] - vars[v[0]],
+                            vars[v[3]] - vars[v[1]]) < eps) {
+                        count++;
+                    }
+                }
+                case BEZIER -> {
+                    if (v.length >= 8
+                            && Math.hypot(vars[v[6]] - vars[v[0]],
+                            vars[v[7]] - vars[v[1]]) < eps) {
+                        count++;
+                    }
+                }
+                default -> {
+                }
+            }
+        }
+        return count;
     }
 
     /** 解之前保存的一份变量（解塌时回滚用）。 */

@@ -1721,10 +1721,11 @@ public final class SketchSession {
         lastLineDiag = String.format(java.util.Locale.ROOT,
                 "a=(%.3f,%.3f) b=(%.3f,%.3f) len=%.4f", ax, ay, bx, by,
                 Math.hypot(bx - ax, by - ay));
-        // ★ 再收紧一档（实测仍有"看着是 0"的线）：阈值 1e-3 → **2e-2（2cm）** ✓
-        //   2cm 在方块尺度下本来就看不见 ⇒ 直接拒绝，比留一条"隐形线"好 ✓
-        if (Math.hypot(bx - ax, by - ay) < 2.0e-2) {
-            lastLineDiag = lastLineDiag + " rejected=too-short";
+        // ★ 修顺序错误：**长度检查必须在 `inferOrtho` 之后** ✓
+        //   原来在投影前判 ⇒ 投影会把某一轴拉到 0 ⇒ 实际更短 ✗
+        //   （下面 inferOrtho 之后会再判一次 ✓ 这里只判"原始距离为 0"这种极端情况）✓
+        if (Math.hypot(bx - ax, by - ay) < 1.0e-9) {
+            lastLineDiag = lastLineDiag + " rejected=zero-origin";
             return;
         }
         // ★★ 修实测"画短直线时几乎每次都变为长度为 0" ✓✓
@@ -1754,6 +1755,12 @@ public final class SketchSession {
         by = ortho[1];
         final boolean horizontal = ortho[2] == 1.0;
         final boolean vertical = ortho[2] == 2.0;
+        // ★ 投影后再判一次长度（这才是玩家**真正看到**的那条线的长度 ✓）
+        if (Math.hypot(bx - ax, by - ay) < 2.0e-2) {
+            lastLineDiag = lastLineDiag + " rejected=too-short-after-ortho len="
+                    + String.format(java.util.Locale.ROOT, "%.4f", Math.hypot(bx - ax, by - ay));
+            return;
+        }
 
         // ★★ 修实测"没有钉住"（日志铁证：re=ENDPOINT 但 +con=0）✓✓
         //   真因：`constrainAt` 在**线建好之后**才拾关键点 ⇒ 新线自己的端点就在落点上、

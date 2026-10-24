@@ -250,7 +250,7 @@ public final class SketchRenderer {
         //   实体线框仍用原来的 LINES 缓冲（它们不属于"草图线条"✓ 也不该变粗 ✓）
         final MultiBufferSource.BufferSource sketchQuadBuf =
                 MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 18));
-        final VertexConsumer vcq = sketchQuadBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
+        final VertexConsumer vcq = sketchQuadBuf.getBuffer(ModRenderTypes.SKETCH_LINES_QUADS);
 
         int drawn = 0;
         int textured = 0;
@@ -397,6 +397,13 @@ public final class SketchRenderer {
             // 否则这批线要等下一批同类绘制才出得来。
             buffers.endBatch(sketchLineType);
             sketchQuadBuf.endBatch();
+            // ★ 诊断：确认细条真的写进缓冲并被 flush（"还是 1px" 时用来判断是哪一环断了）
+            final String qdiag = "quads=" + quadsWritten;
+            if (!qdiag.equals(lastQuadDiag)) {
+                lastQuadDiag = qdiag;
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-quads] {}", qdiag);
+            }
+            quadsWritten = 0;
         }
     }
 
@@ -1473,6 +1480,8 @@ public final class SketchRenderer {
 
     private static String lastDim3dDiag = "";
 
+    private static String lastQuadDiag = "";
+
     /** 平面里的一条线段 ⇒ 世界细条 ✓。 */
     private static void seg3(final VertexConsumer vcq, final PoseStack.Pose pose,
                              final Vec3 cameraPos, final Pose3dc renderPose, final Sketch sketch,
@@ -1535,6 +1544,9 @@ public final class SketchRenderer {
      */
     private static Vec3 quadUp;
 
+    /** 本帧写进"草图线条"缓冲的细条数（诊断用 ✓）。 */
+    private static int quadsWritten;
+
     /** 用某张草图的平面法线设置细条的躺平面 ✓（方向用渲染 pose 旋转到世界）✓ */
     private static void setQuadUp(final Pose3dc renderPose, final Sketch sketch) {
         if (renderPose == null || sketch == null || sketch.plane() == null) {
@@ -1582,6 +1594,7 @@ public final class SketchRenderer {
             side = dir.cross(new Vec3(1, 0, 0));
         }
         side = side.normalize().scale(QUAD_LINE_HALF);
+        quadsWritten++;
         colourVertex(vc, pose, a.subtract(side), colour);
         colourVertex(vc, pose, a.add(side), colour);
         colourVertex(vc, pose, b.add(side), colour);

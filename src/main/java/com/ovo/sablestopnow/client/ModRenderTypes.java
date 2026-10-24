@@ -141,6 +141,25 @@ public class ModRenderTypes {
                     .createCompositeState(false)
     );
 
+    /** 草图线条专用（QUADS 细条）✓ 与网格同设置但**不同实例**，避免同帧互抢缓冲。 */
+    public static final RenderType SKETCH_LINES_QUADS = RenderType.create(
+            "sablestopnow_sketch_lines_quads",
+            DefaultVertexFormat.POSITION_COLOR,
+            VertexFormat.Mode.QUADS,
+            1536,
+            false,
+            true,
+            RenderType.CompositeState.builder()
+                    .setShaderState(RenderStateShard.POSITION_COLOR_SHADER)
+                    .setLayeringState(RenderStateShard.VIEW_OFFSET_Z_LAYERING)
+                    .setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
+                    .setOutputState(RenderStateShard.ITEM_ENTITY_TARGET)
+                    .setWriteMaskState(RenderStateShard.COLOR_WRITE)
+                    .setCullState(RenderStateShard.NO_CULL)
+                    .setDepthTestState(RenderStateShard.LEQUAL_DEPTH_TEST)
+                    .createCompositeState(false)
+    );
+
     /**
      * 实体**贴图**：方块图集 + alpha 裁剪。
      *

@@ -1408,11 +1408,14 @@ public final class SketchRenderer {
             return 0;
         }
         final float[] white = {1.0f, 1.0f, 1.0f};
+        final StringBuilder diag = new StringBuilder("dims=" + dims.size());
         for (final var d : dims) {
             if (d.labelKey() != null && d.labelKey().contains("angle")) {
                 continue; // 角度：保持 HUD 弧线 ✓
             }
             final double[] ends = com.ovo.sablestopnow.sketch.SketchMeasure.endpointsOf(sketch, d);
+            diag.append(' ').append(d.labelKey() == null ? "?" : d.labelKey())
+                    .append(ends == null ? ":noEnds" : ":ok");
             if (ends == null) {
                 continue;
             }
@@ -1457,8 +1460,14 @@ public final class SketchRenderer {
             drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2, white);
             drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a2, b2, a1, b1, white);
         }
+        if (!diag.equals(lastDim3dDiag)) {
+            lastDim3dDiag = diag;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[dim3d] {}", diag);
+        }
         return drawn;
     }
+
+    private static String lastDim3dDiag = "";
 
     /** 平面里的一条线段 ⇒ 世界细条 ✓。 */
     private static void seg3(final VertexConsumer vcq, final PoseStack.Pose pose,

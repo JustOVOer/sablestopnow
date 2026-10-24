@@ -64,6 +64,12 @@ public final class SketchRenderer {
      */
     private static final float[] CONSTRUCTION_COLOR = {0.62f, 0.66f, 0.78f, 1.00f};
 
+    /**
+     * 画草图时**其它模型**的不透明度 ✓（需求：进入草图时其它模型半透明 10% ✓）。
+     * 1.0 = 正常；0.10 = 鬼影 ✓（由 {@link #render} 每帧按"是否在画草图"设置 ✓）
+     */
+    private static float ghostAlpha = 1.0f;
+
     /** 圆的折线段数。草图阶段够用；精确圆弧是拉伸阶段的事。 */
     private static final int CIRCLE_SEGMENTS = 48;
 
@@ -184,6 +190,8 @@ public final class SketchRenderer {
         // 还要各自 endBatch（同一个 buffer 被两队各自 flush 会互相截断）。
         final List<Solid.Placed> solids = SolidClientState.placed(level);
         final boolean sketching = SketchClient.active();
+        // ★ 需求：进入草图时**其它模型半透明 10%** ✓
+        ghostAlpha = sketching ? 0.10f : 1.0f;
         // 不能因为「没有草图」就提前返回：选面阶段恰恰是一张草图都还没有的时候，
         // 那三块基准板必须画出来，否则玩家看不到该点哪里。
         if (sketches.isEmpty() && !sketching && solids.isEmpty()) {
@@ -251,7 +259,9 @@ public final class SketchRenderer {
                     final MultiBufferSource.BufferSource own =
                             MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
                     final VertexConsumer vcRepeat = own.getBuffer(
-                            net.minecraft.client.renderer.RenderType.entityCutoutNoCull(repeatTex));
+                            ghostAlpha < 1.0f
+                                    ? net.minecraft.client.renderer.RenderType.entityTranslucent(repeatTex)
+                                    : net.minecraft.client.renderer.RenderType.entityCutoutNoCull(repeatTex));
                     textured += drawTexturedSolid(vcRepeat, pose, cameraPos, sPose, placed, faces,
                             look.blocksPerTile(), repeatTex);
                     own.endBatch();
@@ -270,8 +280,9 @@ public final class SketchRenderer {
             //   需要看形状时按 F3 仍然能看到。
             if (!placed.solid().appearance().hasTexture()) {
                 for (final Vector3d[] seg : placed.edges()) {
-                    line(vc, pose, world(cameraPos, sPose, seg[0]),
-                            world(cameraPos, sPose, seg[1]), SOLID_COLOR);
+                    // ★ 需求：画草图时其它模型**半透明 10%** ✓
+                    lineA(vc, pose, world(cameraPos, sPose, seg[0]),
+                            world(cameraPos, sPose, seg[1]), SOLID_COLOR, ghostAlpha);
                     drawn++;
                 }
             }
@@ -487,7 +498,7 @@ public final class SketchRenderer {
                 final Vec3 p = world(cameraPos, renderPose, v.position());
                 final Vector3d n = rot.transform(new Vector3d(v.normal()), new Vector3d());
                 vc.addVertex(pose, (float) p.x, (float) p.y, (float) p.z)
-                        .setColor(255, 255, 255, 255)
+                        .setColor(255, 255, 255, (int) (ghostAlpha * 255.0f))
                         .setUv((float) v.u(), (float) v.v())
                         .setOverlay(net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY)
                         .setLight(FULL_BRIGHT)
@@ -1175,6 +1186,17 @@ public final class SketchRenderer {
         for (final int[] e : edges) {
             line(vc, pose, c[e[0]], c[e[1]], VOXEL_DEBUG_COLOR);
         }
+    }
+
+    /** 带 alpha 的线段 ✓（鬼影用；顶点格式与原 {@link #line} 一致 ✓）。 */
+    private static void lineA(final VertexConsumer vc, final PoseStack.Pose pose,
+                              final Vec3 a, final Vec3 b, final float[] color, final float alpha) {
+        vc.addVertex(pose, (float) a.x, (float) a.y, (float) a.z)
+                .setColor(color[0], color[1], color[2], alpha)
+                .setNormal(pose, 0.0f, 1.0f, 0.0f);
+        vc.addVertex(pose, (float) b.x, (float) b.y, (float) b.z)
+                .setColor(color[0], color[1], color[2], alpha)
+                .setNormal(pose, 0.0f, 1.0f, 0.0f);
     }
 
     private static void line(final VertexConsumer vc, final PoseStack.Pose pose,

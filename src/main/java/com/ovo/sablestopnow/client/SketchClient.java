@@ -463,6 +463,22 @@ public final class SketchClient {
                     return true;
                 }
             }
+            // ★ 需求：**基准点（原点）等虚拟关键点也要能选成点** ✓
+            //   实测"先选线、再点基准点 ⇒ 想标点到线距离却选不上"✗
+            //   原因：原点不是图元 ⇒ pickEntity 命中不了 ⇒ 被当成"点空白放置"✗
+            //   ⇒ 没命中图元时，先在关键点处生成/复用一个点图元并选中 ✓
+            //     之后点空白即落"点 ↔ 线 距离" ✓（圆心/端点仍走上面那条快速路径 ✓）
+            if (hit == null && work != null) {
+                final var keyPt = session.pointEntityAt(
+                        session.hoverU(), session.hoverV(), MODE.pickTolerance());
+                if (keyPt != null && !session.isSelected(keyPt)) {
+                    if (picked.size() >= 2) {
+                        session.clearSelection();
+                    }
+                    session.toggleEntity(keyPt);
+                    return true;
+                }
+            }
             if (hit != null) {
                 if (picked.size() >= 2) {
                     session.clearSelection(); // 已选两个还想选 ⇒ 从这一个重新开始 ✓ 不至于卡住 ✓

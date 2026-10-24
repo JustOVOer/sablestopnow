@@ -600,7 +600,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 // ★ 但草图在、几何算不出来 ⇒ **保留实体**（不再静默丢弃）
                 //   丢掉它会让玩家看到"草图被吃掉、新拉伸不出现" ✗
                 lastCsgDiag = "solidEmpty idx=" + solid.index() + " kind="
-                        + solid.shape().getClass().getSimpleName() + " sketchResolved=true";
+                        + solid.shape().getClass().getSimpleName() + " sketchResolved=true"
+                        + " ents=" + sketch.entities().size()
+                        + " cons=" + sketch.constructionEntities().size()
+                        + " refs=" + sketch.referenceEntities().size()
+                        + " loops=" + SketchProfiles.findLoops(sketch).size();
             }
             // 网格与平面法线只为**贴图**准备；没有贴图时调用方不看它们。
             // ⚠ 平面法线要带上：SolidMesh.faceKind 靠它判断"这个面是盖子还是侧面"。

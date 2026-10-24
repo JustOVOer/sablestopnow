@@ -1302,6 +1302,10 @@ public final class ModelUi {
 
     /** 立刻重建树（外部数据变化时用，例如刚建好一条配合）。 */
     public static void refreshTreeNow() {
+        // ★ 修实测"新拉伸在游戏里看得见、树里却没有"✗
+        //   树的刷新是靠**内容指纹**去重的；强制刷新时若指纹没变就会跳过 setRoots ✗
+        //   ⇒ 这里先清掉指纹，保证下一次一定重建 ✓
+        lastTreeSignature = null;
         refreshTree(true);
     }
 
@@ -1367,7 +1371,8 @@ public final class ModelUi {
                     root.data = id;
                     root.highlight = id.equals(selected);
                     // 默认展开（玩家手动收起过才会被 applyRememberedExpansion 覆盖）
-                    root.expanded = true;
+                    // ★ 用户要求：树默认**全部折叠** ✓（要点开才展开）
+                    root.expanded = false;
                     root.child(mateBranch(id));
                     root.child(sketchBranch(id));
                     root.child(solidsBranch(id));
@@ -1388,6 +1393,16 @@ public final class ModelUi {
             return;
         }
         lastTreeSignature = signature;
+        // ★ 诊断（"树里没有实体行"✓）：把这次真正交给视图的根/一级子节点打出来
+        final StringBuilder shape = new StringBuilder();
+        for (final TreeView.TreeItem r : roots) {
+            shape.append('[').append(r.children.size()).append(']').append(r.label.getString());
+        }
+        final String treeShape = shape.toString();
+        if (!treeShape.equals(lastTreeShape)) {
+            lastTreeShape = treeShape;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[tree-shape] {}", treeShape);
+        }
         view.setRoots(roots);
         lastRootCount = roots.size();
         lastRowCount = view.rowCount();
@@ -1846,6 +1861,9 @@ public final class ModelUi {
 
     /** 上次打印的"树两侧数量"诊断（变化才打 ✓）。 */
     private static String lastTreeDiag = "";
+
+    /** 上次打印的"树形状"诊断（变化才打 ✓）。 */
+    private static String lastTreeShape = "";
 
     /** 树内容的指纹：所有节点的 key 拼起来，加选中模型。 */
     private static String signatureOf(final List<TreeView.TreeItem> roots) {

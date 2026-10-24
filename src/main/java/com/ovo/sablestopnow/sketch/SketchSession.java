@@ -516,6 +516,12 @@ public final class SketchSession {
         if (!all.isEmpty()) {
             this.working.toggleConstruction(all.get(all.size() - 1));
         }
+        // ★★ 修实测"所有拉伸/切割都创建不出模型"最可能的原因之一 ✓✓：
+        //   辅助线绘制模式是**开关**（一直开着）⇒ 玩家画的所有线都被标成辅助线
+        //   ⇒ 轮廓为空 ⇒ 拉伸/旋转算出**空几何**（日志：solidEmpty kind=Revolution
+        //     sketchResolved=true）⇒ 看起来"创建了却没有模型"✗
+        //   ⇒ 改成**一次性**：标记完立刻自己关掉 ✓（想再画辅助线就再点一次）
+        this.constructionDraw = false;
     }
 
     public boolean chainMode() {

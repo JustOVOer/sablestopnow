@@ -84,11 +84,10 @@ public class ModRenderTypes {
                     .setLineState(new RenderStateShard.LineStateShard(OptionalDouble.of(4.0)))
                     .setLayeringState(RenderStateShard.VIEW_OFFSET_Z_LAYERING)
                     .setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
-                      .setDepthTestState(RenderStateShard.NO_DEPTH_TEST)
                     .setOutputState(RenderStateShard.ITEM_ENTITY_TARGET)
                     .setWriteMaskState(RenderStateShard.COLOR_DEPTH_WRITE)
                     .setCullState(RenderStateShard.NO_CULL)
-                    .setDepthTestState(RenderStateShard.LEQUAL_DEPTH_TEST)
+                    .setDepthTestState(RenderStateShard.NO_DEPTH_TEST)
                     .createCompositeState(false)
     );
 

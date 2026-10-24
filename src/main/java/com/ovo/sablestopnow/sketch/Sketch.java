@@ -804,12 +804,13 @@ public final class Sketch {
             setConstruction(l, true);
             added.add(l);
         }
+        // ★ 用户要求：两条辅助线要**等长约束** ✓
+        //   （之前临时去掉，是因为当时"凭空多出的 COINCIDENT"导致过定义 ✗；
+        //     那个根因已修好 ⇒ 现在加回来是安全的 ✓）
+        //   自由度：6 个变量 − 1 条等长 = **5** ✓ 正好是圆弧的真实自由度 ⇒ 不会过定义 ✓
         if (!added.isEmpty() && !hasEqualLen(av)) {
-            // ⚠ 需求 ④ 实测反馈："加了辅助线就**过定义**、半径与圆心角也不对" ✗
-            //   ⇒ **不再加 EQUAL_LEN** ✓
-            //   两条线**共享弧的圆心变量** ⇒ "圆心端重合"是结构事实 ✓
-            //   半径 = |圆心→起点| = |圆心→终点|（弧的终点本来就在这个圆上 ✓）
-            //   ⇒ 少一条约束 ⇒ 不会过定义 ✓ 半径/弧角的读法也不受影响 ✓
+            addConstraint(SketchSolver.EQUAL_LEN, 0.0,
+                    av[0], av[1], av[2], av[3], av[0], av[1], av[4], av[5]);
         }
         return added;
     }

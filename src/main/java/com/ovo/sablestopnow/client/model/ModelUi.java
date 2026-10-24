@@ -895,6 +895,8 @@ public final class ModelUi {
                 index = Math.max(index, s.index() + 1);
             }
         }
+        // ★ 把"本会话刚创建过、还没同步回来"的序号也算上 ✓（修"编号永远是 1"✗）
+        index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(source.body(), 0) + 1);
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(
                 com.ovo.sablestopnow.sketch.Solid.createRevolution(
                         source.body(), source.id(), index, params));
@@ -1422,6 +1424,16 @@ public final class ModelUi {
      */
     private static boolean cutMode;
 
+    /**
+     * **本会话内已创建过的实体序号** ✓（按 body 记）。
+     *
+     * <p>为什么需要 ✗✓：序号是"服务端镜像里的 max+1"算出来的 ✓
+     * 但刚创建的实体要等**服务端广播回来**才进镜像 ⇒ 连着建两个时
+     * 第二个又会算出同一个序号 ⇒ **重名/覆盖** ✓（实测"编号永远是 1、新实体不出现"✗）
+     */
+    private static final java.util.Map<java.util.UUID, Integer> LOCAL_SOLID_INDEX =
+            new java.util.HashMap<>();
+
     /** 当前是在配"拉伸"还是"旋转"。 */
     private static boolean revolveMode;
     /**
@@ -1732,6 +1744,9 @@ public final class ModelUi {
                 : com.ovo.sablestopnow.sketch.Solid.create(
                         source.body(), source.id(), index, params);
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(solid);
+        LOCAL_SOLID_INDEX.put(source.body(), solid.index());  // ★ 记住这个 body 用到的序号 ✓
+        // ★ 立刻重建右侧树 ✓（不强制的话要等"指纹变化"才刷，玩家会觉得"新拉伸没出现"✗）
+        refreshTreeNow();
         ModelMode.prompt("model.prompt.extrude_created");
         refreshLeftPanel();
     }

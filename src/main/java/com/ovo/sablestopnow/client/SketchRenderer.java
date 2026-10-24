@@ -959,6 +959,10 @@ public final class SketchRenderer {
         if (previewPoint == null) {
             return;
         }
+        // ★ 预览线改成**和背景网格同一种呈现方式**（四边形细条 + SKETCH_GRID 类型）✓
+        final MultiBufferSource.BufferSource quadBuf =
+                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+        final VertexConsumer vcq = quadBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
         final var session = SketchClient.mode().session();
         final var pending = session.pendingPoints();
         if (pending.isEmpty()) {
@@ -988,7 +992,7 @@ public final class SketchRenderer {
                     final Vec3 p = world(cameraPos, renderPose, sketch,
                             a[0] + r * Math.cos(ang), a[1] + r * Math.sin(ang));
                     if (prev != null) {
-                        line(vc, pose, prev, p, PREVIEW_COLOR);
+                        quadLine(vcq, pose, prev, p, PREVIEW_COLOR);
                     }
                     prev = p;
                 }
@@ -1017,7 +1021,7 @@ public final class SketchRenderer {
                             final Vec3 p = world(cameraPos, renderPose, sketch,
                                     centre[0] + r * Math.cos(ang), centre[1] + r * Math.sin(ang));
                             if (prev != null) {
-                                line(vc, pose, prev, p, PREVIEW_COLOR);
+                                quadLine(vcq, pose, prev, p, PREVIEW_COLOR);
                             }
                             prev = p;
                         }
@@ -1058,7 +1062,7 @@ public final class SketchRenderer {
                             final double vv = f0 * p0[1] + f1 * c1[1] + f2 * bv + f3 * p3[1];
                             final Vec3 p = world(cameraPos, renderPose, sketch, uu, vv);
                             if (prev != null) {
-                                line(vc, pose, prev, p, PREVIEW_COLOR);
+                                quadLine(vcq, pose, prev, p, PREVIEW_COLOR);
                             }
                             prev = p;
                         }
@@ -1073,6 +1077,7 @@ public final class SketchRenderer {
                 previewLine(vc, pose, cameraPos, renderPose, sketch, a[0], a[1], bu, bv);
             }
         }
+        quadBuf.endBatch();
     }
 
     private static void previewLine(final VertexConsumer vc, final PoseStack.Pose pose,
@@ -1369,6 +1374,38 @@ public final class SketchRenderer {
                                      final Vec3 p, final float[] c) {
         vc.addVertex(pose, (float) p.x, (float) p.y, (float) p.z)
                 .setColor(c[0], c[1], c[2], c[3]);
+    }
+
+    /** 细条半宽（格）✓ 与背景网格同一档。 */
+    private static final double QUAD_LINE_HALF = 0.02;
+
+    /**
+     * 用**四边形细条**画一条线 ✓ —— 尺寸/预览线要"和背景网格一样的呈现方式"。
+     *
+     * <p>相机空间里取(线段方向 × 视线方向)作侧向量 ⇒ 偏移 ±半宽 ⇒ 细长四边形 ✓
+     * 与 {@code SKETCH_GRID} 同一个 RenderType / 顶点格式 ⇒ 观感与网格一致 ✓
+     */
+    private static void quadLine(final VertexConsumer vc, final PoseStack.Pose pose,
+                                 final Vec3 a, final Vec3 b, final float[] colour) {
+        final Vec3 d = b.subtract(a);
+        final double len = d.length();
+        if (len < 1.0e-6) {
+            return;
+        }
+        final Vec3 dir = d.scale(1.0 / len);
+        final Vec3 mid = a.add(b).scale(0.5);
+        Vec3 side = dir.cross(mid.lengthSqr() < 1.0e-9 ? new Vec3(0, 0, 1) : mid.normalize());
+        if (side.lengthSqr() < 1.0e-9) {
+            side = dir.cross(new Vec3(0, 1, 0));
+        }
+        if (side.lengthSqr() < 1.0e-9) {
+            side = new Vec3(1, 0, 0);
+        }
+        side = side.normalize().scale(QUAD_LINE_HALF);
+        colourVertex(vc, pose, a.subtract(side), colour);
+        colourVertex(vc, pose, a.add(side), colour);
+        colourVertex(vc, pose, b.add(side), colour);
+        colourVertex(vc, pose, b.subtract(side), colour);
     }
 
     private static void quad(final VertexConsumer vc, final PoseStack.Pose pose,

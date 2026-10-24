@@ -570,15 +570,15 @@ public final class SketchHud {
                         final double my2 = (ay + by) * 0.5;
                         // 用文字实际宽度决定断口 ✓（按标签在线的哪一侧不影响断口 ✓）
                         final double half = 19.0; // 三位小数（如 "5.000"）的半个文字宽 + 余量 ✓（此处 text 还没声明 ✓ 所以用等价常量 ✓）
-                        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ax, ay,
+                        crispLine(g, ax, ay,
                                 mx2 - ux * half, my2 - uy * half, 1.5f, lineArgb);
-                        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
+                        crispLine(g,
                                 mx2 + ux * half, my2 + uy * half, bx, by, 1.5f, lineArgb);
                     } else {
                         // 空间太窄 ⇒ 整条画出来 ✓（文字会落在旁边 ✓ 与参考图 3/4 的"外侧文字"一致 ✓）
                         shortLine = true;
                         if (segLen > 1.0e-6) { lineDirX = (bx - ax) / segLen; lineDirY = (by - ay) / segLen; }
-                        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ax, ay, bx, by, 1.5f, lineArgb);
+                        crispLine(g, ax, ay, bx, by, 1.5f, lineArgb);
                     }
                 }
             }
@@ -740,10 +740,10 @@ public final class SketchHud {
                         midX = midBaseX + offX + ux * along;
                         midY = midBaseY + offY + uy * along;
                     }
-                    com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
+                    crispLine(g,
                             paX, paY, midX - ux * gap * 0.5, midY - uy * gap * 0.5,
                             1.0f, pArgb);
-                    com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
+                    crispLine(g,
                             midX + ux * gap * 0.5, midY + uy * gap * 0.5, pbX, pbY,
                             1.0f, pArgb);
                     dimArrow(g, paX, paY, pbX, pbY, pArgb);
@@ -783,13 +783,13 @@ public final class SketchHud {
         final int curX = guiX(mc);
         final int curY = guiY(mc);
         final int curArgb = session.lockedVariant() >= 0 ? 0xEEFFCC55 : 0xAAFFCC55;
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, curX + 3, curY - 9, curX + 3, curY - 3,
+        crispLine(g, curX + 3, curY - 9, curX + 3, curY - 3,
                 1.4f, curArgb);
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, curX + 3, curY + 3, curX + 3, curY + 9,
+        crispLine(g, curX + 3, curY + 3, curX + 3, curY + 9,
                 1.4f, curArgb);
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, curX - 9, curY + 3, curX - 3, curY + 3,
+        crispLine(g, curX - 9, curY + 3, curX - 3, curY + 3,
                 1.4f, curArgb);
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, curX + 3, curY + 3, curX + 9, curY + 3,
+        crispLine(g, curX + 3, curY + 3, curX + 9, curY + 3,
                 1.4f, curArgb);
         final int px = guiX(mc) + OFFSET_X;
         final int py = guiY(mc) + OFFSET_Y + 12; // 让开吸附提示那一行 ✓ 免得两者叠字 ✗
@@ -800,10 +800,10 @@ public final class SketchHud {
         final int iconArgb = 0xCCFFCC55;
         final int ix = px - 16;
         final int iy = py + 4;
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ix, iy - 4, ix, iy + 4, 1.0f, iconArgb);
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ix + 10, iy - 4, ix + 10, iy + 4,
+        crispLine(g, ix, iy - 4, ix, iy + 4, 1.0f, iconArgb);
+        crispLine(g, ix + 10, iy - 4, ix + 10, iy + 4,
                 1.0f, iconArgb);
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ix, iy, ix + 10, iy, 1.0f, iconArgb);
+        crispLine(g, ix, iy, ix + 10, iy, 1.0f, iconArgb);
         com.ovo.sablestopnow.client.gui.lib.UiVector.disc(g, ix, iy, 1.5, iconArgb);
         com.ovo.sablestopnow.client.gui.lib.UiVector.disc(g, ix + 10, iy, 1.5, iconArgb);
         final boolean locked = session.lockedVariant() >= 0;
@@ -980,13 +980,13 @@ public final class SketchHud {
             return;
         }
         // 原点：小方框 ✓（白 ✓ 与普通点区分 ✓）
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, o[0] - 4, o[1] - 4, o[0] + 4, o[1] - 4,
+        crispLine(g, o[0] - 4, o[1] - 4, o[0] + 4, o[1] - 4,
                 1.2f, 0xFFFFFFFF);
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, o[0] + 4, o[1] - 4, o[0] + 4, o[1] + 4,
+        crispLine(g, o[0] + 4, o[1] - 4, o[0] + 4, o[1] + 4,
                 1.2f, 0xFFFFFFFF);
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, o[0] + 4, o[1] + 4, o[0] - 4, o[1] + 4,
+        crispLine(g, o[0] + 4, o[1] + 4, o[0] - 4, o[1] + 4,
                 1.2f, 0xFFFFFFFF);
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, o[0] - 4, o[1] + 4, o[0] - 4, o[1] - 4,
+        crispLine(g, o[0] - 4, o[1] + 4, o[0] - 4, o[1] - 4,
                 1.2f, 0xFFFFFFFF);
         // U 轴（红 ✓）/ V 轴（绿 ✓）：短线 + 两笔箭头 ✓
         arrow(g, work, sub, mc, tmp, o, 0.45, 0.0, 0xFFFF5555);
@@ -1003,7 +1003,7 @@ public final class SketchHud {
         if (tip == null) {
             return;
         }
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, o[0], o[1], tip[0], tip[1], 1.6f, argb);
+        crispLine(g, o[0], o[1], tip[0], tip[1], 1.6f, argb);
         final double dx = tip[0] - o[0];
         final double dy = tip[1] - o[1];
         final double len = Math.hypot(dx, dy);
@@ -1016,7 +1016,7 @@ public final class SketchHud {
         for (final double sgn : new double[] {1.0, -1.0}) {
             final double ax = ux * Math.cos(0.5) - uy * Math.sin(0.5) * sgn;
             final double ay = ux * Math.sin(0.5) * sgn + uy * Math.cos(0.5);
-            com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, tip[0], tip[1],
+            crispLine(g, tip[0], tip[1],
                     tip[0] - ax * 7.0, tip[1] - ay * 7.0, 1.6f, argb);
         }
     }
@@ -1143,9 +1143,9 @@ public final class SketchHud {
             sweep += 2.0 * Math.PI;
         }
         // 界线 = 两条线**自身**（延伸出弧外 10px ✓ 与 SolirdWorks 一致 ✓）
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ox, oy,
+        crispLine(g, ox, oy,
                 ox + Math.cos(a1) * (r + 10.0), oy + Math.sin(a1) * (r + 10.0), 1.0f, argb);
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ox, oy,
+        crispLine(g, ox, oy,
                 ox + Math.cos(a2) * (r + 10.0), oy + Math.sin(a2) * (r + 10.0), 1.0f, argb);
         // 弧线：折线逼近（24 段 ✓ 看不出是折线 ✓）
         final int steps = 24;
@@ -1155,7 +1155,7 @@ public final class SketchHud {
             final double a = a1 + sweep * i / steps;
             final double nx = ox + Math.cos(a) * r;
             final double ny = oy + Math.sin(a) * r;
-            com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, px, py, nx, ny, 1.0f, argb);
+            crispLine(g, px, py, nx, ny, 1.0f, argb);
             px = nx;
             py = ny;
         }
@@ -1187,9 +1187,9 @@ public final class SketchHud {
             final double ty = Math.cos(aEnd) * dir * 12.0;
             final double inx = Math.cos(aEnd) * 3.5;
             final double iny = Math.sin(aEnd) * 3.5;
-            com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ex, ey,
+            crispLine(g, ex, ey,
                     ex + tx + inx, ey + ty + iny, 1.2f, argb);
-            com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, ex, ey,
+            crispLine(g, ex, ey,
                     ex + tx - inx, ey + ty - iny, 1.2f, argb);
         }
     }
@@ -1382,6 +1382,50 @@ public final class SketchHud {
     /**
      * 画一条**界线** ✓（SolidWorks 样式：起点离几何留 4px 缝 ✓ 终点超出尺寸线 6px ✓）。
      */
+    /**
+     * **清晰的 1px 实线** ✓ —— 用户要"尺寸线的呈现方式和背景网格一样"（不模糊、不半透明）。
+     *
+     * <p>为什么不直接用 {@code UiVector.line} ✗：那条线是**抗锯齿宽度线**，观感发虚、半透明，
+     * 和方块世界里的网格完全不是一回事 ✓ ⇒ 这里用 Bresenham + 1px {@code fill} 逐像素画 ✓
+     * 参数顺序与原来保持一致（{@code width} 仍然接收，但只用于"≥1.5 就画两像素"）✓
+     */
+    private static void crispLine(final net.minecraft.client.gui.GuiGraphics g,
+                                  final double x1, final double y1,
+                                  final double x2, final double y2,
+                                  final float width, final int argb) {
+        final int ix1 = (int) Math.round(x1);
+        final int iy1 = (int) Math.round(y1);
+        final int ix2 = (int) Math.round(x2);
+        final int iy2 = (int) Math.round(y2);
+        int x = ix1;
+        int y = iy1;
+        final int dx = Math.abs(ix2 - ix1);
+        final int dy = Math.abs(iy2 - iy1);
+        final int sx = ix1 < ix2 ? 1 : -1;
+        final int sy = iy1 < iy2 ? 1 : -1;
+        int err = dx - dy;
+        final boolean thick = width >= 1.5f;
+        int guard = 0;
+        while (guard++ < 4096) {
+            g.fill(x, y, x + 1, y + 1, argb);
+            if (thick) {
+                g.fill(x + 1, y, x + 2, y + 1, argb);
+            }
+            if (x == ix2 && y == iy2) {
+                break;
+            }
+            final int e2 = err * 2;
+            if (e2 > -dy) {
+                err -= dy;
+                x += sx;
+            }
+            if (e2 < dx) {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
     private static void extLine(final net.minecraft.client.gui.GuiGraphics g,
                                 final double gx, final double gy,
                                 final double dx2, final double dy2, final int argb) {
@@ -1395,7 +1439,7 @@ public final class SketchHud {
         final double uy = dy / len;
         final double gap = 4.0;    // 与几何留缝 ✓
         final double over = 6.0;   // 超出尺寸线 ✓
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g,
+        crispLine(g,
                 gx + ux * gap, gy + uy * gap,
                 dx2 + ux * over, dy2 + uy * over, 1.0f, argb);
     }
@@ -1420,8 +1464,8 @@ public final class SketchHud {
         final double by1 = tipY - uy * size + py * size * spread;
         final double bx2 = tipX - ux * size - px * size * spread;
         final double by2 = tipY - uy * size - py * size * spread;
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, tipX, tipY, bx1, by1, 1.4f, argb);
-        com.ovo.sablestopnow.client.gui.lib.UiVector.line(g, tipX, tipY, bx2, by2, 1.4f, argb);
+        crispLine(g, tipX, tipY, bx1, by1, 1.4f, argb);
+        crispLine(g, tipX, tipY, bx2, by2, 1.4f, argb);
     }
 
     private static int clamp(final int value, final int min, final int max) {

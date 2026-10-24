@@ -1548,7 +1548,11 @@ public final class SketchRenderer {
         if (side.lengthSqr() < 1.0e-9) {
             side = new Vec3(1, 0, 0);
         }
-        side = side.normalize().scale(QUAD_LINE_HALF);
+        // ★ 修实测"现在全是像素线段"✗：半宽固定 0.02 格 ⇒ 离得远就只剩 1px，看着像像素线 ✗
+        //   ⇒ 半宽随**相机距离**缩放（屏幕上粗细基本恒定，约 3~4px ⇒ 与网格同观感）✓
+        final double dist = Math.sqrt(mid.lengthSqr());
+        final double half = Math.max(QUAD_LINE_HALF, Math.min(dist * 0.0035, 0.30));
+        side = side.normalize().scale(half);
         colourVertex(vc, pose, a.subtract(side), colour);
         colourVertex(vc, pose, a.add(side), colour);
         colourVertex(vc, pose, b.add(side), colour);

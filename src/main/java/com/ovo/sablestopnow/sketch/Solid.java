@@ -530,6 +530,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     /** CSG 渲染开关（修好 {@code Csg.Node} 之后再打开 ✓）。 */
     public static final boolean CSG_RENDER_ENABLED = true;
 
+    /** 上一次切割 CSG 的诊断（客户端打日志用 ✓；本包被离线编译 ⇒ 不能直接用 LOGGER ✓）。 */
+    public static String lastCsgDiag = "none";
+
     private record CutFeat(SketchPlane plane, Sketch sketch, Extrude.Params params,
                            List<double[]> boxes) {
     }
@@ -546,6 +549,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             final Sketch cs = solid.resolve(sketches);
             if (cs == null) {
+                // ★ 诊断：切割体**解析不到它的草图** ⇒ 这次切割什么都不会发生 ✓
+                //   （实测"完全没有切割"也可能就是这一条 ✓ 常见于草图集合没传全 ✓）
+                lastCsgDiag = "cutResolve=null body=" + solid.body();
                 continue;
             }
             cutters.computeIfAbsent(solid.body(), k -> new ArrayList<>())
@@ -581,9 +587,23 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             List<Vector3d[]> drawnEdges = edges;
             // ★ CSG 渲染链路（csg.js 移植）✓ —— Node.clipTo 的"清空后再传入"坑修好后已可用 ✓
             if (cut && CSG_RENDER_ENABLED) {
-                List<Csg.Polygon> acc = CsgMesh.fromMesh(solid.mesh(sketch), null);
+                // ★ 修实测"现在是完全没有切割"✗
+                //   真因：`solid.mesh(sketch)` 是**为贴图准备的网格**，没有贴图时可能是空 ✗
+                //   CSG 拿到空输入 ⇒ 差集为空 ⇒ 落回原网格 ⇒ 看着"完全没切" ✓
+                //   ⇒ 空就用**几何网格**（由盒子生成）✓ 保证 CSG 的输入一定是封闭实体 ✓
+                SolidMesh.Mesh targetMesh = solid.mesh(sketch);
+                final int targetTris = targetMesh == null ? 0 : targetMesh.indices().length / 3;
+                if (targetMesh == null || targetMesh.isEmpty()) {
+                    targetMesh = SolidMesh.fromBoxes(rawBoxes);
+                }
+                List<Csg.Polygon> acc = CsgMesh.fromMesh(targetMesh, null);
+                int cutterTris = 0;
                 for (final CutFeat f : feats) {
-                    final SolidMesh.Mesh cutterMesh = SolidMesh.build(f.sketch(), f.params());
+                    SolidMesh.Mesh cutterMesh = SolidMesh.build(f.sketch(), f.params());
+                    if (cutterMesh == null || cutterMesh.isEmpty()) {
+                        cutterMesh = SolidMesh.fromBoxes(f.boxes());
+                    }
+                    cutterTris += cutterMesh.indices().length / 3;
                     // 切割体在自己的平面坐标里 ⇒ 先换算到目标实体的平面空间 ✓
                     final List<Csg.Polygon> cutterPolys = CsgMesh.fromMesh(cutterMesh,
                             CsgMesh.between(f.plane(), sketch == null ? null : sketch.plane()));
@@ -592,6 +612,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                     acc = Csg.subtract(acc, cutterPolys);
                 }
+                lastCsgDiag = "tris target=" + targetTris + " cutter=" + cutterTris
+                        + " resultPolys=" + acc.size();
                 if (!acc.isEmpty()) {
                     mesh = CsgMesh.toMesh(acc);
                     // 线框也从结果提（旧轮廓已经不成立 ⇒ 画出来会"线框完整、实体有洞"✗）

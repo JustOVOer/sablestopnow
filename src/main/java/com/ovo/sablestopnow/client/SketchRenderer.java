@@ -70,6 +70,8 @@ public final class SketchRenderer {
      */
     private static float ghostAlpha = 1.0f;
 
+    private static String lastCsgDiagLogged = "none";
+
     /** 圆的折线段数。草图阶段够用；精确圆弧是拉伸阶段的事。 */
     private static final int CIRCLE_SEGMENTS = 48;
 
@@ -192,6 +194,12 @@ public final class SketchRenderer {
         final boolean sketching = SketchClient.active();
         // ★ 需求：进入草图时**其它模型半透明 10%** ✓
         ghostAlpha = sketching ? 0.10f : 1.0f;
+        // 切割 CSG 诊断（只在变化时打一次 ✓）
+        final String csgDiag = com.ovo.sablestopnow.sketch.Solid.lastCsgDiag;
+        if (!csgDiag.equals(lastCsgDiagLogged)) {
+            lastCsgDiagLogged = csgDiag;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[solid-csg] {}", csgDiag);
+        }
         // 不能因为「没有草图」就提前返回：选面阶段恰恰是一张草图都还没有的时候，
         // 那三块基准板必须画出来，否则玩家看不到该点哪里。
         if (sketches.isEmpty() && !sketching && solids.isEmpty()) {

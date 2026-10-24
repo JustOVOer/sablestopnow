@@ -86,8 +86,10 @@ public final class SolidClientState {
         final List<Sketch> sketches = SketchClientState.in(dimension);
         final StringBuilder sb = new StringBuilder(64);
         for (final Solid s : solids) {
+            // ★ 修实测"点选材质后没有生效"✗：签名必须包含**外观/贴图**（整条 Solid 的哈希）
+            //   只算 shape ⇒ 换贴图时签名不变 ⇒ 缓存命中旧 Placed（旧外观）⇒ 看起来"没加材质"✗
             sb.append(s.id()).append(':').append(s.index()).append(':')
-                    .append(s.shape().hashCode()).append(';');
+                    .append(s.shape().hashCode()).append(':').append(s.hashCode()).append(';');
         }
         sb.append('|');
         for (final Sketch k : sketches) {

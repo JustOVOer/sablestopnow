@@ -93,14 +93,16 @@ public final class SketchRenderer {
     /** 鼠标下那块基准板的颜色（亮黄，明确告诉玩家"点下去就是它"）。 */
     private static final float[] DATUM_HOVER_COLOR = {0.98f, 0.82f, 0.30f};
     /** 橡皮筋预览线的颜色。 */
-    private static final float[] PREVIEW_COLOR = {0.95f, 0.85f, 0.35f};
+    // ★ 用户要求：尺寸显示/预览的线条**像背景网格**那样细而实，**不透明白色** ✓
+    private static final float[] PREVIEW_COLOR = {1.0f, 1.0f, 1.0f};
     /**
      * 推理虚线颜色（淡青）。
      *
      * <p>与橡皮筋的黄色区分开：橡皮筋是"将画出来的东西"，推理线是"参考方向"，
      * 两者同色会让人以为那整条长线也会被画出来。
      */
-    private static final float[] INFERENCE_COLOR = {0.45f, 0.85f, 1.0f};
+    // 推理辅助线（水平/竖直提示）：同样改成不透明白色 ✓
+    private static final float[] INFERENCE_COLOR = {1.0f, 1.0f, 1.0f};
     /**
      * 拉伸实体的线框颜色（暖紫）。
      *

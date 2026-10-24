@@ -582,6 +582,11 @@ public final class SketchClient {
     public static void edit(final Sketch sketch) {
         MODE.edit(sketch);
         SketchRenderer.setEditing(sketch.id());
+        // ★ 用户要求：**从右侧栏进入草图时也要自动正视** ✓
+        //   （以前只有"点模型面建草图"那条路会正视 ⇒ 从树里进去是斜着看 ✗）
+        if (sketch != null && sketch.plane() != null) {
+            alignCameraTo(sketch.plane().normal());
+        }
     }
 
     /**

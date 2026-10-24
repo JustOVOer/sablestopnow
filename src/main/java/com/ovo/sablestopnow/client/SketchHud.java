@@ -490,8 +490,8 @@ public final class SketchHud {
                         screen[0] = baseX;
                         screen[1] = baseY;
                     }
-                    final double ox = baseX - mx;
-                    final double oy = baseY - my;
+                    final double ox = screen[0] - mx;
+                    final double oy = screen[1] - my;
                     // ★ 需求 ③：尺寸线的**方向**随类型 ✓
                     //   距离 ⇒ 沿参考点连线平移（原样式 ✓）
                     //   水平 ⇒ **水平**线（y 取标签所在的那条横线 ✓）⇒ 界线自然竖直 ✓
@@ -502,13 +502,13 @@ public final class SketchHud {
                     final double by;
                     if (dimHoriz) {
                         ax = sa[0];
-                        ay = baseY;
+                        ay = screen[1];
                         bx = sb[0];
-                        by = baseY;
+                        by = screen[1];
                     } else if (dimVert) {
-                        ax = baseX;
+                        ax = screen[0];
                         ay = sa[1];
-                        bx = baseX;
+                        bx = screen[0];
                         by = sb[1];
                     } else {
                         ax = sa[0] + ox;
@@ -516,7 +516,8 @@ public final class SketchHud {
                         bx = sb[0] + ox;
                         by = sb[1] + oy;
                     }
-                    final int lineArgb = d.driving() ? 0xCCE6E6E6 : 0x998C93A8;
+                    // ★ 用户要求：尺寸线风格与背景网格一致 ⇒ **不透明白色** ✓
+                      final int lineArgb = d.driving() ? 0xFFFFFFFF : 0x99FFFFFF;
                     // 界线：从参考点拉到尺寸线两端（留一点缝，SW 也这样 ✓）
                     // ★ 界线按参考图画 ✓：与几何**留小缝**（4px ✓）· **超出**尺寸线一小段（6px ✓）
                     //   （参考图 1/3/4 都明显超出 ✓ 我原来"贴到尺寸线就停"✗）

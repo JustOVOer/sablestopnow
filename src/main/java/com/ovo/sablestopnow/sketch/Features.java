@@ -63,6 +63,107 @@ public final class Features {
                         List<Vector3d[]> edges, List<Vector3d> vertices) {
     }
 
+    /**
+     * 把**相邻且法线渐变**的平面块合并成**曲面**面 ✓（修"一个曲面识别成多个平面"✗）。
+     *
+     * <p>判据：两块共享任一顶点，且法线夹角 < 12°（圆柱弦盒的相邻条带约 5–10° ✓）。
+     * 合并结果标成 {@link Kind#CURVED} ⇒ **不产参考线、不能当基准面** ✓
+     * 但**边界面**本身仍然可以高亮 ✓（玩家看得见是"一整块曲面"✓）
+     */
+    private static List<Face> mergeSmooth(final List<Face> faces) {
+        final int n = faces.size();
+        if (n < 2) {
+            return faces;
+        }
+        final int[] parent = new int[n];
+        for (int i = 0; i < n; i++) {
+            parent[i] = i;
+        }
+        final double cosLimit = Math.cos(Math.toRadians(12.0));
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                final Face a = faces.get(i);
+                final Face b = faces.get(j);
+                if (!a.planar() || !b.planar()) {
+                    continue;
+                }
+                if (a.normal().dot(b.normal()) < cosLimit) {
+                    continue;
+                }
+                if (!sharesVertex(a, b)) {
+                    continue;
+                }
+                union(parent, i, j);
+            }
+        }
+        final Map<Integer, List<Integer>> groups = new HashMap<>();
+        for (int i = 0; i < n; i++) {
+            groups.computeIfAbsent(find(parent, i), x -> new ArrayList<>()).add(i);
+        }
+        final List<Face> out = new ArrayList<>();
+        for (final List<Integer> g : groups.values()) {
+            if (g.size() == 1) {
+                out.add(faces.get(g.get(0)));
+                continue;
+            }
+            // 合并：只有"所有法线都一致"才是平面，否则是曲面 ✓
+            final List<Vector3d[]> tris = new ArrayList<>();
+            final Vector3d nSum = new Vector3d();
+            final Vector3d centroid = new Vector3d();
+            double area = 0;
+            double maxDev = 0;
+            final Vector3d n0 = faces.get(g.get(0)).normal();
+            double w0 = 0;
+            for (final int idx : g) {
+                final Face f = faces.get(idx);
+                tris.addAll(f.triangles());
+                nSum.fma(f.area(), f.normal());
+                centroid.fma(f.area(), f.origin());
+                area += f.area();
+            }
+            final Vector3d normal = area > 0 ? nSum.normalize(new Vector3d()) : n0;
+            final Vector3d origin = area > 0 ? centroid.div(area, new Vector3d()) : new Vector3d();
+            w0 = normal.dot(origin);
+            for (final Vector3d[] tri : tris) {
+                for (final Vector3d p : tri) {
+                    maxDev = Math.max(maxDev, Math.abs(normal.dot(p) - w0));
+                }
+            }
+            final Kind kind = maxDev < 1.0e-3 ? Kind.PLANAR : Kind.CURVED;
+            final List<double[]> segs = kind == Kind.PLANAR
+                    ? faces.get(g.get(0)).segments() : List.of();
+            out.add(new Face(out.size(), kind, origin, normal, tris, segs, area));
+        }
+        return out;
+    }
+
+    private static boolean sharesVertex(final Face a, final Face b) {
+        for (final Vector3d[] ta : a.triangles()) {
+            for (final Vector3d[] tb : b.triangles()) {
+                for (final Vector3d pa : ta) {
+                    for (final Vector3d pb : tb) {
+                        if (pa.distanceSquared(pb) < 1.0e-8) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static int find(final int[] parent, final int i) {
+        return parent[i] == i ? i : (parent[i] = find(parent, parent[i]));
+    }
+
+    private static void union(final int[] parent, final int a, final int b) {
+        final int ra = find(parent, a);
+        final int rb = find(parent, b);
+        if (ra != rb) {
+            parent[rb] = ra;
+        }
+    }
+
     /** 面的最小面积（格²）✓ 小于它的当噪声丢掉（圆柱条带、CSG 碎三角形）✗。 */
     public static final double MIN_FACE_AREA = 0.02;
 
@@ -146,13 +247,17 @@ public final class Features {
             }
         }
 
-        // ② 邻接：边 ⇒ 三角形列表
+        // ② 邻接：边 ⇒ 三角形列表（边界判定要用）＋ 顶点 ⇒ 三角形列表（连通判定要用）
+        //   ★ 连通必须按**共享顶点**算：CSG 的三角汤有 T 型接点（一条边被对面切成两段 ✗）
+        //     只认同一条边会把**同一块平面**拆成好几块 ⇒ 实测"一个平面识别成几个三角形/梯形"✗
         final Map<Long, List<Integer>> edgeTris = new HashMap<>();
+        final Map<Integer, List<Integer>> vertTris = new HashMap<>();
         for (int t = 0; t < tris.size(); t++) {
             final int[] tri = tris.get(t);
             for (int k = 0; k < 3; k++) {
                 edgeTris.computeIfAbsent(edgeKey(tri[k], tri[(k + 1) % 3]), x -> new ArrayList<>())
                         .add(t);
+                vertTris.computeIfAbsent(tri[k], x -> new ArrayList<>()).add(t);
             }
         }
 
@@ -176,7 +281,7 @@ public final class Features {
         final List<Vector3d[]> allEdges = new ArrayList<>();
         final java.util.Set<Integer> usedTri = new java.util.HashSet<>();
         for (final List<Integer> bucket : buckets.values()) {
-            for (final List<Integer> component : components(bucket, tris, edgeTris)) {
+            for (final List<Integer> component : components(bucket, tris, vertTris)) {
                 if (component.isEmpty()) {
                     continue;
                 }
@@ -193,6 +298,12 @@ public final class Features {
                 }
             }
         }
+
+        // ★ 修实测"一个曲面被识别成多个平面"✗：把**相邻且法线夹角小**的平面块合并成曲面 ✓
+        //   （圆柱的弦盒侧面每个三角形法线都略不同 ⇒ 会被拆成一堆小平面 ✗）
+        final List<Face> merged = mergeSmooth(faces);
+        faces.clear();
+        faces.addAll(merged);
 
         final List<Vector3d> usedVerts = new ArrayList<>();
         final java.util.Set<Integer> seen = new java.util.HashSet<>();
@@ -221,7 +332,7 @@ public final class Features {
 
     /** 同一平面桶内按共享边做连通分量 ✓。 */
     private static List<List<Integer>> components(final List<Integer> bucket, final List<int[]> tris,
-                                                  final Map<Long, List<Integer>> edgeTris) {
+                                                  final Map<Integer, List<Integer>> vertTris) {
         final java.util.Set<Integer> remain = new java.util.HashSet<>(bucket);
         final List<List<Integer>> out = new ArrayList<>();
         for (final int seed : bucket) {
@@ -236,7 +347,7 @@ public final class Features {
                 final int t = queue.poll();
                 final int[] tri = tris.get(t);
                 for (int k = 0; k < 3; k++) {
-                    final List<Integer> around = edgeTris.get(edgeKey(tri[k], tri[(k + 1) % 3]));
+                    final List<Integer> around = vertTris.get(tri[k]);
                     if (around == null) {
                         continue;
                     }

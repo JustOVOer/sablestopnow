@@ -54,6 +54,19 @@ public final class SketchClient {
     }
 
     /**
+     * **正在编辑草图**（而不是"只是进了草图模式、还在选基准面"）✓
+     *
+     * <p>为什么要区分 ✗✓：进草图模式后会先让玩家选基准面；那时**还没进入编辑**。
+     * 之前渲染用的是 {@link #active()} ⇒ 一进模式就把其它模型虚化（10%），
+     * 而且模型面的悬停拾取被关掉 ⇒ "未选基准面就虚化、且选不到面" ✗（用户实测）
+     * ⇒ 虚化、网格、草图置顶、模型面拾取**都以"真的在编辑"为准** ✓
+     */
+    public static boolean editing() {
+        return MODE.active() && MODE.session() != null
+                && MODE.session().stage() == com.ovo.sablestopnow.sketch.SketchSession.Stage.EDITING;
+    }
+
+    /**
      * 进入草图模式：用该结构的局部包围盒生成三个基准面。
      *
      * @return 是否成功进入（结构还没同步过来时返回 false）

@@ -191,7 +191,8 @@ public final class SketchRenderer {
         // RenderType/批次。另起一个渲染器就要把变换再写一份（一定会漂移），
         // 还要各自 endBatch（同一个 buffer 被两队各自 flush 会互相截断）。
         final List<Solid.Placed> solids = SolidClientState.placed(level);
-        final boolean sketching = SketchClient.active();
+        // ★ 只有**真的在编辑草图**才虚化模型、关掉模型面拾取 ✓（选基准面阶段不虚化 ✓）
+        final boolean sketching = SketchClient.editing();
         // ★ 模型视图：每帧更新"面/棱/点"的悬停拾取 ✓（画草图时不拾取模型面 ✓）
         if (!sketching) {
             com.ovo.sablestopnow.client.model.FeatureHover.update(mc);

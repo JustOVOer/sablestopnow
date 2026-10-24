@@ -1844,6 +1844,9 @@ public final class ModelUi {
     @Nullable
     private static String lastTreeSignature;
 
+    /** 上次打印的"树两侧数量"诊断（变化才打 ✓）。 */
+    private static String lastTreeDiag = "";
+
     /** 树内容的指纹：所有节点的 key 拼起来，加选中模型。 */
     private static String signatureOf(final List<TreeView.TreeItem> roots) {
         final StringBuilder sb = new StringBuilder();
@@ -2087,6 +2090,16 @@ public final class ModelUi {
      * 分组规则在 {@code Solid.groupSketches}（纯逻辑，有离线断言）。
      */
     private static TreeView.TreeItem solidsBranch(final UUID bodyId) {
+        // ★ 诊断（实测"创建后草图消失、新拉伸不出现"✓）：把两侧数量记下来
+        //   solids=0 & sketches 少一张 ⇒ 是**数据没同步回来**（服务端没接受/广播丢）
+        //   solids>0 ⇒ 数据在，问题在树/渲染
+        final String treeDiag = (bodyId == null ? "?" : bodyId.toString().substring(0, 8))
+                + " solids=" + currentSolidsOf(bodyId).size()
+                + " sketches=" + currentSketchesOf(bodyId).size();
+        if (!treeDiag.equals(lastTreeDiag)) {
+            lastTreeDiag = treeDiag;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[tree] {}", treeDiag);
+        }
         final TreeView.TreeItem node = new TreeView.TreeItem("solids:" + bodyId)
                 .label(Component.translatable("model.node.solids"));
         final java.util.List<com.ovo.sablestopnow.sketch.Solid> solids = currentSolidsOf(bodyId);

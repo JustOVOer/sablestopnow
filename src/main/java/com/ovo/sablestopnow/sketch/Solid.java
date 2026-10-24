@@ -591,11 +591,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final Sketch sketch = solid.resolve(sketches);
             final List<Vector3d[]> edges = solid.edges(sketch);
             if (edges.isEmpty()) {
-                // ★ 诊断（实测"旋转拉伸创建后没有模型"✓）：静默跳过最难查 ⇒ 明确记下来 ✓
+                // ★ 不再静默跳过：跳过的实体在树上仍然存在 ⇒ 玩家会看到"草图没了、新拉伸没出现" ✗
+                //   现在保留它（几何为空，画不出东西），并把原因记进诊断 ✓
                 lastCsgDiag = "solidEmpty idx=" + solid.index() + " kind="
                         + solid.shape().getClass().getSimpleName()
                         + " sketchResolved=" + (sketch != null);
-                continue;
             }
             // 网格与平面法线只为**贴图**准备；没有贴图时调用方不看它们。
             // ⚠ 平面法线要带上：SolidMesh.faceKind 靠它判断"这个面是盖子还是侧面"。

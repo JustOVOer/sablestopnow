@@ -1548,7 +1548,9 @@ public final class SketchRenderer {
     }
 
     /** 细条半宽（格）✓ 与背景网格同一档。 */
-    private static final double QUAD_LINE_HALF = 0.02;
+    // ★ 用户反馈"线条非常粗糙、像像素线"⇒ 细条太窄（0.02 格在远处≈1px，严重走样）✗
+    //   调成网格的 **2.5 倍**（0.05 格 ≈ 4~6px）⇒ 抗锯齿明显改善、和网格同一套几何但更"实"✓
+    private static final double QUAD_LINE_HALF = 0.05;
 
     /**
      * 用**四边形细条**画一条线 ✓ —— 尺寸/预览线要"和背景网格一样的呈现方式"。

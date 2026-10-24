@@ -484,8 +484,17 @@ public final class SketchHud {
                     //   标签仍在玩家拖到的位置 ✓
                     final double mx = (sa[0] + sb[0]) * 0.5;
                     final double my = (sa[1] + sb[1]) * 0.5;
-                    final double baseX = mx + offX * 18.0;
-                    final double baseY = my + offY * 18.0;
+                    // ★ 修"尺寸文字与 3D 尺寸线不对齐"✗
+                      //   3D 尺寸线是把几何沿**平面内**法向偏 0.35 格画的（SketchRenderer.drawDimensions3D）✓
+                      //   ⇒ 文字位置也改成"**同一个平面偏移点**投影到屏幕" ✓ 而不是屏幕里偏 18px ✗
+                      final double dimOff = 0.35;
+                      final double mdU = (ends[0] + ends[2]) * 0.5 + (dimHoriz ? 0.0
+                              : (dimVert ? dimOff : offX * dimOff));
+                      final double mdV = (ends[1] + ends[3]) * 0.5 + (dimHoriz ? dimOff
+                              : (dimVert ? 0.0 : offY * dimOff));
+                      final double[] mdScreen = project(working, sub, mdU, mdV, mc, tmp);
+                      final double baseX = mdScreen != null ? mdScreen[0] : mx + offX * 18.0;
+                      final double baseY = mdScreen != null ? mdScreen[1] : my + offY * 18.0;
                     if (!LABEL_OVERRIDE.containsKey(d.constraintIndex())) {
                         screen[0] = baseX;
                         screen[1] = baseY;

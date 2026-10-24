@@ -685,5 +685,8 @@
   "model.relation.concentric": "同心",
   "model.sketch.tool.bezier": "贝塞尔",
   "model.extrude.cut": "切割台体",
-  "model.extrude.cut_on": "切割台体 ✓"
+  "model.extrude.cut_on": "切割台体 ✓",
+  "model.tool.cut": "切割台体",
+  "model.tool.cut.short": "切割",
+  "model.tool.cut.hint": "选结构 + 选草图，拉出的体用来给同一结构内相交的实体打洞"
 }

@@ -261,7 +261,16 @@ public final class ModelUi {
                         ModelUi::startSketch).tooltipKey("model.tool.sketch.hint"));
                 // 拉伸：先选结构，再在树里点一张**已保存**的草图作为拉伸源。
                 row.add(shortButton("model.tool.extrude", "model.tool.extrude.short",
-                        ModelUi::startExtrude).tooltipKey("model.tool.extrude.hint"));
+                        () -> {
+                            cutMode = false;   // 普通拉伸 ⇒ 关掉切割 ✓
+                            startExtrude();
+                        }).tooltipKey("model.tool.extrude.hint"));
+                // ★ 需求 ⑥：**切割台体**独立入口 ✓（与"拉伸台体"平级 ✓ 不是藏在面板里的开关 ✓）
+                row.add(shortButton("model.tool.cut", "model.tool.cut.short",
+                        () -> {
+                            cutMode = true;    // 进来就是切割模式 ✓
+                            startExtrude();
+                        }).tooltipKey("model.tool.cut.hint"));
                 row.add(shortButton("model.tool.hide", "model.tool.hide.short", ModelUi::toggleHide));
                 row.add(shortButton("model.tool.delete_mate", "model.tool.delete_mate.short",
                         ModelUi::deleteSelectedMate));
@@ -815,12 +824,14 @@ public final class ModelUi {
             // ★ 用户要求：约束/尺寸**要编号** ✓（"左侧约束和尺寸建议…并进行编号" ✓）
             //   编号用**约束下标 +1**（与画布上双击改值的对象一致 ✓ 稳定不随排序跳 ✓）
             final String num = "#" + (d.constraintIndex() + 1) + " ";
+            // ★ 水平/竖直尺寸存有符号差值 ⇒ 左栏也按**绝对值**显示 ✓
             final String text = off
                     ? String.format(java.util.Locale.ROOT, "%s%s %.3f  (实测 %.3f)", num,
-                            Component.translatable(d.labelKey()).getString(), d.value(),
-                            d.measured())
+                            Component.translatable(d.labelKey()).getString(),
+                            Math.abs(d.value()), Math.abs(d.measured()))
                     : String.format(java.util.Locale.ROOT, "%s%s %.3f", num,
-                            Component.translatable(d.labelKey()).getString(), d.value());
+                            Component.translatable(d.labelKey()).getString(),
+                            Math.abs(d.value()));
             body.add(new Label(Component.literal(text))
                     .color(off ? 0xFFFF8A5C : 0xFFE6E6E6));
         }

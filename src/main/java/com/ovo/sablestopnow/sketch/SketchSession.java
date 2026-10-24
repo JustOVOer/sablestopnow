@@ -1704,8 +1704,18 @@ public final class SketchSession {
         //   ⇒ 这里比较**吸附之后**的关键点身份：同一个就干脆不建 ✓（玩家再点一次即可 ✓）
         final KeyPoint kpA = pickKeyPoint(ax, ay, 0.15);
         final KeyPoint kpB = pickKeyPoint(bx, by, 0.15);
+        // ★ 修实测"零长直线仍高概率出现、且自带一个点约束" ✗
+        //   真因：两次点击吸到了**同一个位置**，但 owner 可能是不同图元
+        //   （例如 A 的端点与 B 的中点坐标重合 ✓）⇒ 上一条"同 owner"的判断漏掉 ✓
+        //   ⇒ 这里再按**坐标**判一次：两端吸附点重合 ⇒ 直接不建 ✓
+        if (kpA != null && kpB != null
+                && Math.hypot(kpA.u() - kpB.u(), kpA.v() - kpB.v()) < 1.0e-6) {
+            lastLineDiag = lastLineDiag + " rejected=same-point";
+            return;
+        }
         if (kpA != null && kpB != null
                 && kpA.kind() == kpB.kind() && kpA.owner() == kpB.owner()) {
+            lastLineDiag = lastLineDiag + " rejected=same-keypoint";
             return; // 两端吸到同一个关键点 ⇒ 会是零长线 ⇒ 不建 ✓
         }
         // 水平/竖直推理吸附：与预览共用 inferOrtho，两边永远一致
@@ -1755,6 +1765,10 @@ public final class SketchSession {
         } else if (vertical) {
             working.addConstraint(SketchSolver.VERTICAL, 0.0, v[0], v[1], v[2], v[3]);
         }
+        // ★ 修实测"辅助线模式下画出来的直线仍然是实线" ✗
+        //   真因：**普通画线的路径从来没调用过** `markConstructionIfDrawing()` ✓
+        //   （只有镜像那几处调了）⇒ 开关是开的，但图元没被打上辅助线标记 ⇒ 画成实线 ✓
+        markConstructionIfDrawing();
     }
 
     /**
@@ -1849,10 +1863,14 @@ public final class SketchSession {
         final Sketch.Entity arc = working.addArcPoints(center[0], center[1],
                 start[0], start[1], end[0], end[1], clockwise);
         // ★ 需求 ④：圆弧改为"**由两条辅助线生成**" ✓（客户端开启；默认关 ⇒ 离线用例不变 ✓）
-        if (arcHandles) {
-            working.ensureArcHandles(arc);
-        }
         final int[] v = arc.vars();
+        if (arcHandles) {
+            final int added = working.ensureArcHandles(arc).size();
+            // ★ 诊断（实测"只看到一条辅助线"✗）：打出**实际补了几条**与两条线是否存在 ✓
+            lastArcDiag = lastArcDiag + " added=" + added
+                    + " h1=" + working.hasLineVars(v[0], v[1], v[2], v[3])
+                    + " h2=" + working.hasLineVars(v[0], v[1], v[4], v[5]);
+        }
         this.pendingSnap = kpCenter;
         constrainToSnap(new int[] {v[0], v[1]});
     }

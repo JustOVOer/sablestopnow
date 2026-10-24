@@ -685,5 +685,8 @@
   "model.relation.concentric": "Concentric",
   "model.sketch.tool.bezier": "Bezier",
   "model.extrude.cut": "Cut body",
-  "model.extrude.cut_on": "Cut body ✓"
+  "model.extrude.cut_on": "Cut body ✓",
+  "model.tool.cut": "Cut body",
+  "model.tool.cut.short": "Cut",
+  "model.tool.cut.hint": "Pick a body and a sketch; the result cuts holes into intersecting solids"
 }

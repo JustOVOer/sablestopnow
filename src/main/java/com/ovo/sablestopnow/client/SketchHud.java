@@ -571,7 +571,9 @@ public final class SketchHud {
                 }
             }
             // 从动/参考尺寸 ⇒ **灰 + 括号** ✓（SolidWorks 的表示法 ✓ 见任务 (5) ✓）
-            final String number = String.format(java.util.Locale.ROOT, "%.3f", d.value());
+            // ★ 水平/竖直尺寸存的是**有符号**差值 ⇒ 显示取绝对值 ✓（否则会显示负数）
+            final String number = String.format(java.util.Locale.ROOT, "%.3f",
+                    Math.abs(d.value()));
             final String text = d.driving() ? number : "(" + number + ")";
             final int argb;
             if (!d.driving()) {
@@ -780,7 +782,7 @@ public final class SketchHud {
         final int px = guiX(mc) + OFFSET_X;
         final int py = guiY(mc) + OFFSET_Y + 12; // 让开吸附提示那一行 ✓ 免得两者叠字 ✗
         final String text = Component.translatable(shown.labelKey()).getString()
-                + String.format(java.util.Locale.ROOT, " %.3f", shown.value());
+                + String.format(java.util.Locale.ROOT, " %.3f", Math.abs(shown.value()));
         // ★ 光标旁的**尺寸图标** ✓（SolidWorks：工具激活后光标附加尺寸标注图标 ✓）
         //   画法：一条尺寸线 + 两端箭头 + 两条界线 ✓ = 一眼认得出是"标注"✓ 全用统一库矢量绘制 ✓
         final int iconArgb = 0xCCFFCC55;

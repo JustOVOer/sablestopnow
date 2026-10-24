@@ -599,10 +599,10 @@ public final class SketchRenderer {
             if (selected) {
                 entityColor = SELECTED_COLOR;
             } else if (entity.equals(hovered)) {
-                // ★ 需求 ⑦：**将要选到的是"点"** ⇒ 直接**橙色**高亮 ✓
-                //   （橙色本来就是"选中"色 ⇒ 玩家一眼看出"这次会选到点、不是它所在的线"✓）
-                entityColor = hovered.kind() == Sketch.EntityKind.POINT
-                        ? SELECTED_COLOR : HOVER_COLOR;
+                // ★ 需求 ⑦ 修正：**不要橙色叉号** ✗ —— 用户要的是"原来吸附用的**方框**"✓
+                //   ⇒ 这里保持普通悬停色；"会选到这个点"由下面那层 marker 方框表示 ✓
+                //     （悬停到点时 SketchMode 会把 snapAt 指到它 ⇒ marker 画方框 ✓）
+                entityColor = HOVER_COLOR;
             } else if (dofFree == null) {
                 entityColor = color;
             } else if (conflicted) {

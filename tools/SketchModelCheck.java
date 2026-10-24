@@ -131,6 +131,62 @@ public final class SketchModelCheck {
         check(mesh.indices().length >= 36, "csg: 结果网格三角形数合理");
     }
 
+    /** 特征图离线用例 ✓（立方体 6 面 / 12 棱 / 8 顶点）。 */
+    private static void featuresFromMesh() {
+        final java.util.List<double[]> boxes = new java.util.ArrayList<>();
+        boxes.add(new double[] {0, 0, 0, 2, 2, 2});
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh mesh =
+                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(boxes);
+        final com.ovo.sablestopnow.sketch.Features.Graph g =
+                com.ovo.sablestopnow.sketch.Features.ofMesh(java.util.UUID.randomUUID(), mesh);
+        check(g.faces().size() == 6, "features: 立方体 6 个面（实际 " + g.faces().size() + "）");
+        int planar = 0;
+        int segs = 0;
+        for (final com.ovo.sablestopnow.sketch.Features.Face f : g.faces()) {
+            if (f.planar()) {
+                planar++;
+            }
+            segs += f.segments().size();
+        }
+        check(planar == 6, "features: 全部是平面（实际 " + planar + "）");
+        check(segs == 24, "features: 每面 4 条直线边共 24（实际 " + segs + "）");
+        check(g.edges().size() == 12, "features: 棱去重后 12（实际 " + g.edges().size() + "）");
+        check(g.vertices().size() == 8, "features: 顶点 8（实际 " + g.vertices().size() + "）");
+        boolean axisAligned = true;
+        for (final com.ovo.sablestopnow.sketch.Features.Face f : g.faces()) {
+            final double ax = Math.abs(f.normal().x);
+            final double ay = Math.abs(f.normal().y);
+            final double az = Math.abs(f.normal().z);
+            if (Math.abs(Math.max(ax, Math.max(ay, az)) - 1.0) > 1.0e-6) {
+                axisAligned = false;
+            }
+        }
+        check(axisAligned, "features: 面法线都沿世界轴");
+    }
+
+    /** 参考几何离线用例：参考线**不计自由度**、且标了 reference ✓。 */
+    private static void referenceNotInDof() {
+        final com.ovo.sablestopnow.sketch.Sketch s = new com.ovo.sablestopnow.sketch.Sketch(
+                java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), "ref-test",
+                com.ovo.sablestopnow.sketch.SketchPlane.base(
+                        com.ovo.sablestopnow.sketch.SketchPlane.Base.FRONT,
+                        new org.joml.Vector3d(0, 0, 0)));
+        final com.ovo.sablestopnow.sketch.Sketch.Entity line =
+                s.addLine(0.0, 0.0, 4.0, 0.0);
+        s.setReference(line, true);
+        final int[] v = line.vars();
+        s.addConstraint(com.ovo.sablestopnow.sketch.SketchSolver.FIXED, 0.0, v[0]);
+        s.addConstraint(com.ovo.sablestopnow.sketch.SketchSolver.FIXED, 0.0, v[1]);
+        s.addConstraint(com.ovo.sablestopnow.sketch.SketchSolver.FIXED, 4.0, v[2]);
+        s.addConstraint(com.ovo.sablestopnow.sketch.SketchSolver.FIXED, 0.0, v[3]);
+        check(s.isReference(line), "reference: 标记生效");
+        check(s.referenceEntities().size() == 1, "reference: 列表里 1 条");
+        check(s.usedVariables().length == 0, "reference: 参考几何的变量不算自由度");
+        // 存档键（NBT 层在游戏里，离线只验"键集合"这一层 ✓）
+        s.addReferenceKey("LINE:0:1:2:3");
+        check(s.referenceKeys().contains("LINE:0:1:2:3"), "reference: 身份键可存可取");
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -171,6 +227,8 @@ public final class SketchModelCheck {
     }
 
     public static void main(final String[] args) throws Exception {
+        referenceNotInDof();
+        featuresFromMesh();
         csgBoolean();
         System.out.println("=== 草图模型层离线自检 ===");
 

@@ -268,7 +268,8 @@ if (-not (Test-Path $solverSrc) -or -not (Test-Path $harnessSrc)) {
         # CSG（csg.js 的 Java 移植）—— 切割用布尔，也要进离线编译 ✓
         $pureSketch += @(
             ($sketchDir + '\csg\Csg.java'),
-            ($sketchDir + '\csg\CsgMesh.java')
+            ($sketchDir + '\csg\CsgMesh.java'),
+            ($sketchDir + '\Features.java')
         )
         $jomlJar = Get-ChildItem (Join-Path $env:USERPROFILE '.gradle\caches\modules-2\files-2.1\org.joml') -Recurse -Filter 'joml-*.jar' -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -notmatch 'sources|javadoc' } | Select-Object -First 1

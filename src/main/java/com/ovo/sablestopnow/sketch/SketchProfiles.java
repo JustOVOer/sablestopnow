@@ -134,7 +134,9 @@ public final class SketchProfiles {
         final List<Profile> out = new ArrayList<>();
         // 圆直接就是一个环
         for (final Sketch.Entity entity : sketch.entities()) {
-            if (sketch.isConstruction(entity)) { continue; } // 辅助线**不参与轮廓/拉伸** ✓（SolidWorks 一致 ✓）
+            if (sketch.isConstruction(entity) || sketch.isReference(entity)) {
+                continue; // 辅助线 / 参考几何都**不参与轮廓/拉伸** ✓
+            }
             if (entity.kind() == Sketch.EntityKind.CIRCLE) {
                 out.add(circleProfile(sketch, entity, sampling));
             }
@@ -177,7 +179,9 @@ public final class SketchProfiles {
     private static List<Profile> lineProfiles(final Sketch sketch, final double tolerance,
                                               final Sampling sampling) {        final List<Sketch.Entity> edges = new ArrayList<>();
         for (final Sketch.Entity entity : sketch.entities()) {
-            if (sketch.isConstruction(entity)) { continue; } // 辅助线**不参与轮廓/拉伸** ✓（SolidWorks 一致 ✓）
+            if (sketch.isConstruction(entity) || sketch.isReference(entity)) {
+                continue; // 辅助线 / 参考几何都**不参与轮廓/拉伸** ✓
+            }
             // 弧有两个端点，和线段一样参与端点焊接
             // ★ 需求 ⑤：**贝塞尔也参与轮廓** ✓（用户明确要求 ✓ 可拉伸/碰撞 ✓）
             if (entity.kind() == Sketch.EntityKind.LINE || entity.kind() == Sketch.EntityKind.ARC

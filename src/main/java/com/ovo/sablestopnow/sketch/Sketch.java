@@ -215,6 +215,12 @@ public final class Sketch {
     public int[] usedVariables() {
         final boolean[] used = new boolean[variables.size()];
         for (final Entity e : entities) {
+            // ★ 参考几何（从模型面带进来的线）**算常量** ✓
+            //   ⇒ 自由度只统计玩家自己的几何 ✓；玩家几何约束到参考线时，
+            //     那些列在雅可比里被当成 0（常量）⇒ 语义正好是"钉在参考几何上" ✓
+            if (isReference(e)) {
+                continue;
+            }
             for (final int v : e.vars()) {
                 if (v >= 0 && v < used.length) {
                     used[v] = true;
@@ -643,6 +649,7 @@ public final class Sketch {
             for (final Entity h : handles) {
                 this.entities.remove(h);
                 this.construction.remove(constructionKey(h));
+                this.reference.remove(constructionKey(h));
             }
         }
         return true;
@@ -761,6 +768,62 @@ public final class Sketch {
         final java.util.List<Entity> out = new java.util.ArrayList<>();
         for (final Entity e : entities()) {
             if (isConstruction(e)) {
+                out.add(e);
+            }
+        }
+        return out;
+    }
+
+    // ================= 参考几何（从模型面带进来的、**不可移动**的线） =================
+
+    /**
+     * **参考几何**的身份键 ✓（用户需求：以模型面为基准面建草图时，把该平面上的直线
+     * 作为**常驻且不可移动**的参考线带进草图，但仍然可以被约束）。
+     *
+     * <p>与 {@link #construction} 的区别 ✗✓：
+     * construction 是玩家自己画的辅助线（可拖、可删）；reference 是**从模型带过来的**，
+     * 玩家**不能拖、不能删**，但可以拿它当约束基准 ✓（与 SolidWorks 的"参考几何"一致）。
+     *
+     * <p>实现：两端各 2 条 {@code FIXED}（见 {@code SketchSession.addReferenceLines}），
+     * 并在自由度分析里**排除**它（否则会凭空吃掉自由度 ✗）。
+     */
+    private final java.util.Set<String> reference = new java.util.HashSet<>();
+
+    /** 这条图元是不是**参考几何** ✓。 */
+    public boolean isReference(final Entity entity) {
+        return entity != null && this.reference.contains(constructionKey(entity));
+    }
+
+    /** 设置/清除参考几何标记 ✓。 */
+    public void setReference(final Entity entity, final boolean value) {
+        if (entity == null) {
+            return;
+        }
+        final String key = constructionKey(entity);
+        if (value) {
+            this.reference.add(key);
+        } else {
+            this.reference.remove(key);
+        }
+    }
+
+    /** 全部参考几何的身份键 ✓（存档用）。 */
+    public java.util.List<String> referenceKeys() {
+        return new java.util.ArrayList<>(this.reference);
+    }
+
+    /** 读档时恢复一个参考几何键 ✓。 */
+    public void addReferenceKey(final String key) {
+        if (key != null && !key.isBlank()) {
+            this.reference.add(key);
+        }
+    }
+
+    /** 全部参考几何 ✓（渲染用另一种颜色、自由度分析与轮廓都跳过它 ✓）。 */
+    public java.util.List<Entity> referenceEntities() {
+        final java.util.List<Entity> out = new java.util.ArrayList<>();
+        for (final Entity e : entities()) {
+            if (isReference(e)) {
                 out.add(e);
             }
         }

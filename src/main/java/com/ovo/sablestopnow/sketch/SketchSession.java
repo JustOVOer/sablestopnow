@@ -465,6 +465,49 @@ public final class SketchSession {
      * 若开着**辅助线绘制模式** ⇒ 把**刚创建的图元**直接标记为辅助线 ✓
      *（用户要求：直接绘制辅助线 ✓ 不是把已有图元转过去 ✗）。
      */
+    /**
+     * 把**模型某个面上的直线**作为**参考几何**加进当前草图 ✓
+     * （用户需求：常驻、不可移动，但仍可以被约束）。
+     *
+     * <p>不可移动 = 两端各 2 条 {@code FIXED} ✓；同时标成 construction ⇒ **不进轮廓** ✓
+     * 自由度分析那边会把参考几何的变量当常量（见 {@link Sketch#usedVariables}）✓
+     *
+     * @param localSegs 该面的直线边（**实体局部坐标**，{@code {x1,y1,z1,x2,y2,z2}}）
+     * @return 实际加了几条
+     */
+    public int addReferenceLines(final java.util.List<double[]> localSegs) {
+        if (this.working == null || localSegs == null || localSegs.isEmpty()) {
+            return 0;
+        }
+        final var plane = this.working.plane();
+        final org.joml.Vector3d out = new org.joml.Vector3d();
+        int added = 0;
+        for (final double[] s : localSegs) {
+            if (s == null || s.length < 6) {
+                continue;
+            }
+            plane.toPlane(new org.joml.Vector3d(s[0], s[1], s[2]), out);
+            final double u1 = out.x;
+            final double v1 = out.y;
+            plane.toPlane(new org.joml.Vector3d(s[3], s[4], s[5]), out);
+            final double u2 = out.x;
+            final double v2 = out.y;
+            if (Math.hypot(u2 - u1, v2 - v1) < 2.0e-2) {
+                continue; // 太短，没意义 ✓
+            }
+            final Sketch.Entity line = this.working.addLine(u1, v1, u2, v2);
+            this.working.setReference(line, true);
+            this.working.setConstruction(line, true); // 不进轮廓 ✓
+            final int[] v = line.vars();
+            this.working.addConstraint(SketchSolver.FIXED, u1, v[0]);
+            this.working.addConstraint(SketchSolver.FIXED, v1, v[1]);
+            this.working.addConstraint(SketchSolver.FIXED, u2, v[2]);
+            this.working.addConstraint(SketchSolver.FIXED, v2, v[3]);
+            added++;
+        }
+        return added;
+    }
+
     private void markConstructionIfDrawing() {
         if (!this.constructionDraw || this.working == null) {
             return;

@@ -192,6 +192,12 @@ public final class SketchRenderer {
         // 还要各自 endBatch（同一个 buffer 被两队各自 flush 会互相截断）。
         final List<Solid.Placed> solids = SolidClientState.placed(level);
         final boolean sketching = SketchClient.active();
+        // ★ 模型视图：每帧更新"面/棱/点"的悬停拾取 ✓（画草图时不拾取模型面 ✓）
+        if (!sketching) {
+            com.ovo.sablestopnow.client.model.FeatureHover.update(mc);
+        } else {
+            com.ovo.sablestopnow.client.model.FeatureHover.clear();
+        }
         // ★ 需求：进入草图时**其它模型半透明 10%** ✓
         ghostAlpha = sketching ? 0.10f : 1.0f;
         // 切割 CSG 诊断（只在变化时打一次 ✓）
@@ -353,6 +359,14 @@ public final class SketchRenderer {
             drawn += drawSketch(vc, pose, cameraPos, sub.renderPose(), sketch, color);
             if (editing && previewPoint != null) {
                 drawPreview(vc, pose, cameraPos, sub.renderPose(), sketch);
+            }
+        }
+        // ★ 需求：模型视图下 **面 / 棱 / 点** 的悬停预览 ✓
+        if (!sketching) {
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit fh =
+                    com.ovo.sablestopnow.client.model.FeatureHover.get();
+            if (fh != null) {
+                drawn += drawFeatureHighlight(pose, cameraPos, fh);
             }
         }
         if (drawn > 0) {
@@ -1270,6 +1284,78 @@ public final class SketchRenderer {
     }
 
     /** 一个带 alpha 的四边形 ✓（顶点格式 POSITION_COLOR ✓ 给 {@code SKETCH_GRID} 用）。 */
+    /**
+     * 画**面/棱/点**的悬停预览 ✓（需求）。
+     *
+     * <ul>
+     *   <li>面：半透明填充 + 边界描边（永远看得见 ✓ 用 NO_DEPTH_TEST 的线类型）</li>
+     *   <li>棱：那条棱再加一道橙色粗线 ✓</li>
+     *   <li>点：三个方向的短十字 ✓</li>
+     * </ul>
+     *
+     * <p>两种 RenderType 各用**独立**的 BufferSource（同一个源取两个类型会互相截断 ✗
+     * 这个坑本文件里已经踩过 ✓）
+     */
+    private static int drawFeatureHighlight(final PoseStack.Pose pose, final Vec3 cameraPos,
+                                            final com.ovo.sablestopnow.client.model.FeatureHover.Hit fh) {
+        int drawn = 0;
+        final float[] fill = {1.00f, 0.82f, 0.25f, 0.20f};
+        final float[] outline = {1.00f, 0.75f, 0.15f, 0.90f};
+        final float[] hot = {1.00f, 0.45f, 0.10f, 1.00f};
+
+        // ① 面填充（QUADS：把三角形补成退化四边形 ✓）
+        final MultiBufferSource.BufferSource fillBuf =
+                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+        final VertexConsumer vf = fillBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
+        for (final Vec3[] tri : fh.worldTris()) {
+            final Vec3 a = rel(tri[0], cameraPos);
+            final Vec3 b = rel(tri[1], cameraPos);
+            final Vec3 c = rel(tri[2], cameraPos);
+            colourVertex(vf, pose, a, fill);
+            colourVertex(vf, pose, b, fill);
+            colourVertex(vf, pose, c, fill);
+            colourVertex(vf, pose, c, fill);
+        }
+        fillBuf.endBatch();
+
+        // ② 边界 / 棱 / 点
+        final MultiBufferSource.BufferSource lineBuf =
+                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+        final VertexConsumer vl = lineBuf.getBuffer(ModRenderTypes.SKETCH_LINES_ON_TOP);
+        for (final Vec3[] seg : fh.worldSegs()) {
+            lineA(vl, pose, rel(seg[0], cameraPos), rel(seg[1], cameraPos), outline, 0.9f);
+            drawn++;
+        }
+        if (fh.kind() == com.ovo.sablestopnow.client.model.FeatureHover.Kind.EDGE
+                && fh.index() >= 0 && fh.index() < fh.worldSegs().size()) {
+            final Vec3[] seg = fh.worldSegs().get(fh.index());
+            lineA(vl, pose, rel(seg[0], cameraPos), rel(seg[1], cameraPos), hot, 1.0f);
+            lineA(vl, pose, rel(seg[0], cameraPos), rel(seg[1], cameraPos), hot, 1.0f);
+            drawn += 2;
+        }
+        if (fh.kind() == com.ovo.sablestopnow.client.model.FeatureHover.Kind.VERTEX
+                && fh.index() >= 0 && fh.index() < fh.worldVerts().size()) {
+            final Vec3 v = fh.worldVerts().get(fh.index());
+            final double d = 0.09;
+            lineA(vl, pose, rel(v.add(-d, 0, 0), cameraPos), rel(v.add(d, 0, 0), cameraPos), hot, 1f);
+            lineA(vl, pose, rel(v.add(0, -d, 0), cameraPos), rel(v.add(0, d, 0), cameraPos), hot, 1f);
+            lineA(vl, pose, rel(v.add(0, 0, -d), cameraPos), rel(v.add(0, 0, d), cameraPos), hot, 1f);
+            drawn += 3;
+        }
+        lineBuf.endBatch();
+        return drawn;
+    }
+
+    private static Vec3 rel(final Vec3 world, final Vec3 cameraPos) {
+        return new Vec3(world.x - cameraPos.x, world.y - cameraPos.y, world.z - cameraPos.z);
+    }
+
+    private static void colourVertex(final VertexConsumer vc, final PoseStack.Pose pose,
+                                     final Vec3 p, final float[] c) {
+        vc.addVertex(pose, (float) p.x, (float) p.y, (float) p.z)
+                .setColor(c[0], c[1], c[2], c[3]);
+    }
+
     private static void quad(final VertexConsumer vc, final PoseStack.Pose pose,
                             final Vec3 a, final Vec3 b, final Vec3 c, final Vec3 d,
                             final float grey, final float alpha) {

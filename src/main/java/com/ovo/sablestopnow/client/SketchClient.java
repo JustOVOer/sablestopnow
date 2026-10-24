@@ -597,13 +597,23 @@ public final class SketchClient {
             return false;
         }
         SketchRenderer.setEditing(MODE.editingId());
+        alignCameraTo(normal);
+        return true;
+    }
+
+    /**
+     * **把相机正视到某个法线方向** ✓（"正视于"）。
+     *
+     * <p>从 {@link #chooseFace} 抽出来，供"以模型面为基准面"复用 ✓
+     */
+    public static void alignCameraTo(final org.joml.Vector3dc normal) {
         // ★ **进入草稿自动正视该面** ✓（用户要求 ✓ / SolidWorks 的"正视于"✓）
         //   视线方向 = 面法线的反向（从外面正对看进去 ✓）⇒ 反解 yaw/pitch ✓
         //   Minecraft 约定：look = (−sin(yaw)·cos(pitch), −sin(pitch), cos(yaw)·cos(pitch))
         //   ⇒ pitch = asin(−look.y) ✓  yaw = atan2(−look.x, look.z) ✓
-        final double lx = -normal.x;
-        final double ly = -normal.y;
-        final double lz = -normal.z;
+        final double lx = -normal.x();
+        final double ly = -normal.y();
+        final double lz = -normal.z();
         final double pitchDeg = Math.toDegrees(Math.asin(Math.max(-1.0, Math.min(1.0, -ly))));
         // ★ 需求 ⑧（用户："先正视和这个面垂直的面，再正视这个面"✓）：**滚转必须唯一确定** ✓
         //   我们这的相机只有 yaw/pitch（up = 世界竖直投影 ✓）⇒ 朝向完全由面法线决定 ✓
@@ -619,7 +629,7 @@ public final class SketchClient {
         //   做法 ✓：设置完读回真实视线方向 ✓，若它与面法线**同向**（说明相机朝着背面 ✗）
         //        就把 yaw 转 180°、pitch 取反再设一次 ✓ ⇒ 无论约定如何，结果都必然是"正对着面看"✓
         final var look = com.ovo.sablestopnow.client.model.ModelCamera.lookVector();
-        final double dot = look.x * normal.x + look.y * normal.y + look.z * normal.z;
+        final double dot = look.x * normal.x() + look.y * normal.y() + look.z * normal.z();
         if (dot > 0.0) {
             com.ovo.sablestopnow.client.model.ModelCamera.alignTo(
                     (float) (yawDeg + 180.0), (float) -pitchDeg);
@@ -627,6 +637,35 @@ public final class SketchClient {
                     "[sketch] face-on corrected: dot={} ⇒ flipped",
                     String.format(java.util.Locale.ROOT, "%.3f", dot));
         }
+    }
+
+    /**
+     * **以模型的一个面作为草图基准面** ✓（需求：草图能够用模型上的面做基准面，
+     * 并把该平面的直线作为常驻、不可移动的参考线）。
+     *
+     * @return true = 这次点击被消费了
+     */
+    public static boolean chooseModelFace(
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
+        if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE) {
+            return false;
+        }
+        if (!MODE.chooseFace(hit.localCenter(), hit.localNormal())) {
+            return false;
+        }
+        SketchRenderer.setEditing(MODE.editingId());
+        alignCameraTo(hit.localNormal());
+        // ★ 该面的直线 ⇒ 参考几何（常驻、不可移动、可被约束）✓
+        final int refs = MODE.session() == null ? 0 : MODE.session().addReferenceLines(
+                hit.face().segments());
+        MODE.solve();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch-face] body={} normal=({},{},{}) segs={} refs+={}",
+                hit.body() == null ? "?" : hit.body().toString().substring(0, 8),
+                String.format(java.util.Locale.ROOT, "%.2f", hit.localNormal().x),
+                String.format(java.util.Locale.ROOT, "%.2f", hit.localNormal().y),
+                String.format(java.util.Locale.ROOT, "%.2f", hit.localNormal().z),
+                hit.face().segments().size(), refs);
         return true;
     }
 

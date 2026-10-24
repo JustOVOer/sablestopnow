@@ -157,6 +157,14 @@ public class SketchData extends SavedData {
         if (!construction.isEmpty()) {
             entry.put("construction", construction);
         }
+        // ★ 参考几何（从模型面带进来的线 ✓ 不可移动、可被约束）✓
+        final ListTag references = new ListTag();
+        for (final String key : sketch.referenceKeys()) {
+            references.add(net.minecraft.nbt.StringTag.valueOf(key));
+        }
+        if (!references.isEmpty()) {
+            entry.put("reference", references);
+        }
 
         final ListTag constraints = new ListTag();
         for (final Sketch.Constraint c : sketch.constraints()) {
@@ -223,6 +231,9 @@ public class SketchData extends SavedData {
 
             sketch.restore(readDoubles(entry, "vars"), entities, constraints);
             // ★ 辅助线标记 ✓（旧存档没有这个键 ⇒ 空 ✓ 向后兼容 ✓）
+            for (final Tag tag : entry.getList("reference", Tag.TAG_STRING)) {
+                sketch.addReferenceKey(tag.getAsString());
+            }
             final ListTag consList = entry.getList("construction", Tag.TAG_STRING);
             for (int i = 0; i < consList.size(); i++) {
                 sketch.addConstructionKey(consList.getString(i));

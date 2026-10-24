@@ -630,6 +630,7 @@ public final class SketchRenderer {
     private static int drawSketch(final VertexConsumer vc, final PoseStack.Pose pose,
                                   final Vec3 cameraPos, final Pose3dc renderPose,
                                   final Sketch sketch, final float[] color) {
+        setQuadUp(renderPose, sketch); // ★ 细条躺在这张草图的平面里（与网格一致）✓
         int lines = 0;
         // 被选中的图元用另一个颜色画，否则"选中了但看不出选中了"。
         // ⚠ 要按**整个选择集**判断，不能只比"是不是那一个" —— 多选之后
@@ -965,6 +966,7 @@ public final class SketchRenderer {
     private static void drawPreview(final VertexConsumer vc, final PoseStack.Pose pose,
                                     final Vec3 cameraPos, final Pose3dc renderPose,
                                     final Sketch sketch) {
+        setQuadUp(renderPose, sketch);
         if (previewPoint == null) {
             return;
         }
@@ -1401,6 +1403,7 @@ public final class SketchRenderer {
     private static int drawDimensions3D(final VertexConsumer vcq, final PoseStack.Pose pose,
                                         final Vec3 cameraPos, final Pose3dc renderPose,
                                         final Sketch sketch) {
+        setQuadUp(renderPose, sketch);
         int drawn = 0;
         final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.Dimension> dims =
                 com.ovo.sablestopnow.sketch.SketchMeasure.existingDimensions(sketch);
@@ -1523,6 +1526,27 @@ public final class SketchRenderer {
         return 2;
     }
 
+    /**
+     * 画细条时的"平面法线"（世界方向）✓ —— 决定细条**躺在哪个平面里**。
+     *
+     * <p>必须与**背景网格**一致：网格的细条躺在草图平面上（会随视角压扁）✓
+     * 而不是朝向相机的广告牌（那样看什么都像屏幕线 ✗）。
+     * 每次画某张草图前由 {@code setQuadUp(...)} 设置 ✓
+     */
+    private static Vec3 quadUp;
+
+    /** 用某张草图的平面法线设置细条的躺平面 ✓（方向用渲染 pose 旋转到世界）✓ */
+    private static void setQuadUp(final Pose3dc renderPose, final Sketch sketch) {
+        if (renderPose == null || sketch == null || sketch.plane() == null) {
+            quadUp = new Vec3(0, 1, 0);
+            return;
+        }
+        final org.joml.Vector3d w = renderPose.transformPosition(
+                sketch.plane().normal(), new org.joml.Vector3d());
+        final Vec3 v = new Vec3(w.x, w.y, w.z);
+        quadUp = v.lengthSqr() < 1.0e-9 ? new Vec3(0, 1, 0) : v.normalize();
+    }
+
     /** 细条半宽（格）✓ 与背景网格同一档。 */
     private static final double QUAD_LINE_HALF = 0.02;
 
@@ -1541,18 +1565,21 @@ public final class SketchRenderer {
         }
         final Vec3 dir = d.scale(1.0 / len);
         final Vec3 mid = a.add(b).scale(0.5);
-        Vec3 side = dir.cross(mid.lengthSqr() < 1.0e-9 ? new Vec3(0, 0, 1) : mid.normalize());
+        // ★★ 修实测"线条看起来仍是屏幕上的 2D 渲染"✗✗
+        //   真因：之前用"线段方向 × 视线方向"作侧向量 ⇒ 细条**永远正对相机**（广告牌）✗
+        //   ⇒ 屏幕上粗细恒定、没有透视压扁 ⇒ 看着就是一条 2D 屏幕线 ✓
+        //   而**背景网格的细条是躺在草图平面里的**（侧向量 = 平面法线 × 线段方向）✓
+        //   ⇒ 这里改成与网格**同一种几何**：侧向量取 (平面法线 × 线段方向) ✓
+        //     于是侧视时它会变窄、正对时最宽 ⇒ 与网格的 3D 观感完全一致 ✓
+        final Vec3 up = quadUp == null ? new Vec3(0, 1, 0) : quadUp;
+        Vec3 side = dir.cross(up);
         if (side.lengthSqr() < 1.0e-9) {
-            side = dir.cross(new Vec3(0, 1, 0));
+            side = dir.cross(new Vec3(0, 0, 1));
         }
         if (side.lengthSqr() < 1.0e-9) {
-            side = new Vec3(1, 0, 0);
+            side = dir.cross(new Vec3(1, 0, 0));
         }
-        // ★ 修实测"现在全是像素线段"✗：半宽固定 0.02 格 ⇒ 离得远就只剩 1px，看着像像素线 ✗
-        //   ⇒ 半宽随**相机距离**缩放（屏幕上粗细基本恒定，约 3~4px ⇒ 与网格同观感）✓
-        final double dist = Math.sqrt(mid.lengthSqr());
-        final double half = Math.max(QUAD_LINE_HALF, Math.min(dist * 0.0035, 0.30));
-        side = side.normalize().scale(half);
+        side = side.normalize().scale(QUAD_LINE_HALF);
         colourVertex(vc, pose, a.subtract(side), colour);
         colourVertex(vc, pose, a.add(side), colour);
         colourVertex(vc, pose, b.add(side), colour);

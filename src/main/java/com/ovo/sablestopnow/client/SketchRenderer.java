@@ -244,6 +244,13 @@ public final class SketchRenderer {
         final net.minecraft.client.renderer.RenderType sketchLineType =
                 ModRenderTypes.SKETCH_LINES_FLAT;
         final VertexConsumer vc = buffers.getBuffer(sketchLineType);
+        // ★ 用户要求：**所有草图线条都改成 3D 线条（和背景网格同一种呈现）** ✓
+        //   做法：草图统一画进一个 **QUADS** 缓冲（RenderType 与网格相同），
+        //   而每个"线"都是相机空间里展开的细长四边形（见 line(...) 的新实现）✓
+        //   实体线框仍用原来的 LINES 缓冲（它们不属于"草图线条"✓ 也不该变粗 ✓）
+        final MultiBufferSource.BufferSource sketchQuadBuf =
+                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 18));
+        final VertexConsumer vcq = sketchQuadBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
 
         int drawn = 0;
         int textured = 0;
@@ -326,7 +333,7 @@ public final class SketchRenderer {
             dbgBuf.endBatch();
         }
         if (sketching) {
-            drawn += drawDatumPlanes(vc, pose, cameraPos, byId);
+            drawn += drawDatumPlanes(vcq, pose, cameraPos, byId);
         }
         // ⚠ 正在编辑的那张草图是**独立对象**（SketchMode.working），**不在 SketchClientState 里** ——
         // 它要等「完成 -> 发服务端 -> 同步回来」才会进客户端镜像。
@@ -344,18 +351,18 @@ public final class SketchRenderer {
                 final VertexConsumer vcGrid = gridBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
                 drawSketchGrid(vcGrid, pose, cameraPos, wsub.renderPose(), working);
                 gridBuf.endBatch();
-                drawn += drawSketch(vc, pose, cameraPos, wsub.renderPose(), working, EDITING_COLOR);
+                drawn += drawSketch(vcq, pose, cameraPos, wsub.renderPose(), working, EDITING_COLOR);
                 // 旋转轴的高亮画在草图之后：它是"参考"，被图元压住就白画了
-                drawn += drawRevolveAxis(vc, pose, cameraPos, wsub.renderPose(), working);
+                drawn += drawRevolveAxis(vcq, pose, cameraPos, wsub.renderPose(), working);
                 // 吸附生效时在**吸附到的那个关键点**上打标记。
                 // 只高亮被指的图元是不够的：玩家把光标放在离端点 0.1 格的地方，
                 // 预览会跳到端点上，但他看不出"为什么线头跑到那儿去了"。
                 final SketchSession.KeyPoint snap = SketchClient.mode().snapAt();
                 if (snap != null) {
-                    drawn += marker(vc, pose, cameraPos, wsub.renderPose(), working, snap.u(), snap.v());
+                    drawn += marker(vcq, pose, cameraPos, wsub.renderPose(), working, snap.u(), snap.v());
                 }
                 if (previewPoint != null) {
-                    drawPreview(vc, pose, cameraPos, wsub.renderPose(), working);
+                    drawPreview(vcq, pose, cameraPos, wsub.renderPose(), working);
                 }
             }
         }
@@ -371,9 +378,9 @@ public final class SketchRenderer {
             }
             final boolean editing = editingId != null && editingId.equals(sketch.id());
             final float[] color = editing ? EDITING_COLOR : IDLE_COLOR;
-            drawn += drawSketch(vc, pose, cameraPos, sub.renderPose(), sketch, color);
+            drawn += drawSketch(vcq, pose, cameraPos, sub.renderPose(), sketch, color);
             if (editing && previewPoint != null) {
-                drawPreview(vc, pose, cameraPos, sub.renderPose(), sketch);
+                drawPreview(vcq, pose, cameraPos, sub.renderPose(), sketch);
             }
         }
         // ★ 需求：模型视图下 **面 / 棱 / 点** 的悬停预览 ✓
@@ -388,6 +395,7 @@ public final class SketchRenderer {
             // 自建 RenderType 不在 bufferSource 的 fixedBuffers 里，必须自己 endBatch，
             // 否则这批线要等下一批同类绘制才出得来。
             buffers.endBatch(sketchLineType);
+            sketchQuadBuf.endBatch();
         }
     }
 
@@ -1247,12 +1255,9 @@ public final class SketchRenderer {
 
     private static void line(final VertexConsumer vc, final PoseStack.Pose pose,
                              final Vec3 a, final Vec3 b, final float[] color) {
-        vc.addVertex(pose, (float) a.x, (float) a.y, (float) a.z)
-                .setColor(color[0], color[1], color[2], 1.0f)
-                .setNormal(pose, 0.0f, 1.0f, 0.0f);
-        vc.addVertex(pose, (float) b.x, (float) b.y, (float) b.z)
-                .setColor(color[0], color[1], color[2], 1.0f)
-                .setNormal(pose, 0.0f, 1.0f, 0.0f);
+        // ★ 所有草图"线"都画成**相机空间里展开的细长四边形** ⇒ 与背景网格同一种 3D 呈现 ✓
+        //   （原来是 GL 线：屏幕空间 1~4px、随抗锯齿发虚、与网格完全不是一回事 ✗）
+        quadLine(vc, pose, a, b, color);
     }
 
     // ================= 草图背景网格（需求 ②） =================

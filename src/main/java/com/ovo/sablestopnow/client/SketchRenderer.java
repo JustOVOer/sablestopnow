@@ -1378,8 +1378,11 @@ public final class SketchRenderer {
 
     private static void colourVertex(final VertexConsumer vc, final PoseStack.Pose pose,
                                      final Vec3 p, final float[] c) {
+        // ★ 修崩溃（ArrayIndexOutOfBounds: Index 3 out of bounds for length 3）✓
+        //   图元颜色有 `{r,g,b}` 三元素（如 EDITING_COLOR / IDLE_COLOR）✗ 直接读 c[3] 就崩 ✓
+        //   ⇒ 长度不足时按不透明处理 ✓
         vc.addVertex(pose, (float) p.x, (float) p.y, (float) p.z)
-                .setColor(c[0], c[1], c[2], c[3]);
+                .setColor(c[0], c[1], c[2], c.length > 3 ? c[3] : 1.0f);
     }
 
     /** 尺寸线相对几何的偏移（格）✓、界线留缝 / 超出（格）✓、箭头尺寸（格）✓ */

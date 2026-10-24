@@ -70,6 +70,68 @@ public final class SketchModelCheck {
         check(offeredWhenApart, "不相切的 直线+圆 ⇒ 也要提供相切按钮（用户要求 ✓）");
     }
 
+    /**
+     * CSG 离线用例（csg.js 移植自检）✓ —— **目前只在输入层自检**。
+     *
+     * <p>⚠ 待修：{@code Csg.subtract} 目前恒返回空集（{@code Csg.Node} 的移植 bug），
+     * 所以这里**不断言布尔结果**，只验证"输入是封闭且法线朝外的网格" ✓（这一层已经通过 ✓）。
+     * 修好 Node 之后把 main 里的 {@code csgBoolean()} 调用打开、并恢复差集断言 ✓。
+     */
+    private static void csgBoolean() {
+        final java.util.List<double[]> targetBoxes = new java.util.ArrayList<>();
+        targetBoxes.add(new double[] {0, 0, 0, 2, 2, 2});
+        final java.util.List<double[]> cutterBoxes = new java.util.ArrayList<>();
+        cutterBoxes.add(new double[] {0.5, 0.5, -0.5, 1.5, 1.5, 2.5});
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh a =
+                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(targetBoxes);
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh b =
+                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(cutterBoxes);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> ra =
+                com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(a, null);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> rb =
+                com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(b, null);
+        check(ra.size() == 12, "csg: 输入立方体 12 个三角形");
+        // 诊断：输入必须"法线朝外" ⇒ 中心点在每个面的**内侧**（n·c − w < 0）✓
+        int outward = 0;
+        for (final com.ovo.sablestopnow.sketch.csg.Csg.Polygon p : ra) {
+            final double d = p.plane.normal.x() * 1.0 + p.plane.normal.y() * 1.0
+                    + p.plane.normal.z() * 1.0 - p.plane.w;
+            if (d < 0) {
+                outward++;
+            }
+        }
+        check(outward == ra.size(), "csg: 输入立方体法线朝外(" + outward + "/" + ra.size() + ")");
+        System.out.println("  csg diag: union=" + com.ovo.sablestopnow.sketch.csg.Csg.union(ra, rb).size()
+                + " intersect=" + com.ovo.sablestopnow.sketch.csg.Csg.intersect(ra, rb).size()
+                + " subtract=" + com.ovo.sablestopnow.sketch.csg.Csg.subtract(ra, rb).size());
+        check(rb.size() == 12, "csg: 切割盒 12 个三角形");
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> r =
+                com.ovo.sablestopnow.sketch.csg.Csg.subtract(ra, rb);
+        check(!r.isEmpty(), "csg: 差集非空");
+        final double[] bb = com.ovo.sablestopnow.sketch.csg.CsgMesh.bounds(r);
+        check(Math.abs(bb[0]) < 1.0e-6 && Math.abs(bb[3] - 2) < 1.0e-6,
+                "csg: 结果 x 范围仍是 0..2");
+        int inside = 0;
+        for (final com.ovo.sablestopnow.sketch.csg.Csg.Polygon p : r) {
+            double cx = 0;
+            double cy = 0;
+            for (final com.ovo.sablestopnow.sketch.csg.Csg.Vertex v : p.vertices) {
+                cx += v.pos().x();
+                cy += v.pos().y();
+            }
+            cx /= p.vertices.size();
+            cy /= p.vertices.size();
+            if (cx > 0.5 + 1.0e-6 && cx < 1.5 - 1.0e-6
+                    && cy > 0.5 + 1.0e-6 && cy < 1.5 - 1.0e-6) {
+                inside++;
+            }
+        }
+        check(inside == 0, "csg: 孔内的面已被移除");
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh mesh =
+                com.ovo.sablestopnow.sketch.csg.CsgMesh.toMesh(r);
+        check(mesh.indices().length >= 36, "csg: 结果网格三角形数合理");
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {

@@ -3,6 +3,9 @@ package com.ovo.sablestopnow.sketch;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Vector3d;
 
+import com.ovo.sablestopnow.sketch.csg.Csg;
+import com.ovo.sablestopnow.sketch.csg.CsgMesh;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -519,12 +522,24 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         return null;
     }
 
+    /**
+     * 一个**切割特征** ✓：它的草图、平面、拉伸参数、以及它自己的盒子。
+     *
+     * <p>盒子用来做碰撞侧的减法；草图+参数用来重新生成**网格**参与 CSG ✓。
+     */
+    /** CSG 渲染开关（修好 {@code Csg.Node} 之后再打开 ✓）。 */
+    public static final boolean CSG_RENDER_ENABLED = false;
+
+    private record CutFeat(SketchPlane plane, Sketch sketch, Extrude.Params params,
+                           List<double[]> boxes) {
+    }
+
     /** 把一批实体解析成"实体 + 它的盒子 + 它的渲染线框 + 贴图网格"，供渲染与碰撞共用。 */
     public static List<Placed> placeAll(final Collection<Solid> solids,
                                         final Collection<Sketch> sketches) {
         // ★ 需求 ⑥：先按 body 收集**切割体**的盒子（这些就是要从别的实体上挖掉的洞 ✓）
         //   盒子层布尔：稳、快、与碰撞天然一致（物理只吃盒子 ✓）
-        final java.util.Map<UUID, List<double[]>> cutters = new java.util.HashMap<>();
+        final java.util.Map<UUID, List<CutFeat>> cutters = new java.util.HashMap<>();
         for (final Solid solid : solids) {
             if (!(solid.shape() instanceof Shape.Cut cut)) {
                 continue;
@@ -534,7 +549,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 continue;
             }
             cutters.computeIfAbsent(solid.body(), k -> new ArrayList<>())
-                    .addAll(Extrude.boxesOf(cs, cut.params()));
+                    .add(new CutFeat(cs.plane(), cs, cut.params(),
+                            Extrude.boxesOf(cs, cut.params())));
         }
         final List<Placed> out = new ArrayList<>(solids.size());
         for (final Solid solid : solids) {
@@ -550,12 +566,43 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             // ⚠ 平面法线要带上：SolidMesh.faceKind 靠它判断"这个面是盖子还是侧面"。
             final Vector3d normal = sketch == null ? null : sketch.plane().normal();
             final List<double[]> rawBoxes = solid.boxes(sketch);
-            final List<double[]> bodyCutters = cutters.get(solid.body());
-            final boolean cut = bodyCutters != null && !bodyCutters.isEmpty();
+            final List<CutFeat> feats = cutters.get(solid.body());
+            final boolean cut = feats != null && !feats.isEmpty();
+            final List<double[]> bodyCutters = new ArrayList<>();
+            if (cut) {
+                for (final CutFeat f : feats) {
+                    bodyCutters.addAll(f.boxes());
+                }
+            }
+            // ① 碰撞/几何：仍是**盒子相减** ✓（物理只吃盒子，稳且快 ✓）
             final List<double[]> boxes = cut ? subtractBoxes(rawBoxes, bodyCutters) : rawBoxes;
-            final SolidMesh.Mesh mesh = cut
-                    ? clipMesh(solid.mesh(sketch), bodyCutters) : solid.mesh(sketch);
-            out.add(new Placed(solid, boxes, edges, mesh, normal));
+            // ② 渲染：**CSG 真布尔** ✓ —— 外观保持原样（顶点带 normal+uv ⇒ 贴图照常）✓
+            SolidMesh.Mesh mesh = solid.mesh(sketch);
+            List<Vector3d[]> drawnEdges = edges;
+            // ⚠ CSG 渲染链路**暂未启用**：csg.js 移植的 Node 仍有 bug（差集恒为空），
+            //   在修好之前不能改变玩家看到的表现 ✗ ⇒ 先走旧的三角剔除 ✓ 无回归 ✓
+            if (cut && CSG_RENDER_ENABLED) {
+                List<Csg.Polygon> acc = CsgMesh.fromMesh(solid.mesh(sketch), null);
+                for (final CutFeat f : feats) {
+                    final SolidMesh.Mesh cutterMesh = SolidMesh.build(f.sketch(), f.params());
+                    // 切割体在自己的平面坐标里 ⇒ 先换算到目标实体的平面空间 ✓
+                    final List<Csg.Polygon> cutterPolys = CsgMesh.fromMesh(cutterMesh,
+                            CsgMesh.between(f.plane(), sketch == null ? null : sketch.plane()));
+                    if (cutterPolys.isEmpty()) {
+                        continue;
+                    }
+                    acc = Csg.subtract(acc, cutterPolys);
+                }
+                if (!acc.isEmpty()) {
+                    mesh = CsgMesh.toMesh(acc);
+                    // 线框也从结果提（旧轮廓已经不成立 ⇒ 画出来会"线框完整、实体有洞"✗）
+                    final List<Vector3d[]> sharp = CsgMesh.sharpEdges(acc, 25.0);
+                    if (!sharp.isEmpty()) {
+                        drawnEdges = sharp;
+                    }
+                }
+            }
+            out.add(new Placed(solid, boxes, drawnEdges, mesh, normal));
         }
         return out;
     }

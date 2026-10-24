@@ -133,3 +133,42 @@ SOFTWARE.
   3. 需要碰撞特性的使用者，请**自行**从上游取得副本并**本地编译**，再把 DLL 放到
      `<gamedir>/sablestopnow-natives/sable_rapier_x86_64_windows.dll` 手动启用（见 `native/README.md`）。
 * 若上游许可方有任何异议，请通过仓库 Issue 联系，我们会立即移除相关引用。
+
+---
+
+## 5. **csg.js** —— BSP 构造实体几何（**已打包**：Java 移植）
+
+- **用途**：切割/布尔运算（`com.ovo.sablestopnow.sketch.csg.Csg`）
+- **来源**：https://github.com/evanw/csg.js
+- **许可**：**MIT**，Copyright (c) 2011 Evan Wallace (http://madebyevan.com/)
+- **我们实际采用了什么**：把它的 `Vertex` / `Plane` / `Polygon` / `Node` 四个结构以及
+  `union` / `subtract` / `intersect` 三个运算**逐方法移植成 Java**（BSP 切割、共面分类、`EPSILON = 1e-5`），
+  并额外让顶点携带 **normal + uv**，这样布尔之后的贴图不会丢。
+  `CsgMesh`（网格互转、平面间坐标变换、锐边提取）是**我们自己写的**。
+- **许可义务**：随附下方 MIT 原文；文件头也保留了同一段声明（见 `Csg.java`）。
+
+```
+Copyright (c) 2011 Evan Wallace (http://madebyevan.com/)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+> MIT 与本项目自身的 MIT 完全兼容：无 copyleft、不要求开源我们的代码，只需保留声明。
+> **只从 csg.js 本体移植**（MIT）；没有从 JCSG（BSD，且依赖 GPL 的 vecmath）或
+> 许可不明的 Java 移植版抄任何代码。

@@ -517,9 +517,11 @@ public final class SketchHud {
                         by = sb[1] + oy;
                     }
                     // ★ 用户要求：尺寸线风格与背景网格一致 ⇒ **不透明白色** ✓
-                      // ★ 尺寸几何已改由**世界层的 3D 线条**绘制（见 SketchRenderer.drawDimensions3D）✓
-                      //   ⇒ HUD 这边把尺寸线/界线/箭头设成**全透明**（只保留文字与输入框）✓
-                      final int lineArgb = 0x00FFFFFF;
+                      // ★ 修实测"线段长度显示直接改没了"✗：文字也用 lineArgb ⇒ 之前把它设透明，文字一起消失 ✗
+                      //   ⇒ lineArgb 恢复成不透明（供**文字**用）；尺寸几何由世界层 3D 线条画 ✓
+                      final int lineArgb = d.driving() ? 0xFFFFFFFF : 0xFFB9C0D4;
+                      // HUD 这套 2D 尺寸线/界线/箭头全部**不画**（改由 3D 线条画 ✓ 避免重影）
+                      final int dimLineArgb = 0x00FFFFFF;
                     // 界线：从参考点拉到尺寸线两端（留一点缝，SW 也这样 ✓）
                     // ★ 界线按参考图画 ✓：与几何**留小缝**（4px ✓）· **超出**尺寸线一小段（6px ✓）
                     //   （参考图 1/3/4 都明显超出 ✓ 我原来"贴到尺寸线就停"✗）
@@ -560,8 +562,8 @@ public final class SketchHud {
                     }
                     // 尺寸线本体 + 两端箭头（用统一库的矢量绘制 ✓ 不手写 fill ✗）
                     // ★ 箭头改成**开放式 V 形** ✓（参考图 1/2/3/4 全是这种 ✓ 我原来画的是实心圆点 ✗）
-                    dimArrow(g, ax, ay, bx, by, lineArgb);
-                    dimArrow(g, bx, by, ax, ay, lineArgb);
+                    dimArrow(g, ax, ay, bx, by, dimLineArgb);
+                    dimArrow(g, bx, by, ax, ay, dimLineArgb);
                     // ★ 尺寸线**在文字处断开** ✓（参考图 1 最清楚：左段 + 文字 + 右段 ✓ 我原来线穿过文字 ✗）
                     //   做法 ✓：量出文字半宽 ⇒ 把尺寸线画成两段 ✓ 中间留白给文字 ✓
                     final double segLen = Math.hypot(bx - ax, by - ay);
@@ -573,7 +575,7 @@ public final class SketchHud {
                         // 用文字实际宽度决定断口 ✓（按标签在线的哪一侧不影响断口 ✓）
                         final double half = 19.0; // 三位小数（如 "5.000"）的半个文字宽 + 余量 ✓（此处 text 还没声明 ✓ 所以用等价常量 ✓）
                         crispLine(g, ax, ay,
-                                mx2 - ux * half, my2 - uy * half, 1.5f, lineArgb);
+                                mx2 - ux * half, my2 - uy * half, 1.5f, dimLineArgb);
                         crispLine(g,
                                 mx2 + ux * half, my2 + uy * half, bx, by, 1.5f, lineArgb);
                     } else {

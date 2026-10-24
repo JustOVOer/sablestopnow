@@ -1784,14 +1784,9 @@ public final class SketchSession {
         lastLineDiag = lastLineDiag
                 + " kpA=" + (kpStart == null ? "none" : kpStart.kind().name())
                 + " kpB=" + (kpEnd == null ? "none" : kpEnd.kind().name());
+        constrainIfSnapped(new int[] {v[0], v[1]}, kpStart);
         if (snapLineEnd) {
-            this.pendingSnap = kpStart;
-            constrainToSnap(new int[] {v[0], v[1]});
-            this.pendingSnap = kpEnd;
-            constrainToSnap(new int[] {v[2], v[3]});
-        } else {
-            this.pendingSnap = kpStart;
-            constrainToSnap(new int[] {v[0], v[1]});
+            constrainIfSnapped(new int[] {v[2], v[3]}, kpEnd);
         }
         // ★ 诊断（实测"所有点都钉不住"✗）：把**这次画线落了几条约束**一并打出来 ✓
         //   ⇒ 0 条 = 吸附没命中/没落约束；≥2 条 = 约束落了但不生效（那就查求解器）✓
@@ -1860,6 +1855,22 @@ public final class SketchSession {
      * ⇒ 圆心那次调用实际拿到的是终点的吸附 ⇒ 圆心永远落不到"同心"约束 ✓
      * 这里改成**按该点自己的坐标**重新拾一次 ✓（与悬停同一函数 ✓ 口径一致 ✓）。
      */
+    /**
+     * **只在确实吸到关键点时才落约束** ✓（修用户实测："明明没有任何吸附，仍然自带一个点约束"✗）。
+     *
+     * <p>为什么必须这样 ✗✓：`constrainToSnap` 里有一个"按**当前鼠标**位置再猜一次"的兜底 ✓
+     * 落线的第二个点时，鼠标其实已经停在终点 ⇒ 兜底会拿**终点附近**的关键点去约束**起点**
+     * ⇒ 凭空多一条 COINCIDENT ⇒ 线被拉成 0 长 + 过定义 ✓（这正是实测症状 ✓）
+     * <p>⇒ 现在只要"这次没有真吸附"，就**什么都不加** ✓
+     */
+    private void constrainIfSnapped(final int[] pointVars, final KeyPoint kp) {
+        if (kp == null) {
+            return;
+        }
+        this.pendingSnap = kp;
+        constrainToSnap(pointVars);
+    }
+
     private void constrainAt(final int[] pointVars, final double u, final double v) {
         final KeyPoint kp = pickKeyPoint(u, v, 0.15);
         // ★ 诊断（"没有钉住"要落到具体一环 ✓）：这次重拾**拾到了什么 / 没拾到** ✓
@@ -1910,8 +1921,7 @@ public final class SketchSession {
                     + " h1=" + working.hasLineVars(v[0], v[1], v[2], v[3])
                     + " h2=" + working.hasLineVars(v[0], v[1], v[4], v[5]);
         }
-        this.pendingSnap = kpCenter;
-        constrainToSnap(new int[] {v[0], v[1]});
+        constrainIfSnapped(new int[] {v[0], v[1]}, kpCenter);
     }
 
     /**
@@ -1944,10 +1954,8 @@ public final class SketchSession {
             }
         }
         lastBezierDiag = dg.toString();
-        this.pendingSnap = kp0;
-        constrainToSnap(new int[] {v[0], v[1]});
-        this.pendingSnap = kp3;
-        constrainToSnap(new int[] {v[6], v[7]});
+        constrainIfSnapped(new int[] {v[0], v[1]}, kp0);
+        constrainIfSnapped(new int[] {v[6], v[7]}, kp3);
     }
 
     /**

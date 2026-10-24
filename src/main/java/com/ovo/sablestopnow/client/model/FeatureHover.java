@@ -112,9 +112,8 @@ public final class FeatureHover {
                 }
                 final Features.Graph graph = Features.of(p);
                 for (final Features.Face face : graph.faces()) {
-                    if (!face.planar()) {
-                        continue;
-                    }
+                    // ★ 曲面也要能**整体高亮** ✓（用户实测"曲面没有整体高亮"✗）
+                    //   能不能当基准面由 chooseModelFace 再判 ✓（那里只认 planar ✓）
                     for (final Vector3d[] tri : face.triangles()) {
                         final double t = rayTriangle(localFrom, localDir, tri[0], tri[1], tri[2]);
                         if (t > 0 && t < bestT) {

@@ -232,8 +232,11 @@ public final class SketchRenderer {
         final MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
         // ★ 需求：**草图状态下，草图的渲染优先级高于模型** ✓
         //   做法：编辑草图时用"关闭深度测试"的线类型 ⇒ 线永远画在模型之上 ✓
-        final net.minecraft.client.renderer.RenderType sketchLineType = sketching
-                ? ModRenderTypes.SKETCH_LINES_ON_TOP : ModRenderTypes.SKETCH_LINES;
+        // ★ 修实测"正视竖直面时草图的水平线看不见"✗：
+        //   草图的线**正好贴在模型表面上** ⇒ 深度值几乎相等 ⇒ 随视角时有时无（z-fighting）✗
+        //   ⇒ 草图线**一律**用 NO_DEPTH_TEST 的类型（本来就是要看得见的东西 ✓）
+        final net.minecraft.client.renderer.RenderType sketchLineType =
+                ModRenderTypes.SKETCH_LINES_ON_TOP;
         final VertexConsumer vc = buffers.getBuffer(sketchLineType);
 
         int drawn = 0;

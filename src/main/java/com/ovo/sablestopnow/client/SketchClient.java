@@ -660,7 +660,9 @@ public final class SketchClient {
      */
     public static boolean chooseModelFace(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
-        if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE) {
+        // 只有**平面**能当基准面 ✓（曲面可以高亮，但不能建草图 ✓）
+        if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE
+                || !hit.face().planar()) {
             return false;
         }
         if (!MODE.chooseFace(hit.localCenter(), hit.localNormal())) {

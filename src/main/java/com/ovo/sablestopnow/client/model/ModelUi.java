@@ -897,6 +897,18 @@ public final class ModelUi {
         }
         // ★ 把"本会话刚创建过、还没同步回来"的序号也算上 ✓（修"编号永远是 1"✗）
         index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(source.body(), 0) + 1);
+        // ★ 修实测"旋转创建后没有模型、草图却被吃掉"✗：
+        //   旋转需要**闭合轮廓**；轮廓不闭合时引擎会产出空几何 ⇒ 以前会静默建一个看不见的体 ✗
+        //   ⇒ 先算一遍线框，空的就**直接提示**、不建体、不吃草图 ✓
+        final int edgeCount = com.ovo.sablestopnow.sketch.Revolve.edges(source, params).size();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[revolve] index={} angle={} edges={} axis=({},{},{},{})",
+                index, String.format(java.util.Locale.ROOT, "%.1f", params.angleDeg()),
+                edgeCount, revolveAxis[0], revolveAxis[1], revolveAxis[2], revolveAxis[3]);
+        if (edgeCount == 0) {
+            ModelMode.prompt("model.revolve.empty_profile");
+            return;
+        }
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(
                 com.ovo.sablestopnow.sketch.Solid.createRevolution(
                         source.body(), source.id(), index, params));

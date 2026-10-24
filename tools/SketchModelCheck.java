@@ -187,6 +187,25 @@ public final class SketchModelCheck {
         check(s.referenceKeys().contains("LINE:0:1:2:3"), "reference: 身份键可存可取");
     }
 
+    /** 旋转：轮廓 + 轴线 ⇒ 必须产线框（诊断"旋转拉伸无产物" ✓）。 */
+    private static void revolveEdges() {
+        final com.ovo.sablestopnow.sketch.Sketch s =
+                new com.ovo.sablestopnow.sketch.Sketch(java.util.UUID.randomUUID(),
+                        java.util.UUID.randomUUID(), "rev", com.ovo.sablestopnow.sketch.SketchPlane
+                                .base(com.ovo.sablestopnow.sketch.SketchPlane.Base.FRONT,
+                                        new org.joml.Vector3d(0, 0, 0)));
+        // 一个离轴 1 格的方块轮廓（轴 = x=0 的竖直轴）
+        s.addLine(1, 0, 1, 2);
+        s.addLine(1, 2, 3, 2);
+        s.addLine(3, 2, 3, 0);
+        s.addLine(3, 0, 1, 0);
+        final com.ovo.sablestopnow.sketch.Revolve.Params p =
+                new com.ovo.sablestopnow.sketch.Revolve.Params(0, 0, 0, 1, 90.0, 1);
+        final var edges = com.ovo.sablestopnow.sketch.Revolve.edges(s, p);
+        check(!edges.isEmpty(), "revolve: 线框边数=" + edges.size());
+
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -227,6 +246,7 @@ public final class SketchModelCheck {
     }
 
     public static void main(final String[] args) throws Exception {
+        revolveEdges();
         referenceNotInDof();
         featuresFromMesh();
         csgBoolean();

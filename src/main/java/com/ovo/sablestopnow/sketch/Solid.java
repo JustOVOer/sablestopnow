@@ -591,6 +591,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final Sketch sketch = solid.resolve(sketches);
             final List<Vector3d[]> edges = solid.edges(sketch);
             if (edges.isEmpty()) {
+                // ★ 诊断（实测"旋转拉伸创建后没有模型"✓）：静默跳过最难查 ⇒ 明确记下来 ✓
+                lastCsgDiag = "solidEmpty idx=" + solid.index() + " kind="
+                        + solid.shape().getClass().getSimpleName()
+                        + " sketchResolved=" + (sketch != null);
                 continue;
             }
             // 网格与平面法线只为**贴图**准备；没有贴图时调用方不看它们。

@@ -519,18 +519,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         return null;
     }
 
-    /** 一个切割特征：**它的草图平面** + 它自己的盒子（在**该平面坐标**里）✓。 */
-    private record CutFeature(SketchPlane plane, List<double[]> boxes) {
-    }
-
     /** 把一批实体解析成"实体 + 它的盒子 + 它的渲染线框 + 贴图网格"，供渲染与碰撞共用。 */
     public static List<Placed> placeAll(final Collection<Solid> solids,
                                         final Collection<Sketch> sketches) {
-        // ★ 需求 ⑥（用户定调）：**切割改的是模型本身** ✓
-        //   切割体 ⇒ 一组盒子（在它自己的草图平面坐标里）✓
-        //   目标实体 ⇒ 自己的盒子 **减去** 这些盒子 ⇒ 得到**新的模型** ✓
-        //   渲染网格与碰撞**都从新模型生成** ⇒ 洞的内壁天然存在 ✓（不用再"补面"✓）
-        final java.util.Map<UUID, List<CutFeature>> cuts = new java.util.HashMap<>();
+        // ★ 需求 ⑥：先按 body 收集**切割体**的盒子（这些就是要从别的实体上挖掉的洞 ✓）
+        //   盒子层布尔：稳、快、与碰撞天然一致（物理只吃盒子 ✓）
+        final java.util.Map<UUID, List<double[]>> cutters = new java.util.HashMap<>();
         for (final Solid solid : solids) {
             if (!(solid.shape() instanceof Shape.Cut cut)) {
                 continue;
@@ -539,107 +533,31 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             if (cs == null) {
                 continue;
             }
-            cuts.computeIfAbsent(solid.body(), k -> new ArrayList<>())
-                    .add(new CutFeature(cs.plane(), Extrude.boxesOf(cs, cut.params())));
+            cutters.computeIfAbsent(solid.body(), k -> new ArrayList<>())
+                    .addAll(Extrude.boxesOf(cs, cut.params()));
         }
         final List<Placed> out = new ArrayList<>(solids.size());
         for (final Solid solid : solids) {
             if (solid.shape() instanceof Shape.Cut) {
-                continue; // 切割体本身不产生材料 ✓
+                continue; // 切割体本身不产生材料/线框/网格 ✓
             }
             final Sketch sketch = solid.resolve(sketches);
-            final List<double[]> own = solid.boxes(sketch);
-            // 把切割盒换算到**这个实体的平面空间** ✓（平面不同也不会错位 ✓）
-            final List<double[]> cutterBoxes = new ArrayList<>();
-            final List<CutFeature> feats = cuts.get(solid.body());
-            if (feats != null && sketch != null && !own.isEmpty()) {
-                for (final CutFeature f : feats) {
-                    for (final double[] box : f.boxes()) {
-                        final double[] conv = boxIntoPlane(f.plane(), sketch.plane(), box);
-                        if (conv != null) {
-                            cutterBoxes.add(conv);
-                        }
-                    }
-                }
-            }
-            final boolean cut = !cutterBoxes.isEmpty();
-            final List<double[]> boxes = cut ? subtractBoxes(own, cutterBoxes) : own;
-            if (boxes.isEmpty()) {
-                continue; // 被切没了 ⇒ 不产生实体 ✓
-            }
-            final List<Vector3d[]> edges = cut ? edgesOfBoxes(boxes) : solid.edges(sketch);
+            final List<Vector3d[]> edges = solid.edges(sketch);
             if (edges.isEmpty()) {
                 continue;
             }
+            // 网格与平面法线只为**贴图**准备；没有贴图时调用方不看它们。
+            // ⚠ 平面法线要带上：SolidMesh.faceKind 靠它判断"这个面是盖子还是侧面"。
             final Vector3d normal = sketch == null ? null : sketch.plane().normal();
-            // ★ 切割后：网格**从盒子生成** ✓（= 从模型生成渲染 ✓）；未切割时沿用原来的（好看的）网格 ✓
-            final SolidMesh.Mesh mesh = cut ? SolidMesh.fromBoxes(boxes) : solid.mesh(sketch);
+            final List<double[]> rawBoxes = solid.boxes(sketch);
+            final List<double[]> bodyCutters = cutters.get(solid.body());
+            final boolean cut = bodyCutters != null && !bodyCutters.isEmpty();
+            final List<double[]> boxes = cut ? subtractBoxes(rawBoxes, bodyCutters) : rawBoxes;
+            final SolidMesh.Mesh mesh = cut
+                    ? clipMesh(solid.mesh(sketch), bodyCutters) : solid.mesh(sketch);
             out.add(new Placed(solid, boxes, edges, mesh, normal));
         }
         return out;
-    }
-
-    /**
-     * 把一个盒子从 {@code from} 平面坐标换算到 {@code to} 平面坐标 ✓（取 8 角的 AABB）。
-     *
-     * <p>平面平行时是**精确**的 ✓；不平行时是"包住"的近似（切割盒本来就是个棱柱 ✓ 够用）✓
-     */
-    @Nullable
-    private static double[] boxIntoPlane(final SketchPlane from, final SketchPlane to,
-                                         final double[] box) {
-        if (from == null || to == null || box == null || box.length < 6) {
-            return null;
-        }
-        final Vector3d fn = from.normal();
-        final Vector3d out = new Vector3d();
-        double minU = Double.MAX_VALUE;
-        double maxU = -Double.MAX_VALUE;
-        double minV = Double.MAX_VALUE;
-        double maxV = -Double.MAX_VALUE;
-        double minD = Double.MAX_VALUE;
-        double maxD = -Double.MAX_VALUE;
-        for (int i = 0; i < 8; i++) {
-            final double u = (i & 1) == 0 ? box[0] : box[3];
-            final double v = (i & 2) == 0 ? box[1] : box[4];
-            final double d = (i & 4) == 0 ? box[2] : box[5];
-            // from 平面坐标 → 世界（局部）→ to 平面坐标 ✓
-            final Vector3d local = from.toLocal(u, v).fma(d, fn, new Vector3d());
-            to.toPlane(local, out);
-            final double depth = to.signedDistance(local);
-            minU = Math.min(minU, out.x);
-            maxU = Math.max(maxU, out.x);
-            minV = Math.min(minV, out.y);
-            maxV = Math.max(maxV, out.y);
-            minD = Math.min(minD, depth);
-            maxD = Math.max(maxD, depth);
-        }
-        return new double[] {minU, minV, minD, maxU, maxV, maxD};
-    }
-
-    /** 一组盒子的棱 ✓（切割后的线框用 ✓ 与盒子一致 ✓）。 */
-    private static List<Vector3d[]> edgesOfBoxes(final List<double[]> boxes) {
-        final List<Vector3d[]> out = new ArrayList<>();
-        for (final double[] b : boxes) {
-            if (b == null || b.length < 6) {
-                continue;
-            }
-            for (int i = 0; i < 8; i++) {
-                for (int axis = 0; axis < 3; axis++) {
-                    if ((i & (1 << axis)) != 0) {
-                        continue; // 只从"该位为 0"的角出发一次 ✓ 避免重复边 ✓
-                    }
-                    final int j = i | (1 << axis);
-                    out.add(new Vector3d[] {corner(b, i), corner(b, j)});
-                }
-            }
-        }
-        return out;
-    }
-
-    private static Vector3d corner(final double[] b, final int i) {
-        return new Vector3d((i & 1) == 0 ? b[0] : b[3],
-                (i & 2) == 0 ? b[1] : b[4],
-                (i & 4) == 0 ? b[2] : b[5]);
     }
 
     /**

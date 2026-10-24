@@ -241,63 +241,6 @@ public final class SolidMesh {
      *
      * @return 网格；草图没有可拉伸区域时返回空网格（不是 null，调用方少一个分支）
      */
-    /**
-     * **从盒子集合生成网格** ✓（切割后的模型就用这个 ⇒ 渲染与碰撞同源 ✓）。
-     *
-     * <p>为什么这样最对 ✗✓（用户的要求："切割应该改整体模型，再由模型生成渲染和碰撞"）：
-     * 切割在模型层就是"盒子集合相减" ✓ 结果仍是一组盒子 ✓
-     * ⇒ 每个盒子出 6 个面 ⇒ **洞的内壁就是切割盒的面**，天然存在 ✓ 不需要再"补面" ✓
-     * （内部面会被深度测试挡住，看不见 ✓ 不影响观感 ✓）
-     */
-    public static Mesh fromBoxes(final java.util.List<double[]> boxes) {
-        final java.util.List<Vertex> vs = new java.util.ArrayList<>();
-        final java.util.List<Integer> idx = new java.util.ArrayList<>();
-        if (boxes == null) {
-            return new Mesh(vs, new int[0]);
-        }
-        for (final double[] b : boxes) {
-            if (b == null || b.length < 6
-                    || b[3] - b[0] < 1.0e-9 || b[4] - b[1] < 1.0e-9 || b[5] - b[2] < 1.0e-9) {
-                continue;
-            }
-            // 6 个面：axis 0/1/2 × side min/max ✓
-            for (int axis = 0; axis < 3; axis++) {
-                for (int side = 0; side < 2; side++) {
-                    final int a1 = (axis + 1) % 3;
-                    final int a2 = (axis + 2) % 3;
-                    final double plane = side == 0 ? b[axis] : b[axis + 3];
-                    final double[] n = new double[3];
-                    n[axis] = side == 0 ? -1.0 : 1.0;
-                    final int base = vs.size();
-                    // 四个角（按 a1/a2 两个方向铺开 ✓ 保证逆时针朝外 ✓）
-                    final int[][] order = side == 0
-                            ? new int[][] {{0, 0}, {1, 0}, {1, 1}, {0, 1}}
-                            : new int[][] {{0, 0}, {0, 1}, {1, 1}, {1, 0}};
-                    for (final int[] o : order) {
-                        final double[] pos = new double[3];
-                        pos[axis] = plane;
-                        pos[a1] = o[0] == 0 ? b[a1] : b[a1 + 3];
-                        pos[a2] = o[1] == 0 ? b[a2] : b[a2 + 3];
-                        vs.add(new Vertex(new Vector3d(pos[0], pos[1], pos[2]),
-                                new Vector3d(n[0], n[1], n[2]),
-                                pos[a1], pos[a2]));
-                    }
-                    idx.add(base);
-                    idx.add(base + 1);
-                    idx.add(base + 2);
-                    idx.add(base);
-                    idx.add(base + 2);
-                    idx.add(base + 3);
-                }
-            }
-        }
-        final int[] arr = new int[idx.size()];
-        for (int i = 0; i < arr.length; i++) {
-            arr[i] = idx.get(i);
-        }
-        return new Mesh(vs, arr);
-    }
-
     public static Mesh build(final Sketch sketch, final Extrude.Params params) {
         final List<Vertex> vertices = new ArrayList<>();
         final List<Integer> indices = new ArrayList<>();

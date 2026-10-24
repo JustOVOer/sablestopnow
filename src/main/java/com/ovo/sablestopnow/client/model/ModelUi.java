@@ -2014,6 +2014,9 @@ public final class ModelUi {
         final com.ovo.sablestopnow.sketch.Solid.TreeGrouping grouping =
                 com.ovo.sablestopnow.sketch.Solid.groupSketches(
                         currentSolidsOf(bodyId), byId.keySet());
+        // ★ 需求：草图也加序号 ✓（按 id 排序 ⇒ 序号稳定，不随"被用掉/被删"重排 ✓）
+        final java.util.List<UUID> sketchOrder = new java.util.ArrayList<>(byId.keySet());
+        sketchOrder.sort(java.util.Comparator.comparing(UUID::toString));
         for (final UUID freeId : grouping.freeSketches()) {
             final com.ovo.sablestopnow.sketch.Sketch sketch = byId.get(freeId);
             if (sketch == null) {
@@ -2023,7 +2026,9 @@ public final class ModelUi {
             // 同一个 key 在两个结构下出现会撞车（配合那边踩过：第二个位置拿到第一个的控件）。
             final TreeView.TreeItem row = new TreeView.TreeItem(
                     "sketch:" + bodyId + ":" + sketch.id())
-                    .label(Component.literal(sketch.name()));
+                    .label(Component.literal("#"
+                            + (sketchOrder.indexOf(sketch.id()) + 1) + " "
+                            + sketch.name()));
             row.data = sketch;
             node.child(row);
         }

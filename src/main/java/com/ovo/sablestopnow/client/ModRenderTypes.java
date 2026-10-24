@@ -72,6 +72,25 @@ public class ModRenderTypes {
                     .setDepthTestState(RenderStateShard.LEQUAL_DEPTH_TEST)
                     .createCompositeState(false)
     );
+    public static final RenderType SKETCH_LINES_ON_TOP = RenderType.create(
+            "sablestopnow_sketch_lines_on_top",
+            DefaultVertexFormat.POSITION_COLOR_NORMAL,
+            VertexFormat.Mode.LINES,
+            1536,
+            false,
+            false,
+            RenderType.CompositeState.builder()
+                    .setShaderState(RenderStateShard.RENDERTYPE_LINES_SHADER)
+                    .setLineState(new RenderStateShard.LineStateShard(OptionalDouble.of(4.0)))
+                    .setLayeringState(RenderStateShard.VIEW_OFFSET_Z_LAYERING)
+                    .setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
+                      .setDepthTestState(RenderStateShard.NO_DEPTH_TEST)
+                    .setOutputState(RenderStateShard.ITEM_ENTITY_TARGET)
+                    .setWriteMaskState(RenderStateShard.COLOR_DEPTH_WRITE)
+                    .setCullState(RenderStateShard.NO_CULL)
+                    .setDepthTestState(RenderStateShard.LEQUAL_DEPTH_TEST)
+                    .createCompositeState(false)
+    );
 
     // 「细长长方体盒」边框：用 QUADS 画实心细长方条代替 GL 线（线宽受驱动限制且跨平台不一致）。
     // 顶点格式沿用 Create/catnip 风格的做法：POSITION_COLOR + 原版 position_color 着色器。

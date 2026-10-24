@@ -533,6 +533,31 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     /** 上一次切割 CSG 的诊断（客户端打日志用 ✓；本包被离线编译 ⇒ 不能直接用 LOGGER ✓）。 */
     public static String lastCsgDiag = "none";
 
+    /**
+     * 把**平面坐标**里的盒子（{@code {u0,v0,d0,u3,v3,d3}}）换成**局部坐标**的封闭网格 ✓。
+     *
+     * <p>只作为"没有贴图网格时的兜底" ✓ —— 正常路径用 {@code solid.mesh(sketch)}（本来就
+     * 已经是局部坐标 ✓）。注意：平面基底若与方块轴不平行，这里的盒子会是个斜棱柱，
+     * 用它的 AABB 只是近似 ✓（兜底路径可以接受 ✓）。
+     */
+    private static SolidMesh.Mesh boxesInLocal(final Sketch sketch, final List<double[]> boxes) {
+        if (sketch == null || boxes == null || boxes.isEmpty()) {
+            return new SolidMesh.Mesh(new ArrayList<>(), new int[0]);
+        }
+        final SketchPlane pl = sketch.plane();
+        final Vector3d n = pl.normal();
+        final List<double[]> local = new ArrayList<>(boxes.size());
+        for (final double[] b : boxes) {
+            if (b == null || b.length < 6) {
+                continue;
+            }
+            final Vector3d lo = pl.toLocal(b[0], b[1]).fma(b[2], n, new Vector3d());
+            final Vector3d hi = pl.toLocal(b[3], b[4]).fma(b[5], n, new Vector3d());
+            local.add(new double[] {lo.x, lo.y, lo.z, hi.x, hi.y, hi.z});
+        }
+        return SolidMesh.fromBoxes(local);
+    }
+
     private record CutFeat(SketchPlane plane, Sketch sketch, Extrude.Params params,
                            List<double[]> boxes) {
     }
@@ -594,19 +619,23 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 SolidMesh.Mesh targetMesh = solid.mesh(sketch);
                 final int targetTris = targetMesh == null ? 0 : targetMesh.indices().length / 3;
                 if (targetMesh == null || targetMesh.isEmpty()) {
-                    targetMesh = SolidMesh.fromBoxes(rawBoxes);
+                    targetMesh = boxesInLocal(sketch, rawBoxes);
                 }
                 List<Csg.Polygon> acc = CsgMesh.fromMesh(targetMesh, null);
                 int cutterTris = 0;
                 for (final CutFeat f : feats) {
                     SolidMesh.Mesh cutterMesh = SolidMesh.build(f.sketch(), f.params());
                     if (cutterMesh == null || cutterMesh.isEmpty()) {
-                        cutterMesh = SolidMesh.fromBoxes(f.boxes());
+                        cutterMesh = boxesInLocal(f.sketch(), f.boxes());
                     }
                     cutterTris += cutterMesh.indices().length / 3;
-                    // 切割体在自己的平面坐标里 ⇒ 先换算到目标实体的平面空间 ✓
-                    final List<Csg.Polygon> cutterPolys = CsgMesh.fromMesh(cutterMesh,
-                            CsgMesh.between(f.plane(), sketch == null ? null : sketch.plane()));
+                    // ★ 修实测"仍然没有切割"✗ ✗
+                    //   关键事实：`SolidMesh` 的顶点**已经是局部坐标**（`Extrude.onPlane` 已把
+                    //   平面坐标 (u,v,depth) 换算成局部/世界点）✓
+                    //   ⇒ 切割体网格与目标网格**本来就在同一个空间** ⇒ **不需要再变换** ✓
+                    //   （之前用 `CsgMesh.between` 又按平面坐标变换了一次 ⇒ 切割体被搬到别处
+                    //     ⇒ 差集切不到任何面 ⇒ 日志里 resultPolys 与 target 三角数一样 ✗）
+                    final List<Csg.Polygon> cutterPolys = CsgMesh.fromMesh(cutterMesh, null);
                     if (cutterPolys.isEmpty()) {
                         continue;
                     }

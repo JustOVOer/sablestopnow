@@ -223,7 +223,11 @@ public final class SketchRenderer {
         // 装置本身是纯碰撞体、不可渲染，所以在这里给它画线框。
         drawVoxelDebugOutline(byId, pose, cameraPos);
         final MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
-        final VertexConsumer vc = buffers.getBuffer(ModRenderTypes.SKETCH_LINES);
+        // ★ 需求：**草图状态下，草图的渲染优先级高于模型** ✓
+        //   做法：编辑草图时用"关闭深度测试"的线类型 ⇒ 线永远画在模型之上 ✓
+        final net.minecraft.client.renderer.RenderType sketchLineType = sketching
+                ? ModRenderTypes.SKETCH_LINES_ON_TOP : ModRenderTypes.SKETCH_LINES;
+        final VertexConsumer vc = buffers.getBuffer(sketchLineType);
 
         int drawn = 0;
         int textured = 0;
@@ -354,7 +358,7 @@ public final class SketchRenderer {
         if (drawn > 0) {
             // 自建 RenderType 不在 bufferSource 的 fixedBuffers 里，必须自己 endBatch，
             // 否则这批线要等下一批同类绘制才出得来。
-            buffers.endBatch(ModRenderTypes.SKETCH_LINES);
+            buffers.endBatch(sketchLineType);
         }
     }
 

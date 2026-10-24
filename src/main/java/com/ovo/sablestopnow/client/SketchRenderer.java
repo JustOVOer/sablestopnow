@@ -235,8 +235,11 @@ public final class SketchRenderer {
         // ★ 修实测"正视竖直面时草图的水平线看不见"✗：
         //   草图的线**正好贴在模型表面上** ⇒ 深度值几乎相等 ⇒ 随视角时有时无（z-fighting）✗
         //   ⇒ 草图线**一律**用 NO_DEPTH_TEST 的类型（本来就是要看得见的东西 ✓）
+        // ★ 再修"侧视时所有水平线都看不见"✗：ON_TOP 带 `VIEW_OFFSET_Z_LAYERING`
+        //   （clip 空间的深度偏移）⇒ 线几乎与视线平行时会被推出近平面 ⇒ **整条被裁掉** ✗
+        //   ⇒ 改用 FLAT：NO_DEPTH_TEST + **不做 clip 空间偏移** ✓
         final net.minecraft.client.renderer.RenderType sketchLineType =
-                ModRenderTypes.SKETCH_LINES_ON_TOP;
+                ModRenderTypes.SKETCH_LINES_FLAT;
         final VertexConsumer vc = buffers.getBuffer(sketchLineType);
 
         int drawn = 0;

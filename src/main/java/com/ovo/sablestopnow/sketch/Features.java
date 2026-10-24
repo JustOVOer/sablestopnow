@@ -130,8 +130,13 @@ public final class Features {
                 }
             }
             final Kind kind = maxDev < 1.0e-3 ? Kind.PLANAR : Kind.CURVED;
-            final List<double[]> segs = kind == Kind.PLANAR
-                    ? faces.get(g.get(0)).segments() : List.of();
+            // 合并面的描边：组内所有 segments 收起来再合并共线 ✓（曲面也描边 ✓）
+            final List<double[]> rawSegs = new ArrayList<>();
+            for (final int idx : g) {
+                rawSegs.addAll(faces.get(idx).segments());
+            }
+            final List<double[]> segs = new ArrayList<>();
+            mergeCollinear(rawSegs, segs);
             out.add(new Face(out.size(), kind, origin, normal, tris, segs, area));
         }
         return out;
@@ -412,7 +417,8 @@ public final class Features {
             }
         }
         final List<double[]> segments = new ArrayList<>();
-        if (kind == Kind.PLANAR) {
+        {   // ★ 曲面也要描边（用户实测"曲面只有变色没有描边"✗）⇒ 边界边对**所有面**都算 ✓
+            //   是否用它当参考线由上层按 planar 过滤 ✓
             // 直接取边界边的**并集**当"直线边"候选，再按方向合并共线 ✓
             final List<double[]> raw = new ArrayList<>();
             for (final Map.Entry<Long, Integer> e : count.entrySet()) {

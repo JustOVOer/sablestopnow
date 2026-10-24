@@ -303,6 +303,12 @@ public final class SketchHud {
             lastArcDiagLogged = arcDiag;
             com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-arc] {}", arcDiag);
         }
+        // ★ 所有建线路径的统一诊断 ✓（0 长线到底是谁造的 ✓）
+        final String createDiag = com.ovo.sablestopnow.sketch.Sketch.lastCreateDiag;
+        if (!createDiag.equals(lastCreateDiagLogged)) {
+            lastCreateDiagLogged = createDiag;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-create] {}", createDiag);
+        }
         // ★ 贝塞尔诊断 ✓（实测"预览正常、落下变线段"✗）
         final String bezDiag = SketchSession.lastBezierDiag;
         if (!bezDiag.equals(lastBezierDiagLogged)) {
@@ -1014,6 +1020,7 @@ public final class SketchHud {
     private static String lastLineDiagLogged = "";
     private static String lastArcDiagLogged = "";
     private static String lastBezierDiagLogged = "";
+    private static String lastCreateDiagLogged = "";
 
     private static void drawHoverName(final net.minecraft.client.gui.GuiGraphics g,
                                       final Minecraft mc) {

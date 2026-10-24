@@ -138,6 +138,21 @@ public final class Sketch {
     private String name;
     private SketchPlane plane;
     private final List<Double> variables = new ArrayList<>();
+    /**
+     * **最后创建的线段**诊断 ✓（长度 + 来源）—— 给客户端打日志用 ✓。
+     *
+     * <p>为什么要全局：0 长线可能来自**任意**建线路径（画线 / 矩形 / 镜像 / 圆弧手柄 / 贝塞尔手柄）
+     * ⇒ 只在一处打日志会漏 ✓（实测：画线路径已经没有 0 长线，但玩家仍看到 ✓）。
+     */
+    public static String lastCreateDiag = "none";
+
+    private static void noteCreate(final String source, final double ax, final double ay,
+                                   final double bx, final double by) {
+        lastCreateDiag = String.format(java.util.Locale.ROOT,
+                "%s len=%.4f a=(%.3f,%.3f) b=(%.3f,%.3f)", source,
+                Math.hypot(bx - ax, by - ay), ax, ay, bx, by);
+    }
+
     private final List<Entity> entities = new ArrayList<>();
     private final List<Constraint> constraints = new ArrayList<>();
 
@@ -282,6 +297,7 @@ public final class Sketch {
 
     /** 加一条线段，坐标是平面内的 {@code (u, v)}。 */
     public Entity addLine(final double ax, final double ay, final double bx, final double by) {
+        noteCreate("addLine", ax, ay, bx, by);
         return addEntity(EntityKind.LINE, ax, ay, bx, by);
     }
 
@@ -293,6 +309,7 @@ public final class Sketch {
      * （圆心 2 + 半径 1 + 两个角度 2）⇒ **不会过定义** ✓（用户特意问过这点 ✓）
      */
     public Entity addLineVars(final int ax, final int ay, final int bx, final int by) {
+        noteCreate("addLineVars", variable(ax), variable(ay), variable(bx), variable(by));
         final Entity e = new Entity(EntityKind.LINE, new int[] {ax, ay, bx, by});
         entities.add(e);
         return e;

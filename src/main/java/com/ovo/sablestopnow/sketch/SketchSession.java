@@ -1721,8 +1721,11 @@ public final class SketchSession {
         lastLineDiag = String.format(java.util.Locale.ROOT,
                 "a=(%.3f,%.3f) b=(%.3f,%.3f) len=%.4f", ax, ay, bx, by,
                 Math.hypot(bx - ax, by - ay));
-        if (Math.hypot(bx - ax, by - ay) < 1.0e-3) {
-            return; // 点在同一处（或几乎同一处），画不出线段
+        // ★ 再收紧一档（实测仍有"看着是 0"的线）：阈值 1e-3 → **2e-2（2cm）** ✓
+        //   2cm 在方块尺度下本来就看不见 ⇒ 直接拒绝，比留一条"隐形线"好 ✓
+        if (Math.hypot(bx - ax, by - ay) < 2.0e-2) {
+            lastLineDiag = lastLineDiag + " rejected=too-short";
+            return;
         }
         // ★★ 修实测"画短直线时几乎每次都变为长度为 0" ✓✓
         //   真因：**两次点击吸到了同一个关键点**（比如都吸到同一个端点/圆心 ✓）
@@ -1810,8 +1813,10 @@ public final class SketchSession {
         final double x1 = Math.max(a[0], b[0]);
         final double y0 = Math.min(a[1], b[1]);
         final double y1 = Math.max(a[1], b[1]);
-        if (x1 - x0 < 1.0e-9 || y1 - y0 < 1.0e-9) {
-            return; // 退化成一个点/一条线
+        // ★ 同一条纪律：矩形退化（宽或高 < 2cm）⇒ 不建 ✓
+        //   否则会造出两条"看着是 0"的边 ✓（实测"0 长直线"的另一条来源 ✓）
+        if (x1 - x0 < 2.0e-2 || y1 - y0 < 2.0e-2) {
+            return;
         }
 
         final Sketch.Entity bottom = working.addLine(x0, y0, x1, y0);

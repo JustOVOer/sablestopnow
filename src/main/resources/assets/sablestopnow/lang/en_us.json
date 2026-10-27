@@ -723,5 +723,6 @@
   "gui.sablestopnow.text.cancel": "Cancel",
   "gui.sablestopnow.text.delete": "Delete",
   "gui.sablestopnow.text.scale": "Scale",
-  "gui.sablestopnow.text.rotation": "Rot°"
+  "gui.sablestopnow.text.rotation": "Rot°",
+  "model.plane.item": "Plane %1$s"
 }

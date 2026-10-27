@@ -60,6 +60,36 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         record Cut(Extrude.Params params) implements Shape {
         }
 
+        /**
+         * **基准面特征** ✓（item 7）。
+         *
+         * <p>它不是材料，而是一个**可被引用的平面**：中心点（局部）+ 单位法线 + 到源面的距离（可负）✓
+         * 塞进 Shape 是为了**自动**复用持久化 / 网络 / 客户端状态 / 树行 / 顺序 / 依赖校验 ✓
+         *
+         * @param sourceSolid 源实体（依赖它 ⇒ 顺序必须在它之后）
+         * @param sourceFace  源面序号（仅用于依赖与重建）
+         */
+        record Plane(double ox, double oy, double oz,
+                     double nx, double ny, double nz,
+                     double distance, java.util.UUID sourceSolid, int sourceFace)
+                implements Shape {
+
+            public Plane {
+                final double len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+                if (!Double.isFinite(len) || len < 1.0e-9) {
+                    throw new IllegalArgumentException("基准面法线不能是零向量");
+                }
+                nx /= len;
+                ny /= len;
+                nz /= len;
+            }
+
+            /** 法线方向朝外偏 {@code distance} 之后的中心点 ✓ */
+            public double[] offsetOrigin() {
+                return new double[] {ox + nx * distance, oy + ny * distance, oz + nz * distance};
+            }
+        }
+
         record Revolution(Revolve.Params params) implements Shape {
             public Revolution {
                 Objects.requireNonNull(params, "旋转参数不能为空");
@@ -86,6 +116,30 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     public static Solid create(final UUID body, final UUID sketchId, final int index,
                                final Extrude.Params params) {
         return create(body, sketchId, index, params, SolidAppearance.EMPTY);
+    }
+
+    /**
+     * 新建一个**基准面特征** ✓（item 7）。
+     *
+     * <p>它没有草图 ⇒ 用一个**确定性 UUID**（由 body + index 派生）占位，
+     * 这样 `SolidData` / 网络 / 校验这些既有链路都能原样复用 ✓
+     * 依赖校验那边会**跳过面特征的草图检查**（见 {@code FeatureDeps}）✓
+     */
+    public static Solid createPlane(final UUID body, final int index,
+                                    final double ox, final double oy, final double oz,
+                                    final double nx, final double ny, final double nz,
+                                    final double distance, final UUID sourceSolid,
+                                    final int sourceFace) {
+        final UUID placeholderSketch = UUID.nameUUIDFromBytes(
+                ("plane:" + body + ":" + index).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return new Solid(UUID.randomUUID(), body, placeholderSketch, index,
+                new Shape.Plane(ox, oy, oz, nx, ny, nz, distance, sourceSolid, sourceFace),
+                SolidAppearance.EMPTY);
+    }
+
+    /** 是不是基准面特征 ✓ */
+    public boolean isPlane() {
+        return this.shape instanceof Shape.Plane;
     }
 
     /** 新建一个拉伸实体，并指定外观（贴图）。 */
@@ -187,6 +241,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
         final List<SolidCollision.OrientedBox> raw = switch (shape) {
             case Shape.Cut c -> List.of(); // 切割体没有自己的碰撞 ✓
+            case Shape.Plane p -> List.of(); // 基准面不是材料 ✓
             case Shape.Extrusion e -> {
                 // ⚠ **曲面走棱盒（OBB），轴对齐轮廓走扫描线。** 判据是刻意的：
                 //   矩形/L 形的扫描线分解是**精确**的、盒子也最少，没有理由给它加朝向；
@@ -281,6 +336,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             case Shape.Revolution r -> volumeOfRevolution(r.params(), regions, area);
             case Shape.Cut c -> 0.0; // 切割体不提供材料体积 ✓
+            case Shape.Plane p -> 0.0; // 基准面不是材料 ✓
         };
     }
 
@@ -390,6 +446,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Extrusion e -> SolidMesh.build(sketch, e.params());
             case Shape.Revolution r -> Revolve.mesh(sketch, r.params());
             case Shape.Cut c -> EMPTY_MESH; // 切割体不渲染 ✓
+            case Shape.Plane p -> EMPTY_MESH; // 基准面不是材料 ✓
         };
     }
 
@@ -407,6 +464,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Extrusion e -> Extrude.prismEdges(sketch, e.params());
             case Shape.Revolution r -> Revolve.edges(sketch, r.params());
             case Shape.Cut c -> List.of(); // 切割体不画线框 ✓
+            case Shape.Plane p -> List.of(); // 基准面不是材料 ✓
         };
     }
 
@@ -587,6 +645,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         for (final Solid solid : solids) {
             if (solid.shape() instanceof Shape.Cut) {
                 continue; // 切割体本身不产生材料/线框/网格 ✓
+            }
+            if (solid.shape() instanceof Shape.Plane) {
+                continue; // 基准面不是材料 ✓（它由渲染侧单独画一个面片）
             }
             final Sketch sketch = solid.resolve(sketches);
             final List<Vector3d[]> edges = solid.edges(sketch);

@@ -199,6 +199,21 @@ public class SolidData extends SavedData {
                 entry.putDouble("d1", c.params().depth1());
                 entry.putDouble("d2", c.params().depth2());
             }
+              case Solid.Shape.Plane p -> {
+                  // ★ item 7：基准面特征 ✓（中心点 + 法线 + 距离 + 源面）
+                  entry.putString("shape", "plane");
+                  entry.putDouble("ox", p.ox());
+                  entry.putDouble("oy", p.oy());
+                  entry.putDouble("oz", p.oz());
+                  entry.putDouble("nx", p.nx());
+                  entry.putDouble("ny", p.ny());
+                  entry.putDouble("nz", p.nz());
+                  entry.putDouble("dist", p.distance());
+                  if (p.sourceSolid() != null) {
+                      entry.put("srcSolid", NbtUtils.createUUID(p.sourceSolid()));
+                  }
+                  entry.putInt("srcFace", p.sourceFace());
+              }
         }
         // 外观（贴图）：用 SolidAppearance 自己的编码，本层不解释任何规则
         final String[] look = solid.appearance().encode();
@@ -242,6 +257,14 @@ public class SolidData extends SavedData {
                         entry.getDouble("du"), entry.getDouble("dv"),
                         entry.getDouble("angle"), entry.getInt("direction")));
                 // ★ 需求 ⑥：切割体 ✓
+                  // ★ item 7：基准面特征 ✓
+                  case "plane" -> new Solid.Shape.Plane(
+                          entry.getDouble("ox"), entry.getDouble("oy"), entry.getDouble("oz"),
+                          entry.getDouble("nx"), entry.getDouble("ny"), entry.getDouble("nz"),
+                          entry.getDouble("dist"),
+                          entry.contains("srcSolid")
+                                  ? NbtUtils.loadUUID(entry.get("srcSolid")) : null,
+                          entry.getInt("srcFace"));
                 case "cut" -> new Solid.Shape.Cut(new Extrude.Params(
                         Extrude.Mode.valueOf(entry.getString("mode")),
                         entry.getDouble("d1"), entry.getDouble("d2")));

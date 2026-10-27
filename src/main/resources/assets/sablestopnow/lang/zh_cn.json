@@ -723,5 +723,6 @@
   "gui.sablestopnow.text.cancel": "取消",
   "gui.sablestopnow.text.delete": "删除",
   "gui.sablestopnow.text.scale": "缩放",
-  "gui.sablestopnow.text.rotation": "旋转°"
+  "gui.sablestopnow.text.rotation": "旋转°",
+  "model.plane.item": "基准面%1$s"
 }

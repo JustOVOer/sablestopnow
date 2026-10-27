@@ -93,6 +93,8 @@ public class ModSettingsCategoryScreen extends UiScreen {
                     new Section("gui.sablestopnow.section.staff_collision", List.of(
                             "dragged_no_player_collision", "scaled_no_player_collision", "ghost_real")),
                     new Section("gui.sablestopnow.section.staff_keys", List.of("keybinds"))),
+            ModConfigCategory.COLORS, List.of(
+                    new Section("gui.sablestopnow.section.colors", List.of("color_palette"))),
             ModConfigCategory.GOGGLES, List.of(
                     new Section("gui.sablestopnow.section.outline", List.of(
                             "render_sub_level_outlines", "outline_always_visible", "outline_only_contour",

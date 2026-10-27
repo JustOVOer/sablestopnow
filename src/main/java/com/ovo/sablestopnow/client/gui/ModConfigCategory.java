@@ -23,7 +23,20 @@ public enum ModConfigCategory {
 
     ASSEMBLER("assembler", "simulated:physics_assembler"),
     STAFF("staff", "simulated:creative_physics_staff"),
-    GOGGLES("goggles", "create:goggles", "minecraft:spyglass");
+    GOGGLES("goggles", "create:goggles", "minecraft:spyglass"),
+
+    /** **调色** ✓（item 2）：图标用**随机染料** ✅ */
+    COLORS("colors", randomDye());
+
+    /** 随机挑一种染料 id ✓（枚举常量初始化期调用 ⇒ 不依赖别处的静态字段）。 */
+    private static String randomDye() {
+        final String[] dyes = {
+            "white_dye", "orange_dye", "magenta_dye", "light_blue_dye", "yellow_dye",
+            "lime_dye", "pink_dye", "gray_dye", "light_gray_dye", "cyan_dye", "purple_dye",
+            "blue_dye", "brown_dye", "green_dye", "red_dye", "black_dye",
+        };
+        return "minecraft:" + dyes[(int) (Math.random() * dyes.length)];
+    }
 
     /** 任何图标都取不到时的最后兜底（保证界面上一定有东西可看）。 */
     private static final String FALLBACK_ITEM = "minecraft:redstone_torch";
@@ -120,6 +133,13 @@ public enum ModConfigCategory {
                     ConfigOption.bool("ghost_real", config.ghostReal).section("gui.sablestopnow.section.staff_collision"),
                     ConfigOption.action("keybinds", () -> Minecraft.getInstance().setScreen(
                             new KeyBindsScreen(Minecraft.getInstance().screen, Minecraft.getInstance().options))).section("gui.sablestopnow.section.staff_keys"));
+            case COLORS -> List.of(
+                    // 一个入口按钮：打开调色板（HSV 滑条 + 十六进制 + 恢复默认）✓
+                    ConfigOption.action("color_palette", () -> {
+                        final net.minecraft.client.Minecraft mc =
+                                net.minecraft.client.Minecraft.getInstance();
+                        mc.setScreen(new ColorPaletteScreen(mc.screen));
+                    }).section("gui.sablestopnow.section.colors"));
             case GOGGLES -> List.of(
                     ConfigOption.bool("render_sub_level_outlines", config.renderSubLevelOutlines).section("gui.sablestopnow.section.outline"),
                     ConfigOption.bool("outline_always_visible", config.outlineAlwaysVisible).section("gui.sablestopnow.section.outline"),

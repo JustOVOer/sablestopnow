@@ -1110,6 +1110,78 @@ public final class Sketch {
         return count;
     }
 
+    // ================= 文字图元（item 3）=================
+
+    /**
+     * **文字图元** ✓：一个矩形（草图平面内的 u/v/w/h）+ 一段文字 + 外观。
+     *
+     * <p>用户要求："本质是辅助线组成的长方形，文字居于左上角" ✓
+     * 这里不真的建 4 条辅助线实体（那会进选择/约束体系、还要管删除级联 ✗），
+     * 而是用**一个矩形数据**表达同一个形状 —— 渲染与选中行为一致，但不会被轮廓/求解器碰到 ✓
+     *
+     * @param rotationDeg 绕**左上角**的旋转（度）✓
+     * @param scale       文字缩放（0.25~8）✓
+     * @param argb        文字颜色（含 alpha）✓
+     */
+    public record TextNote(double u, double v, double w, double h, String text, int argb,
+                           double scale, double rotationDeg) {
+
+        public TextNote withText(final String t) {
+            return new TextNote(u, v, w, h, t, argb, scale, rotationDeg);
+        }
+
+        public TextNote withLook(final int colour, final double sc, final double rot) {
+            return new TextNote(u, v, w, h, text, colour, sc, rot);
+        }
+
+        /** 点是否落在矩形内（用于双击编辑）（不做旋转判定的宽容版 ✓）。 */
+        public boolean contains(final double pu, final double pv) {
+            final double x0 = Math.min(u, u + w);
+            final double x1 = Math.max(u, u + w);
+            final double y0 = Math.min(v, v + h);
+            final double y1 = Math.max(v, v + h);
+            return pu >= x0 && pu <= x1 && pv >= y0 && pv <= y1;
+        }
+    }
+
+    private final java.util.List<TextNote> texts = new java.util.ArrayList<>();
+
+    /** 全部文字图元 ✓。 */
+    public java.util.List<TextNote> texts() {
+        return java.util.Collections.unmodifiableList(this.texts);
+    }
+
+    /** 加一个文字图元 ✓。 */
+    public void addText(final TextNote note) {
+        if (note != null) {
+            this.texts.add(note);
+        }
+    }
+
+    /** 替换第 index 个文字图元 ✓（编辑后写回）。 */
+    public void replaceText(final int index, final TextNote note) {
+        if (index >= 0 && index < this.texts.size()) {
+            this.texts.set(index, note);
+        }
+    }
+
+    /** 删掉第 index 个 ✓。 */
+    public void removeText(final int index) {
+        if (index >= 0 && index < this.texts.size()) {
+            this.texts.remove(index);
+        }
+    }
+
+    /** 命中测试：返回文字图元下标，没有 -1 ✓（后加的优先）。 */
+    public int textAt(final double u, final double v) {
+        for (int i = this.texts.size() - 1; i >= 0; i--) {
+            if (this.texts.get(i).contains(u, v)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     /**
      * 一份**完整状态快照** ✓（撤销/重做用）。
      *
@@ -1118,7 +1190,8 @@ public final class Sketch {
     public record State(double[] vars, java.util.List<Entity> entities,
                         java.util.List<Constraint> constraints,
                         java.util.List<String> constructionKeys,
-                        java.util.List<String> referenceKeys) {
+                        java.util.List<String> referenceKeys,
+                        java.util.List<TextNote> texts) {
     }
 
     /** 捕获当前状态 ✓（撤销栈用）。 */
@@ -1126,7 +1199,8 @@ public final class Sketch {
         return new State(variables(), new java.util.ArrayList<>(entities),
                 new java.util.ArrayList<>(constraints),
                 new java.util.ArrayList<>(this.construction),
-                new java.util.ArrayList<>(this.reference));
+                new java.util.ArrayList<>(this.reference),
+                new java.util.ArrayList<>(this.texts));
     }
 
     /** 恢复到某个快照 ✓（图元/约束/标记/变量一起回滚）。 */
@@ -1146,6 +1220,8 @@ public final class Sketch {
         this.construction.addAll(state.constructionKeys());
         this.reference.clear();
         this.reference.addAll(state.referenceKeys());
+        this.texts.clear();
+        this.texts.addAll(state.texts());
     }
 
     /** 解之前保存的一份变量（解塌时回滚用）。 */

@@ -166,6 +166,24 @@ public class SketchData extends SavedData {
             entry.put("reference", references);
         }
 
+        // ★ 文字图元（item 3）✓
+        final ListTag texts = new ListTag();
+        for (final Sketch.TextNote note : sketch.texts()) {
+            final CompoundTag nt = new CompoundTag();
+            nt.putDouble("u", note.u());
+            nt.putDouble("v", note.v());
+            nt.putDouble("w", note.w());
+            nt.putDouble("h", note.h());
+            nt.putString("text", note.text());
+            nt.putInt("argb", note.argb());
+            nt.putDouble("scale", note.scale());
+            nt.putDouble("rot", note.rotationDeg());
+            texts.add(nt);
+        }
+        if (!texts.isEmpty()) {
+            entry.put("texts", texts);
+        }
+
         final ListTag constraints = new ListTag();
         for (final Sketch.Constraint c : sketch.constraints()) {
             final CompoundTag ct = new CompoundTag();
@@ -233,6 +251,15 @@ public class SketchData extends SavedData {
             // ★ 辅助线标记 ✓（旧存档没有这个键 ⇒ 空 ✓ 向后兼容 ✓）
             for (final Tag tag : entry.getList("reference", Tag.TAG_STRING)) {
                 sketch.addReferenceKey(tag.getAsString());
+            }
+            // ★ 文字图元（item 3）✓
+            for (final Tag tag : entry.getList("texts", Tag.TAG_COMPOUND)) {
+                final CompoundTag nt = (CompoundTag) tag;
+                sketch.addText(new Sketch.TextNote(
+                        nt.getDouble("u"), nt.getDouble("v"), nt.getDouble("w"), nt.getDouble("h"),
+                        nt.getString("text"), nt.getInt("argb"),
+                        nt.contains("scale") ? nt.getDouble("scale") : 1.0,
+                        nt.contains("rot") ? nt.getDouble("rot") : 0.0));
             }
             final ListTag consList = entry.getList("construction", Tag.TAG_STRING);
             for (int i = 0; i < consList.size(); i++) {

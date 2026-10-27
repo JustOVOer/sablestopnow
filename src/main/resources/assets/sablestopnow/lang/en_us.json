@@ -715,5 +715,13 @@
   "gui.sablestopnow.color.done": "Done",
   "gui.sablestopnow.category.colors.desc": "Colours used by the sketch and feature renderer",
   "gui.sablestopnow.opt.color_palette": "Colour palette",
-  "gui.sablestopnow.opt.color_palette.desc": "Open the palette: 8 colours, HSV sliders, hex input, one-click reset"
+  "gui.sablestopnow.opt.color_palette.desc": "Open the palette: 8 colours, HSV sliders, hex input, one-click reset",
+  "model.sketch.tool.text": "Text",
+  "gui.sablestopnow.text.title": "Edit text",
+  "gui.sablestopnow.text.hint": "Enter = new line · fields below set colour / scale / rotation",
+  "gui.sablestopnow.text.ok": "OK",
+  "gui.sablestopnow.text.cancel": "Cancel",
+  "gui.sablestopnow.text.delete": "Delete",
+  "gui.sablestopnow.text.scale": "Scale",
+  "gui.sablestopnow.text.rotation": "Rot°"
 }

@@ -354,6 +354,7 @@ public final class SketchRenderer {
                 drawSketchGrid(vcGrid, pose, cameraPos, wsub.renderPose(), working);
                 gridBuf.endBatch();
                 drawn += drawSketch(vcq, pose, cameraPos, wsub.renderPose(), working, EDITING_COLOR);
+                drawn += drawSketchTexts(pose, cameraPos, wsub.renderPose(), working);
                 drawn += drawDimensions3D(vcq, pose, cameraPos, wsub.renderPose(), working);
                 // 旋转轴的高亮画在草图之后：它是"参考"，被图元压住就白画了
                 drawn += drawRevolveAxis(vcq, pose, cameraPos, wsub.renderPose(), working);
@@ -1761,6 +1762,40 @@ public final class SketchRenderer {
     }
 
     /** 细条半宽（格）✓ 与背景网格同一档。 */
+    /**
+     * 画草图里的**文字图元** ✓（item 3）。
+     *
+     * <p>做法：把文字放在该矩形**左上角**的平面上，缩放到格、按需旋转，
+     * 然后用 {@code Font.drawInBatch} 画成**面向相机**的公告牌（不随视角消失、可读）✓
+     * 退出草图后照样显示 ⇒ 满足"常驻显示于此" ✓
+     */
+    private static int drawSketchTexts(final PoseStack.Pose pose, final Vec3 cameraPos,
+                                       final Pose3dc renderPose, final Sketch sketch) {
+        final java.util.List<Sketch.TextNote> texts = sketch.texts();
+        if (texts.isEmpty()) {
+            return 0;
+        }
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final MultiBufferSource.BufferSource buf = mc.renderBuffers().bufferSource();
+        int drawn = 0;
+        for (final Sketch.TextNote note : texts) {
+            final Vec3 p = world(cameraPos, renderPose, sketch, note.u(), note.v());
+            final org.joml.Matrix4f m = new org.joml.Matrix4f(pose.pose())
+                    .translate((float) p.x, (float) p.y, (float) p.z)
+                    .rotate((float) Math.toRadians(-note.rotationDeg()), 0, 0, 1)
+                    .scale(0.022f * (float) Math.max(0.25, Math.min(8.0, note.scale())));
+            final String[] lines = (note.text() == null ? "" : note.text()).split("\n", -1);
+            final int colour = (note.argb() & 0xFFFFFF) | 0xFF000000;
+            for (int i = 0; i < lines.length; i++) {
+                mc.font.drawInBatch(lines[i], 0, i * 9, colour, false, m, buf,
+                        net.minecraft.client.gui.Font.DisplayMode.SEE_THROUGH, 0, 0xF000F0);
+            }
+            drawn++;
+        }
+        buf.endBatch();
+        return drawn;
+    }
+
     /** 3D 棒的**半宽**（格）✓ 方向在基准面内、垂直于线段。 */
     private static final double BAR_WIDTH_HALF = 0.025;
 

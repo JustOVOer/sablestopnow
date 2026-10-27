@@ -715,5 +715,13 @@
   "gui.sablestopnow.color.done": "完成",
   "gui.sablestopnow.category.colors.desc": "调整草图与特征渲染用的颜色",
   "gui.sablestopnow.opt.color_palette": "调色板",
-  "gui.sablestopnow.opt.color_palette.desc": "打开调色板：8 项颜色，可调 H/S/V、直接输入十六进制、一键复位"
+  "gui.sablestopnow.opt.color_palette.desc": "打开调色板：8 项颜色，可调 H/S/V、直接输入十六进制、一键复位",
+  "model.sketch.tool.text": "文字",
+  "gui.sablestopnow.text.title": "编辑文字",
+  "gui.sablestopnow.text.hint": "回车换行 · 点击下方输入框可调颜色/缩放/旋转",
+  "gui.sablestopnow.text.ok": "确定",
+  "gui.sablestopnow.text.cancel": "取消",
+  "gui.sablestopnow.text.delete": "删除",
+  "gui.sablestopnow.text.scale": "缩放",
+  "gui.sablestopnow.text.rotation": "旋转°"
 }

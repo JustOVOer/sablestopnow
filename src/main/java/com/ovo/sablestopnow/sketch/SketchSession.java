@@ -47,6 +47,8 @@ public final class SketchSession {
         LINE,
         /** 矩形：两次点击（对角）。 */
         RECTANGLE,
+        /** **文字**（item 3）：两次点击拉出矩形（对角），落下后弹 modify 框 ✓ */
+        TEXT,
         /** 圆：两次点击（圆心 + 半径上一点）。 */
         CIRCLE,
         /**
@@ -270,6 +272,20 @@ public final class SketchSession {
 
     /** 上一次画贝塞尔的**变量与采样点诊断** ✓（给客户端打日志用 ✓）。 */
     public static String lastBezierDiag = "none";
+
+    /** 上一次文字图元的诊断 ✓（item 3）。 */
+    public static String lastTextDiag = "none";
+
+    /** 文字图元创建后的回调 ✓（客户端用它弹出编辑框；草图包不依赖客户端 ✓）。 */
+    public interface TextCreatedHook {
+        void onCreated(int index);
+    }
+
+    private static TextCreatedHook textCreatedHook;
+
+    public static void setTextCreatedHook(final TextCreatedHook hook) {
+        textCreatedHook = hook;
+    }
 
     public Stage stage() {
         return stage;
@@ -1764,6 +1780,32 @@ public final class SketchSession {
                 if (pending.size() == 2) {
                     addConstrainedRectangle(pending.get(0), pending.get(1));
                     pending.clear();
+                    return true;
+                }
+            }
+            case TEXT -> {
+                // ★ item 3：两次点击拉出矩形 ⇒ 生成文字图元（默认文案）并请求打开编辑框 ✓
+                pending.add(new double[] {u, v});
+                if (pending.size() == 2) {
+                    final double[] a = pending.get(0);
+                    final double[] b = pending.get(1);
+                    pending.clear();
+                    final double u0 = Math.min(a[0], b[0]);
+                    final double v0 = Math.min(a[1], b[1]);
+                    final double w = Math.abs(b[0] - a[0]);
+                    final double h = Math.abs(b[1] - a[1]);
+                    if (w < 2.0e-2 || h < 2.0e-2) {
+                        return true; // 太小：当没画 ✓
+                    }
+                    pushUndo();
+                    this.working.addText(new Sketch.TextNote(u0, v0, w, h, "文字",
+                            0xFFFFFFFF, 1.0, 0.0));
+                    final int idx2 = this.working.texts().size() - 1;
+                    lastTextDiag = "created idx=" + idx2 + " rect=(" + u0 + "," + v0 + ","
+                            + w + "," + h + ")";
+                    if (textCreatedHook != null) {
+                        textCreatedHook.onCreated(idx2);
+                    }
                     return true;
                 }
             }

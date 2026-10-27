@@ -78,6 +78,40 @@ public final class SketchClient {
     }
 
     static {
+        // ★ item 3：画完文字图元 ⇒ 弹出多行编辑框（模态）✓
+        com.ovo.sablestopnow.sketch.SketchSession.setTextCreatedHook(index -> {
+            final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+            if (mc == null || MODE.session() == null || MODE.session().working() == null) {
+                return;
+            }
+            final com.ovo.sablestopnow.sketch.Sketch work = MODE.session().working();
+            if (index < 0 || index >= work.texts().size()) {
+                return;
+            }
+            final com.ovo.sablestopnow.sketch.Sketch.TextNote note = work.texts().get(index);
+            mc.setScreen(new com.ovo.sablestopnow.client.gui.TextNoteEditScreen(mc.screen, note,
+                    new com.ovo.sablestopnow.client.gui.TextNoteEditScreen.Sink() {
+                        @Override
+                        public void save(final String text, final int argb, final double scale,
+                                         final double rotationDeg) {
+                            work.replaceText(index, note.withText(text)
+                                    .withLook(argb, scale, rotationDeg));
+                            com.ovo.sablestopnow.network.SketchNetworking.sendSave(work);
+                            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                                    "[sketch-text] saved idx={} lines={} scale={} rot={}",
+                                      index, text.split("\n", -1).length, scale, rotationDeg);
+                        }
+
+                        @Override
+                        public void delete() {
+                            work.removeText(index);
+                            com.ovo.sablestopnow.network.SketchNetworking.sendSave(work);
+                            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                                    "[sketch-text] deleted idx={}", index);
+                        }
+                    }));
+        });
+
         // ★ item 1：旋转面板等轴时，"点草图里的一条线"即设为旋转轴 ✓
         com.ovo.sablestopnow.sketch.SketchMode.setLinePickHook((sketch, line) ->
                 com.ovo.sablestopnow.client.model.ModelUi.revolveAxisPicking()

@@ -39,6 +39,9 @@ public final class ModelTools {
     /** **圆角特征**（item 8）：点一条棱 + 设半径 ⇒ 新建圆角 ✓ */
     public static final String FILLET = "fillet";
 
+    /** item 9: mirror */
+    public static final String MIRROR = "mirror";
+
     /** 上边栏的标签页分组。 */
     public static final String TAB_MATE = "mate";
     public static final String TAB_MODEL = "model";

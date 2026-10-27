@@ -265,6 +265,16 @@ public final class ModelUi {
                             cutMode = false;   // 普通拉伸 ⇒ 关掉切割 ✓
                             startExtrude();
                         }).tooltipKey("model.tool.extrude.hint"));
+                // item 9: mirror entry
+                row.add(shortButton("model.tool.mirror", "model.tool.mirror.short",
+                        () -> {
+                            cutMode = false;
+                            mirrorSources.clear();
+                            mirrorPlaneOrigin = null;
+                            mirrorPlaneNormal = null;
+                            ModelMode.setTool(ModelTools.MIRROR);
+                            refreshLeftPanel();
+                        }).tooltipKey("model.tool.mirror.hint"));
                 // ★ item 8：**圆角**入口 ✓（上边栏）
                 row.add(shortButton("model.tool.fillet", "model.tool.fillet.short",
                         () -> {
@@ -1275,6 +1285,10 @@ public final class ModelUi {
                   }
                   return;
             } else if (item.data instanceof com.ovo.sablestopnow.sketch.Solid solid) {
+                  if (ModelTools.MIRROR.equals(ModelMode.tool())) {
+                      mirrorToggleSource(solid);
+                      return;
+                  }
                 // 点拉伸实体：只把它的结构选中（左栏的拉伸页会把可删的实体列出来）。
                 // 不做"点一下就删"—— 删除是不可逆的，必须走左栏那个明确的按钮。
                 ModelForceUi.select(null);
@@ -1923,6 +1937,111 @@ public final class ModelUi {
     private static java.util.UUID filletSourceSolid;
 
     /** 圆角工具：点到一条棱 ⇒ 记录并弹半径输入框（带黄色预览）✓ */
+    // ================= item 9: mirror =================
+
+    private static final java.util.List<java.util.UUID> mirrorSources = new java.util.ArrayList<>();
+    private static org.joml.Vector3d mirrorPlaneOrigin;
+    private static org.joml.Vector3d mirrorPlaneNormal;
+    private static java.util.UUID mirrorBody;
+
+    /** Mirror tool: first face sets the mirror plane; a second face click with sources creates it. */
+    public static boolean mirrorPickPlane(
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
+        if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE
+                || !hit.face().planar()) {
+            ModelMode.prompt("model.mirror.pick_plane");
+            return false;
+        }
+        if (mirrorPlaneOrigin != null && !mirrorSources.isEmpty()) {
+            return createMirrorFeature();
+        }
+        mirrorPlaneOrigin = new org.joml.Vector3d(hit.localCenter());
+        mirrorPlaneNormal = new org.joml.Vector3d(hit.localNormal()).normalize();
+        mirrorBody = hit.body();
+        updateMirrorPreview();
+        return true;
+    }
+
+    /** Mirror tool: clicking a feature row toggles it as a mirror source. */
+    public static void mirrorToggleSource(final com.ovo.sablestopnow.sketch.Solid solid) {
+        if (solid == null || solid.isPlane() || solid.isFillet() || solid.isMirror()) {
+            ModelMode.prompt("model.mirror.no_sources");
+            return;
+        }
+        if (!mirrorSources.remove(solid.id())) {
+            mirrorSources.add(solid.id());
+        }
+        mirrorBody = solid.body();
+        updateMirrorPreview();
+        refreshLeftPanel();
+    }
+
+    /** Preview: mirrored wireframe of the selected sources, in preview yellow. */
+    private static void updateMirrorPreview() {
+        if (mirrorPlaneOrigin == null || mirrorPlaneNormal == null || mirrorSources.isEmpty()) {
+            com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+            return;
+        }
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        if (level == null) {
+            return;
+        }
+        final double[] o = {mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z};
+        final double[] n = {mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z};
+        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
+                new java.util.ArrayList<>();
+        final var sketches = com.ovo.sablestopnow.sketch.SketchClientState.current(level);
+        for (final com.ovo.sablestopnow.sketch.Solid src
+                : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, mirrorBody)) {
+            if (!mirrorSources.contains(src.id())) {
+                continue;
+            }
+            final com.ovo.sablestopnow.sketch.Sketch sk = src.resolve(sketches);
+            if (sk == null) {
+                continue;
+            }
+            for (final org.joml.Vector3d[] e : src.edges(sk)) {
+                segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
+                        com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[0], o, n),
+                        com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[1], o, n)));
+            }
+        }
+        com.ovo.sablestopnow.client.model.FeaturePreview.set(mirrorBody, mirrorPlaneNormal, segs);
+    }
+
+    /** Creates the mirror feature. */
+    private static boolean createMirrorFeature() {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        if (level == null || mirrorPlaneOrigin == null || mirrorSources.isEmpty()) {
+            ModelMode.prompt("model.mirror.no_sources");
+            return false;
+        }
+        int index = 1;
+        for (final com.ovo.sablestopnow.sketch.Solid s
+                : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, mirrorBody)) {
+            index = Math.max(index, s.index() + 1);
+        }
+        index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(mirrorBody, 0) + 1);
+        final com.ovo.sablestopnow.sketch.Solid mirror =
+                com.ovo.sablestopnow.sketch.Solid.createMirror(mirrorBody, index,
+                        mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z,
+                        mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z,
+                        new java.util.ArrayList<>(mirrorSources));
+        com.ovo.sablestopnow.network.SolidNetworking.sendSave(mirror);
+        LOCAL_SOLID_INDEX.put(mirrorBody, mirror.index());
+        com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+        mirrorSources.clear();
+        mirrorPlaneOrigin = null;
+        mirrorPlaneNormal = null;
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[mirror] created idx={}", mirror.index());
+        lastTreeSignature = null;
+        refreshTreeNow();
+        ModelMode.setTool(ModelTools.NONE);
+        return true;
+    }
+
     public static boolean filletPickEdge(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
         if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.EDGE) {

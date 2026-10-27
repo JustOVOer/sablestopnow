@@ -690,5 +690,12 @@
   "model.tool.cut.short": "Cut",
   "model.tool.cut.hint": "Pick a body and a sketch; the result cuts holes into intersecting solids",
   "model.revolve.empty_profile": "A revolve needs a closed profile: close the sketch loop first",
-  "model.cut.item": "Cut %1$s"
+  "model.cut.item": "Cut %1$s",
+  "model.order.up": "↑ Move up",
+  "model.order.down": "↓ Move down",
+  "model.order.delete": "🗑 Delete",
+  "model.order.rejected": "Cannot reorder: it would break feature dependencies",
+  "model.order.duplicate_index": "Duplicate index",
+  "model.order.cut_before_material": "A cut must come after a filled feature",
+  "model.order.missing_sketch": "Referenced sketch is missing"
 }

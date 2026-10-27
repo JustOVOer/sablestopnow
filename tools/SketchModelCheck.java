@@ -226,6 +226,34 @@ public final class SketchModelCheck {
                 + s.usedVariables().length + "）");
     }
 
+    /** item 4：特征顺序/依赖校验 ✓ */
+    private static void featureOrder() {
+        final java.util.UUID body = java.util.UUID.randomUUID();
+        final java.util.UUID sk = java.util.UUID.randomUUID();
+        final com.ovo.sablestopnow.sketch.Solid a = com.ovo.sablestopnow.sketch.Solid.create(
+                body, sk, 1, com.ovo.sablestopnow.sketch.Extrude.Params.oneSided(1.0));
+        final com.ovo.sablestopnow.sketch.Solid b = com.ovo.sablestopnow.sketch.Solid.create(
+                body, sk, 2, com.ovo.sablestopnow.sketch.Extrude.Params.oneSided(2.0));
+        final com.ovo.sablestopnow.sketch.Solid cut = com.ovo.sablestopnow.sketch.Solid.createCut(
+                body, sk, 3, com.ovo.sablestopnow.sketch.Extrude.Params.oneSided(1.0));
+        final java.util.List<com.ovo.sablestopnow.sketch.Solid> list =
+                java.util.List.of(a, b, cut);
+        check(com.ovo.sablestopnow.sketch.FeatureDeps.validate(list,
+                java.util.List.of(sk)) == null, "order: 正常顺序通过");
+        check(com.ovo.sablestopnow.sketch.FeatureDeps.moved(list, cut.id(), 1,
+                java.util.List.of(sk)) == null, "order: 已在末尾不能下移");
+        final java.util.List<com.ovo.sablestopnow.sketch.Solid> m1 =
+                com.ovo.sablestopnow.sketch.FeatureDeps.moved(list, cut.id(), -1,
+                        java.util.List.of(sk));
+        check(m1 != null, "order: 切割可上移到中间");
+        check(m1 != null && com.ovo.sablestopnow.sketch.FeatureDeps.moved(m1, cut.id(), -1,
+                java.util.List.of(sk)) == null, "order: 切割不能排到材料之前");
+        check(com.ovo.sablestopnow.sketch.FeatureDeps.previousIndex(list, b.id()) == 1,
+                "order: 上一个序号 = 1");
+        check(com.ovo.sablestopnow.sketch.FeatureDeps.validate(list,
+                java.util.List.of()) != null, "order: 草图缺失被发现");
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -266,6 +294,7 @@ public final class SketchModelCheck {
     }
 
     public static void main(final String[] args) throws Exception {
+        featureOrder();
         undoSnapshot();
         revolveEdges();
         referenceNotInDof();

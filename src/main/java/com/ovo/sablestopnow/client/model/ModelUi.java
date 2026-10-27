@@ -1253,12 +1253,39 @@ public final class ModelUi {
                 ModelMode.selectModel(sketch.body());
                 refreshLeftPanel();
                 return;
+              } else if (item.data instanceof com.ovo.sablestopnow.sketch.Solid actSolid
+                      && item.key.startsWith("feat:")) {
+                  final String[] parts = item.key.split(":");
+                  if (parts.length >= 4) {
+                      featureAction(parts[1], actSolid);
+                  }
+                  return;
             } else if (item.data instanceof com.ovo.sablestopnow.sketch.Solid solid) {
                 // 点拉伸实体：只把它的结构选中（左栏的拉伸页会把可删的实体列出来）。
                 // 不做"点一下就删"—— 删除是不可逆的，必须走左栏那个明确的按钮。
                 ModelForceUi.select(null);
                 ModelCouplingUi.clearSelection();
                 MateClientState.setHighlightedMate(null);
+                  // ★ item 6.5：点特征行 ⇒ **进入左侧编辑**（预填参数）✓
+                  if (solid.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Extrusion e) {
+                      ModelMode.setTool(ModelTools.EXTRUDE);
+                      cutMode = false;
+                      revolveMode = false;
+                      extrudeDepth.set(e.params().depth1());
+                        extrudeBackDepth.set(e.params().depth2());
+                        extrudeMode = e.params().mode();
+                      lastLeftSignature = null;
+                      refreshLeftPanel();
+                      return;
+                  }
+                  if (solid.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Revolution r) {
+                      ModelMode.setTool(ModelTools.EXTRUDE);
+                      revolveMode = true;
+                      revolveAngle.set(r.params().angleDeg());
+                      lastLeftSignature = null;
+                      refreshLeftPanel();
+                      return;
+                  }
                 ModelMode.selectModel(solid.body());
                 refreshLeftPanel();
                 return;
@@ -1840,6 +1867,56 @@ public final class ModelUi {
                 segs.size(), cutMode, revolveMode);
     }
 
+    /**
+     * 特征行动作：**↑ 上移 / ↓ 下移 / 删除** ✓（item 4 / 6.5）。
+     *
+     * <p>顺序调整 = 交换序号 + **依赖校验**；违反就拒绝并提示，树保持原样 ✓
+     */
+    private static void featureAction(final String action,
+                                      final com.ovo.sablestopnow.sketch.Solid solid) {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        if (level == null || solid == null) {
+            return;
+        }
+        if ("del".equals(action)) {
+            com.ovo.sablestopnow.network.SolidNetworking.sendRemove(solid.id());
+            com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[feature] delete solid idx={}",
+                    solid.index());
+            lastTreeSignature = null;
+            refreshTreeNow();
+            return;
+        }
+        final int dir = "up".equals(action) ? -1 : 1;
+        final java.util.List<com.ovo.sablestopnow.sketch.Solid> solids =
+                com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, solid.body());
+        final java.util.List<java.util.UUID> sketchIds = new java.util.ArrayList<>();
+        for (final com.ovo.sablestopnow.sketch.Sketch sk
+                : com.ovo.sablestopnow.sketch.SketchClientState.current(level)) {
+            sketchIds.add(sk.id());
+        }
+        final java.util.List<com.ovo.sablestopnow.sketch.Solid> moved =
+                com.ovo.sablestopnow.sketch.FeatureDeps.moved(solids, solid.id(), dir, sketchIds);
+        if (moved == null) {
+            ModelMode.prompt("model.order.rejected");
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[feature] order rejected solid={} dir={}", solid.id(), dir);
+            return;
+        }
+        for (final com.ovo.sablestopnow.sketch.Solid s2 : moved) {
+            for (final com.ovo.sablestopnow.sketch.Solid old : solids) {
+                if (old.id().equals(s2.id()) && old.index() != s2.index()) {
+                    com.ovo.sablestopnow.network.SolidNetworking.sendSave(s2);
+                    com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                            "[feature] reorder {} : {} -> {}", s2.id(), old.index(), s2.index());
+                }
+            }
+        }
+        lastTreeSignature = null;
+        refreshTreeNow();
+    }
+
     private static void createExtrude() {
         final com.ovo.sablestopnow.sketch.Sketch source = currentExtrudeSource();
         if (source == null) {
@@ -2250,6 +2327,22 @@ public final class ModelUi {
             // **贴图入口做在树上**（用户 2026-10 的要求）。
             // 以前它只藏在"拉伸工具"面板里，所以用户根本找不到 ——
             // 特征节点上就该有它自己的编辑入口。
+            // ★ item 4：**顺序调整**（↑/↓）+ 删除（item 6.5）—— 以子行形式出现（树只支持 child 行）
+            final TreeView.TreeItem upRow = new TreeView.TreeItem(
+                    "feat:up:" + bodyId + ":" + solid.id())
+                    .label(Component.translatable("model.order.up"));
+            upRow.data = solid;
+            row.child(upRow);
+            final TreeView.TreeItem downRow = new TreeView.TreeItem(
+                    "feat:down:" + bodyId + ":" + solid.id())
+                    .label(Component.translatable("model.order.down"));
+            downRow.data = solid;
+            row.child(downRow);
+            final TreeView.TreeItem delRow = new TreeView.TreeItem(
+                    "feat:del:" + bodyId + ":" + solid.id())
+                    .label(Component.translatable("model.order.delete"));
+            delRow.data = solid;
+            row.child(delRow);
             final TreeView.TreeItem texRow = new TreeView.TreeItem(
                     "texture:" + bodyId + ":" + solid.id())
                     .label(Component.translatable("model.texture.open"));

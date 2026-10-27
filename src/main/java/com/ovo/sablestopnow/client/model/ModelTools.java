@@ -42,6 +42,9 @@ public final class ModelTools {
     /** item 9: mirror */
     public static final String MIRROR = "mirror";
 
+    /** item 10: pattern */
+    public static final String PATTERN = "pattern";
+
     /** 上边栏的标签页分组。 */
     public static final String TAB_MATE = "mate";
     public static final String TAB_MODEL = "model";

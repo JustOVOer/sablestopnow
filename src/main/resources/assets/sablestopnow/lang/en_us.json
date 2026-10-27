@@ -751,5 +751,18 @@
   "model.mirror.pick_plane": "Pick a plane face first",
   "model.mirror.no_sources": "No source features selected yet (click feature rows)",
   "model.pattern.item": "Pattern %1$s",
-  "model.order.pattern_before_source": "A pattern must come after its sources"
+  "model.order.pattern_before_source": "A pattern must come after its sources",
+  "gui.sablestopnow.pattern.title": "Pattern",
+  "gui.sablestopnow.pattern.dir1": "Direction 1",
+  "gui.sablestopnow.pattern.dir2": "Direction 2",
+  "gui.sablestopnow.pattern.n": "Count",
+  "gui.sablestopnow.pattern.s": "Spacing (signed)",
+  "gui.sablestopnow.pattern.ok": "Create",
+  "gui.sablestopnow.pattern.cancel": "Cancel",
+  "gui.sablestopnow.pattern.value": "Value",
+  "model.tool.pattern": "Pattern",
+  "model.tool.pattern.short": "Pattern",
+  "model.tool.pattern.hint": "Pick 1-3 edges as directions, select features, then click the first edge again",
+  "model.pattern.pick_edge": "Pick an edge as a pattern direction",
+  "model.pattern.no_sources": "No source features selected yet"
 }

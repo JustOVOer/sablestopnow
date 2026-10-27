@@ -751,5 +751,18 @@
   "model.mirror.pick_plane": "请先点一个面作为镜像面",
   "model.mirror.no_sources": "还没有选择要镜像的特征（在右栏点特征行）",
   "model.pattern.item": "阵列%1$s",
-  "model.order.pattern_before_source": "阵列必须排在其源特征之后"
+  "model.order.pattern_before_source": "阵列必须排在其源特征之后",
+  "gui.sablestopnow.pattern.title": "阵列",
+  "gui.sablestopnow.pattern.dir1": "方向 1",
+  "gui.sablestopnow.pattern.dir2": "方向 2",
+  "gui.sablestopnow.pattern.n": "次数",
+  "gui.sablestopnow.pattern.s": "间距（可负）",
+  "gui.sablestopnow.pattern.ok": "创建",
+  "gui.sablestopnow.pattern.cancel": "取消",
+  "gui.sablestopnow.pattern.value": "数值",
+  "model.tool.pattern": "阵列",
+  "model.tool.pattern.short": "阵列",
+  "model.tool.pattern.hint": "点 1-3 条棱定方向，右栏选特征，再点第一条棱设次数/间距",
+  "model.pattern.pick_edge": "请点一条棱作为阵列方向",
+  "model.pattern.no_sources": "尚未选择被阵列的特征（在右栏点特征行）"
 }

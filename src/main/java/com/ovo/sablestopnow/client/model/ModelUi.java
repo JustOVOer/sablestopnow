@@ -265,6 +265,14 @@ public final class ModelUi {
                             cutMode = false;   // 普通拉伸 ⇒ 关掉切割 ✓
                             startExtrude();
                         }).tooltipKey("model.tool.extrude.hint"));
+                // item 10: pattern entry
+                row.add(shortButton("model.tool.pattern", "model.tool.pattern.short",
+                        () -> {
+                            cutMode = false;
+                            com.ovo.sablestopnow.client.model.PatternTool.reset();
+                            ModelMode.setTool(ModelTools.PATTERN);
+                            refreshLeftPanel();
+                        }).tooltipKey("model.tool.pattern.hint"));
                 // item 9: mirror entry
                 row.add(shortButton("model.tool.mirror", "model.tool.mirror.short",
                         () -> {
@@ -1285,6 +1293,11 @@ public final class ModelUi {
                   }
                   return;
             } else if (item.data instanceof com.ovo.sablestopnow.sketch.Solid solid) {
+                  if (ModelTools.PATTERN.equals(ModelMode.tool())) {
+                      com.ovo.sablestopnow.client.model.PatternTool.toggleSource(solid);
+                      refreshLeftPanel();
+                      return;
+                  }
                   if (ModelTools.MIRROR.equals(ModelMode.tool())) {
                       mirrorToggleSource(solid);
                       return;

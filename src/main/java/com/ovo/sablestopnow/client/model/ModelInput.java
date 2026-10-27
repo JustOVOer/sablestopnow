@@ -538,6 +538,17 @@ public final class ModelInput {
             // 生成的，正好把结构整个包在中间；鼠标指向结构时几乎必然先命中某块板。
             // 实测症状就是"只能选到三个基准面，选不到模型上的面"。
             // SolidWorks 也是这个顺序：指到面上高亮面，指到空白处才显示基准面。
+            // item 10: pattern tool - click edges to add directions
+            if (com.ovo.sablestopnow.client.model.ModelTools.PATTERN.equals(ModelMode.tool())) {
+                final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf2 =
+                        com.ovo.sablestopnow.client.model.FeatureHover.get();
+                if (pf2 != null) {
+                    com.ovo.sablestopnow.client.model.PatternTool.pickEdge(pf2);
+                } else {
+                    ModelMode.prompt("model.pattern.pick_edge");
+                }
+                return;
+            }
             // item 9: mirror tool - click a face to set / confirm the mirror plane
             if (com.ovo.sablestopnow.client.model.ModelTools.MIRROR.equals(ModelMode.tool())) {
                 final com.ovo.sablestopnow.client.model.FeatureHover.Hit mf =

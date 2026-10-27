@@ -69,6 +69,30 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
          * @param sourceSolid 源实体（依赖它 ⇒ 顺序必须在它之后）
          * @param sourceFace  源面序号（仅用于依赖与重建）
          */
+        /**
+         * 圆角特征引用的**一条棱** ✓（item 8）：源实体 + 棱的两个端点（局部坐标）。
+         *
+         * <p>端点用来在重建时**核对棱是否还存在**（上游改了参数、棱没了 ⇒ 圆角失效并提示）✓
+         */
+        record EdgeRef(java.util.UUID solidId, double ax, double ay, double az,
+                       double bx, double by, double bz) {
+        }
+
+        /**
+         * **圆角特征** ✓（item 8）：等半径，凸棱；多条棱分别倒角后合并 ✓。
+         *
+         * <p>几何由 {@code FilletGeom} 算成**局部坐标的阶梯盒**，
+         * 在 {@code placeAll} 里当作"本地的切割盒"用 —— 于是碰撞与渲染（CSG）都自动一致 ✓
+         */
+        record Fillet(double radius, java.util.List<EdgeRef> edges) implements Shape {
+            public Fillet {
+                if (!(radius > 0.0) || !Double.isFinite(radius)) {
+                    throw new IllegalArgumentException("圆角半径必须为正");
+                }
+                edges = edges == null ? java.util.List.of() : java.util.List.copyOf(edges);
+            }
+        }
+
         record Plane(double ox, double oy, double oz,
                      double nx, double ny, double nz,
                      double distance, java.util.UUID sourceSolid, int sourceFace)
@@ -135,6 +159,55 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         return new Solid(UUID.randomUUID(), body, placeholderSketch, index,
                 new Shape.Plane(ox, oy, oz, nx, ny, nz, distance, sourceSolid, sourceFace),
                 SolidAppearance.EMPTY);
+    }
+
+    /** 新建一个**圆角特征** ✓（item 8；与基准面一样用确定性占位 sketch id） */
+    public static Solid createFillet(final UUID body, final int index, final double radius,
+                                     final java.util.List<Shape.EdgeRef> edges) {
+        final UUID placeholderSketch = UUID.nameUUIDFromBytes(
+                ("fillet:" + body + ":" + index).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return new Solid(UUID.randomUUID(), body, placeholderSketch, index,
+                new Shape.Fillet(radius, edges), SolidAppearance.EMPTY);
+    }
+
+    /** 是不是圆角特征 ✓ */
+    public boolean isFillet() {
+        return this.shape instanceof Shape.Fillet;
+    }
+
+    /**
+     * 圆角特征要**挖掉**的盒子（**局部坐标**）✓（item 8）。
+     *
+     * <p>对每条棱：相邻两面取"盖面法线（草图平面法线）"与"侧面法线（棱方向 × 盖面法线）"，
+     * 交给 {@link FilletGeom} 算阶梯盒 ✓（凸棱假设；凹棱/斜棱返回空 ⇒ 该棱不生效）
+     */
+    public java.util.List<double[]> filletBoxes(final java.util.Map<UUID, Solid> byId) {
+        final java.util.List<double[]> out = new java.util.ArrayList<>();
+        if (!(this.shape instanceof final Shape.Fillet f) || byId == null) {
+            return out;
+        }
+        for (final Shape.EdgeRef ref : f.edges()) {
+            final Solid src = byId.get(ref.solidId());
+            if (src == null || src.shape instanceof Shape.Plane || src.shape instanceof Shape.Cut) {
+                continue;
+            }
+            // 只用"棱方向"与"草图平面法线"两面 ⇒ 与 FilletGeom 的轴对齐判据配合 ✓
+            final org.joml.Vector3d a = new org.joml.Vector3d(ref.ax(), ref.ay(), ref.az());
+            final org.joml.Vector3d b = new org.joml.Vector3d(ref.bx(), ref.by(), ref.bz());
+            final org.joml.Vector3d dir = new org.joml.Vector3d(b).sub(a);
+            if (dir.length() < 1.0e-6) {
+                continue;
+            }
+            dir.normalize();
+            // 盖面法线：默认沿 +Y（轴对齐棱的常见情形）；侧面法线 = dir × cap
+            final org.joml.Vector3d cap = new org.joml.Vector3d(0, 1, 0);
+            if (Math.abs(dir.dot(cap)) > 0.99) {
+                cap.set(1, 0, 0); // 棱本身竖直 ⇒ 换个参考轴 ✓
+            }
+            final org.joml.Vector3d side = new org.joml.Vector3d(dir).cross(cap).normalize();
+            out.addAll(FilletGeom.boxesFor(a, b, cap, side, f.radius(), true));
+        }
+        return out;
     }
 
     /** 是不是基准面特征 ✓ */
@@ -242,6 +315,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         final List<SolidCollision.OrientedBox> raw = switch (shape) {
             case Shape.Cut c -> List.of(); // 切割体没有自己的碰撞 ✓
             case Shape.Plane p -> List.of(); // 基准面不是材料 ✓
+            case Shape.Fillet f -> List.of(); // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
             case Shape.Extrusion e -> {
                 // ⚠ **曲面走棱盒（OBB），轴对齐轮廓走扫描线。** 判据是刻意的：
                 //   矩形/L 形的扫描线分解是**精确**的、盒子也最少，没有理由给它加朝向；
@@ -337,6 +411,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Revolution r -> volumeOfRevolution(r.params(), regions, area);
             case Shape.Cut c -> 0.0; // 切割体不提供材料体积 ✓
             case Shape.Plane p -> 0.0; // 基准面不是材料 ✓
+            case Shape.Fillet f -> 0.0; // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
         };
     }
 
@@ -447,6 +522,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Revolution r -> Revolve.mesh(sketch, r.params());
             case Shape.Cut c -> EMPTY_MESH; // 切割体不渲染 ✓
             case Shape.Plane p -> EMPTY_MESH; // 基准面不是材料 ✓
+            case Shape.Fillet f -> EMPTY_MESH; // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
         };
     }
 
@@ -465,6 +541,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Revolution r -> Revolve.edges(sketch, r.params());
             case Shape.Cut c -> List.of(); // 切割体不画线框 ✓
             case Shape.Plane p -> List.of(); // 基准面不是材料 ✓
+            case Shape.Fillet f -> List.of(); // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
         };
     }
 
@@ -641,6 +718,21 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     .add(new CutFeat(cs.plane(), cs, cut.params(),
                             Extrude.boxesOf(cs, cut.params())));
         }
+        // ★ item 8：**圆角**要挖掉的盒子（局部坐标，直接可用 ✓ 不需要平面换算）
+        final java.util.Map<UUID, Solid> byId = new java.util.HashMap<>();
+        for (final Solid s2 : solids) {
+            byId.put(s2.id(), s2);
+        }
+        final java.util.Map<UUID, List<double[]>> localCutters = new java.util.HashMap<>();
+        for (final Solid s2 : solids) {
+            if (!(s2.shape() instanceof Shape.Fillet)) {
+                continue;
+            }
+            final List<double[]> boxes2 = s2.filletBoxes(byId);
+            if (!boxes2.isEmpty()) {
+                localCutters.computeIfAbsent(s2.body(), k -> new ArrayList<>()).addAll(boxes2);
+            }
+        }
         final List<Placed> out = new ArrayList<>(solids.size());
         for (final Solid solid : solids) {
             if (solid.shape() instanceof Shape.Cut) {
@@ -648,6 +740,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             if (solid.shape() instanceof Shape.Plane) {
                 continue; // 基准面不是材料 ✓（它由渲染侧单独画一个面片）
+            }
+            if (solid.shape() instanceof Shape.Fillet) {
+                continue; // 圆角特征本身不产生材料（它的作用是"挖盒子"）✓
             }
             final Sketch sketch = solid.resolve(sketches);
             final List<Vector3d[]> edges = solid.edges(sketch);
@@ -672,13 +767,18 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final Vector3d normal = sketch == null ? null : sketch.plane().normal();
             final List<double[]> rawBoxes = solid.boxes(sketch);
             final List<CutFeat> feats = cutters.get(solid.body());
-            final boolean cut = feats != null && !feats.isEmpty();
+            // ★ item 8：有圆角也算"要切" ⇒ 走 CSG（否则只有圆角时渲染不变、碰撞却变了 ✗）
+            final List<double[]> filletCuts0 = localCutters.getOrDefault(solid.body(), List.of());
+            final boolean cut = (feats != null && !feats.isEmpty()) || !filletCuts0.isEmpty();
             final List<double[]> bodyCutters = new ArrayList<>();
             if (cut) {
                 for (final CutFeat f : feats) {
                     bodyCutters.addAll(f.boxes());
                 }
             }
+            // ★ item 8：圆角的局部盒子直接追加（它们已经是**本实体局部坐标** ✓）
+            final List<double[]> filletCuts = filletCuts0;
+            bodyCutters.addAll(filletCuts);
             // ① 碰撞/几何：仍是**盒子相减** ✓（物理只吃盒子，稳且快 ✓）
             final List<double[]> boxes = cut ? subtractBoxes(rawBoxes, bodyCutters) : rawBoxes;
             // ② 渲染：**CSG 真布尔** ✓ —— 外观保持原样（顶点带 normal+uv ⇒ 贴图照常）✓
@@ -717,6 +817,14 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
                 lastCsgDiag = "tris target=" + targetTris + " cutter=" + cutterTris
                         + " resultPolys=" + acc.size();
+                // ★ item 8：圆角盒子也参与 CSG 减法（局部坐标 ⇒ 直接建网格 ✓）
+                if (!filletCuts.isEmpty()) {
+                    final List<Csg.Polygon> fb = CsgMesh.fromMesh(
+                            SolidMesh.fromBoxes(filletCuts), null);
+                    if (!fb.isEmpty()) {
+                        acc = Csg.subtract(acc, fb);
+                    }
+                }
                 if (!acc.isEmpty()) {
                     mesh = CsgMesh.toMesh(acc);
                     // 线框也从结果提（旧轮廓已经不成立 ⇒ 画出来会"线框完整、实体有洞"✗）

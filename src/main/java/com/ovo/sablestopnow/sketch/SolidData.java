@@ -214,6 +214,26 @@ public class SolidData extends SavedData {
                   }
                   entry.putInt("srcFace", p.sourceFace());
               }
+              case Solid.Shape.Fillet f -> {
+                  // ★ item 8：圆角特征 ✓（半径 + 每条棱的源实体与两个端点）
+                  entry.putString("shape", "fillet");
+                  entry.putDouble("radius", f.radius());
+                  final ListTag edgeList = new ListTag();
+                  for (final Solid.Shape.EdgeRef e : f.edges()) {
+                      final CompoundTag et = new CompoundTag();
+                      if (e.solidId() != null) {
+                          et.put("src", NbtUtils.createUUID(e.solidId()));
+                      }
+                      et.putDouble("ax", e.ax());
+                      et.putDouble("ay", e.ay());
+                      et.putDouble("az", e.az());
+                      et.putDouble("bx", e.bx());
+                      et.putDouble("by", e.by());
+                      et.putDouble("bz", e.bz());
+                      edgeList.add(et);
+                  }
+                  entry.put("edges", edgeList);
+              }
         }
         // 外观（贴图）：用 SolidAppearance 自己的编码，本层不解释任何规则
         final String[] look = solid.appearance().encode();
@@ -258,6 +278,18 @@ public class SolidData extends SavedData {
                         entry.getDouble("angle"), entry.getInt("direction")));
                 // ★ 需求 ⑥：切割体 ✓
                   // ★ item 7：基准面特征 ✓
+                  // ★ item 8：圆角特征 ✓
+                  case "fillet" -> {
+                      final java.util.List<Solid.Shape.EdgeRef> refs = new java.util.ArrayList<>();
+                      for (final Tag et : entry.getList("edges", Tag.TAG_COMPOUND)) {
+                          final CompoundTag c = (CompoundTag) et;
+                          refs.add(new Solid.Shape.EdgeRef(
+                                  c.contains("src") ? NbtUtils.loadUUID(c.get("src")) : null,
+                                  c.getDouble("ax"), c.getDouble("ay"), c.getDouble("az"),
+                                  c.getDouble("bx"), c.getDouble("by"), c.getDouble("bz")));
+                      }
+                      yield new Solid.Shape.Fillet(entry.getDouble("radius"), refs);
+                  }
                   case "plane" -> new Solid.Shape.Plane(
                           entry.getDouble("ox"), entry.getDouble("oy"), entry.getDouble("oz"),
                           entry.getDouble("nx"), entry.getDouble("ny"), entry.getDouble("nz"),

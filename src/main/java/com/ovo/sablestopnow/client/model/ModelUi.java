@@ -2454,6 +2454,9 @@ public final class ModelUi {
         for (final com.ovo.sablestopnow.sketch.Solid solid : solids) {
             // ★ 需求：切割在树里要叫**切割** ✓（以前一律显示"拉伸"✗）
             final Component label = solid.shape()
+                    instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Fillet
+                    ? Component.translatable("model.fillet.item", solid.index())
+                    : solid.shape()
                     instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Plane
                     ? Component.translatable("model.plane.item", solid.index())
                     : solid.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut

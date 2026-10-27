@@ -734,5 +734,7 @@
   "gui.sablestopnow.plane.cancel": "取消",
   "model.plane.pick_face": "请先点一个模型上的**平面**（基准面工具）",
   "model.order.plane_before_source": "基准面必须排在其源特征之后",
-  "model.order.plane": "基准面"
+  "model.order.plane": "基准面",
+  "model.fillet.item": "圆角%1$s",
+  "model.order.fillet_before_source": "圆角必须排在其源特征之后"
 }

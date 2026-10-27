@@ -83,7 +83,18 @@ public final class FeatureDeps {
                 }
             }
         }
-        // ④ 切割必须在第一个实心特征之后
+        // ④ 圆角的**源实体**必须排在它之前 ✓（棱来自那个实体）
+        for (final Solid s : solids) {
+            if (s.shape() instanceof final Solid.Shape.Fillet f) {
+                for (final Solid.Shape.EdgeRef e : f.edges()) {
+                    final Integer src = e.solidId() == null ? null : indexOf.get(e.solidId());
+                    if (src != null && src > s.index()) {
+                        return "model.order.fillet_before_source";
+                    }
+                }
+            }
+        }
+        // ⑤ 切割必须在第一个实心特征之后
         final List<Node> ordered = nodes(solids);
         boolean materialSeen = false;
         for (final Node n : ordered) {

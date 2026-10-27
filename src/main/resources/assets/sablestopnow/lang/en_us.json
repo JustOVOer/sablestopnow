@@ -734,5 +734,7 @@
   "gui.sablestopnow.plane.cancel": "Cancel",
   "model.plane.pick_face": "Pick a planar model face first",
   "model.order.plane_before_source": "A datum plane must come after its source feature",
-  "model.order.plane": "Plane"
+  "model.order.plane": "Plane",
+  "model.fillet.item": "Fillet %1$s",
+  "model.order.fillet_before_source": "A fillet must come after its source feature"
 }

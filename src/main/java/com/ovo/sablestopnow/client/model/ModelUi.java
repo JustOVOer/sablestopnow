@@ -265,6 +265,13 @@ public final class ModelUi {
                             cutMode = false;   // 普通拉伸 ⇒ 关掉切割 ✓
                             startExtrude();
                         }).tooltipKey("model.tool.extrude.hint"));
+                // ★ item 8：**圆角**入口 ✓（上边栏）
+                row.add(shortButton("model.tool.fillet", "model.tool.fillet.short",
+                        () -> {
+                            cutMode = false;
+                            ModelMode.setTool(ModelTools.FILLET);
+                            refreshLeftPanel();
+                        }).tooltipKey("model.tool.fillet.hint"));
                 // ★ item 7：**新建基准面**入口 ✓（上边栏）
                 row.add(shortButton("model.tool.plane", "model.tool.plane.short",
                         () -> {
@@ -1908,6 +1915,115 @@ public final class ModelUi {
         } catch (final IllegalArgumentException e) {
             com.ovo.sablestopnow.client.model.FeatureHighlight.clear();
         }
+    }
+
+    /** 圆角工具：当前拾取到的棱（局部端点 + 源实体）✓ */
+    private static org.joml.Vector3d filletEdgeA;
+    private static org.joml.Vector3d filletEdgeB;
+    private static java.util.UUID filletSourceSolid;
+
+    /** 圆角工具：点到一条棱 ⇒ 记录并弹半径输入框（带黄色预览）✓ */
+    public static boolean filletPickEdge(
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
+        if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.EDGE) {
+            ModelMode.prompt("model.fillet.pick_edge");
+            return false;
+        }
+        final int idx = hit.index();
+        if (idx < 0 || idx >= hit.face().segments().size()) {
+            ModelMode.prompt("model.fillet.pick_edge");
+            return false;
+        }
+        final double[] seg = hit.face().segments().get(idx);
+        filletEdgeA = new org.joml.Vector3d(seg[0], seg[1], seg[2]);
+        filletEdgeB = new org.joml.Vector3d(seg[3], seg[4], seg[5]);
+        filletSourceSolid = hit.body();
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        mc.setScreen(new com.ovo.sablestopnow.client.gui.PlaneCreateScreen(mc.screen, 0.25,
+                new com.ovo.sablestopnow.client.gui.PlaneCreateScreen.Sink() {
+                    @Override
+                    public void preview(final double radius) {
+                        updateFilletPreview(radius);
+                    }
+
+                    @Override
+                    public void create(final double radius) {
+                        createFilletFeature(radius);
+                    }
+
+                    @Override
+                    public void cancel() {
+                        com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+                    }
+                }, "gui.sablestopnow.fillet.title", "gui.sablestopnow.fillet.radius"));
+        updateFilletPreview(0.25);
+        return true;
+    }
+
+    /** 预览：沿棱画一条"圆角弧"的折线（阶梯盒的包络）✓ */
+    private static void updateFilletPreview(final double radius) {
+        if (filletEdgeA == null || filletEdgeB == null || filletSourceSolid == null) {
+            return;
+        }
+        final org.joml.Vector3d dir = new org.joml.Vector3d(filletEdgeB).sub(filletEdgeA);
+        if (dir.length() < 1.0e-6) {
+            return;
+        }
+        dir.normalize();
+        org.joml.Vector3d cap = new org.joml.Vector3d(0, 1, 0);
+        if (Math.abs(dir.dot(cap)) > 0.99) {
+            cap.set(1, 0, 0);
+        }
+        final org.joml.Vector3d side = new org.joml.Vector3d(dir).cross(cap).normalize();
+        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
+                new java.util.ArrayList<>();
+        final int n = 8;
+        org.joml.Vector3d prev = null;
+        for (int i = 0; i <= n; i++) {
+            final double t = (double) i / n;
+            // 四分之一圆：从 cap 方向转到 side 方向
+            final double ang = Math.PI * 0.5 * t;
+            final org.joml.Vector3d p = new org.joml.Vector3d(filletEdgeA)
+                    .fma(radius, cap).fma(radius * Math.sin(ang) - radius, side)
+                    .fma(-radius * Math.cos(ang) + radius, cap);
+            if (prev != null) {
+                segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
+                        new org.joml.Vector3d(prev), new org.joml.Vector3d(p)));
+            }
+            prev = p;
+        }
+        com.ovo.sablestopnow.client.model.FeaturePreview.set(filletSourceSolid, side, segs);
+    }
+
+    /** 真正创建圆角特征 ✓ */
+    private static void createFilletFeature(final double radius) {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        if (level == null || filletEdgeA == null || filletEdgeB == null
+                || filletSourceSolid == null) {
+            return;
+        }
+        int index = 1;
+        for (final com.ovo.sablestopnow.sketch.Solid s
+                : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, filletSourceSolid)) {
+            index = Math.max(index, s.index() + 1);
+        }
+        index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(filletSourceSolid, 0) + 1);
+        final com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef ref =
+                new com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef(filletSourceSolid,
+                        filletEdgeA.x, filletEdgeA.y, filletEdgeA.z,
+                        filletEdgeB.x, filletEdgeB.y, filletEdgeB.z);
+        final com.ovo.sablestopnow.sketch.Solid fillet =
+                com.ovo.sablestopnow.sketch.Solid.createFillet(filletSourceSolid, index, radius,
+                        java.util.List.of(ref));
+        com.ovo.sablestopnow.network.SolidNetworking.sendSave(fillet);
+        LOCAL_SOLID_INDEX.put(filletSourceSolid, fillet.index());
+        com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[fillet] created idx={} radius={}",
+                fillet.index(), radius);
+        lastTreeSignature = null;
+        refreshTreeNow();
+        ModelMode.setTool(ModelTools.NONE);
     }
 
     /** 基准面工具当前拾取到的面：中心（局部）+ 单位法线 ✓ */

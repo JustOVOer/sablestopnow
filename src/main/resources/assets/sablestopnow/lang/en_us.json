@@ -736,5 +736,11 @@
   "model.order.plane_before_source": "A datum plane must come after its source feature",
   "model.order.plane": "Plane",
   "model.fillet.item": "Fillet %1$s",
-  "model.order.fillet_before_source": "A fillet must come after its source feature"
+  "model.order.fillet_before_source": "A fillet must come after its source feature",
+  "model.tool.fillet": "Fillet",
+  "model.tool.fillet.short": "Fillet",
+  "model.tool.fillet.hint": "Click an edge, set the radius, then create an equal-radius fillet",
+  "gui.sablestopnow.fillet.title": "New fillet",
+  "gui.sablestopnow.fillet.radius": "Radius",
+  "model.fillet.pick_edge": "Pick an edge first (axis-aligned convex edges only, v1)"
 }

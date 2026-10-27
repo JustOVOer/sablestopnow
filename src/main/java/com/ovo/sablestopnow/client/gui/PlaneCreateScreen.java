@@ -29,11 +29,23 @@ public final class PlaneCreateScreen extends Screen {
     private EditBox field;
     private double distance;
 
+    /** 标题/标签/按钮用的语言键（基准面与圆角共用同一个输入框 ✓） */
+    private final String titleKey;
+    private final String labelKey;
+
     public PlaneCreateScreen(final Screen parent, final double initial, final Sink sink) {
-        super(Component.translatable("gui.sablestopnow.plane.title"));
+        this(parent, initial, sink, "gui.sablestopnow.plane.title",
+                "gui.sablestopnow.plane.distance");
+    }
+
+    public PlaneCreateScreen(final Screen parent, final double initial, final Sink sink,
+                             final String titleKey, final String labelKey) {
+        super(Component.translatable(titleKey));
         this.parent = parent;
         this.sink = sink;
         this.distance = initial;
+        this.titleKey = titleKey;
+        this.labelKey = labelKey;
     }
 
     @Override
@@ -41,7 +53,8 @@ public final class PlaneCreateScreen extends Screen {
         final int cx = this.width / 2;
         final int y = this.height / 2 - 10;
         field = new EditBox(this.font, cx - 60, y, 120, 18,
-                Component.translatable("gui.sablestopnow.plane.distance"));
+                Component.translatable(labelKey == null ? "gui.sablestopnow.plane.distance"
+                        : labelKey));
         field.setMaxLength(8);
         field.setValue(String.format(java.util.Locale.ROOT, "%.2f", distance));
         field.setResponder(text -> {
@@ -71,7 +84,7 @@ public final class PlaneCreateScreen extends Screen {
     public void render(final GuiGraphics g, final int mouseX, final int mouseY, final float partial) {
         this.renderBackground(g, mouseX, mouseY, partial);
         g.drawCenteredString(this.font, this.title, this.width / 2, this.height / 2 - 34, 0xFFFFFF);
-        g.drawString(this.font, Component.translatable("gui.sablestopnow.plane.distance"),
+        g.drawString(this.font, Component.translatable(labelKey),
                 this.width / 2 - 60, this.height / 2 - 22, 0xA8B8C8, false);
         super.render(g, mouseX, mouseY, partial);
     }

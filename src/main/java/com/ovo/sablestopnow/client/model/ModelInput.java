@@ -538,6 +538,17 @@ public final class ModelInput {
             // 生成的，正好把结构整个包在中间；鼠标指向结构时几乎必然先命中某块板。
             // 实测症状就是"只能选到三个基准面，选不到模型上的面"。
             // SolidWorks 也是这个顺序：指到面上高亮面，指到空白处才显示基准面。
+            // ★ item 8：**圆角工具**下点棱 ⇒ 记录棱并弹"半径"输入框 ✓
+            if (com.ovo.sablestopnow.client.model.ModelTools.FILLET.equals(ModelMode.tool())) {
+                final com.ovo.sablestopnow.client.model.FeatureHover.Hit hf =
+                        com.ovo.sablestopnow.client.model.FeatureHover.get();
+                if (hf != null) {
+                    com.ovo.sablestopnow.client.model.ModelUi.filletPickEdge(hf);
+                } else {
+                    ModelMode.prompt("model.fillet.pick_edge");
+                }
+                return;
+            }
             // ★ item 7：**基准面工具**下点面 ⇒ 记录面并弹"距离"输入框 ✓
             if (com.ovo.sablestopnow.client.model.ModelTools.PLANE.equals(ModelMode.tool())) {
                 final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf =

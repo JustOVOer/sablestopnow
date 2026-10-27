@@ -736,5 +736,11 @@
   "model.order.plane_before_source": "基准面必须排在其源特征之后",
   "model.order.plane": "基准面",
   "model.fillet.item": "圆角%1$s",
-  "model.order.fillet_before_source": "圆角必须排在其源特征之后"
+  "model.order.fillet_before_source": "圆角必须排在其源特征之后",
+  "model.tool.fillet": "圆角",
+  "model.tool.fillet.short": "圆角",
+  "model.tool.fillet.hint": "点一条棱、设半径后创建圆角（等半径；凸棱；轴对齐棱）",
+  "gui.sablestopnow.fillet.title": "新建圆角",
+  "gui.sablestopnow.fillet.radius": "半径",
+  "model.fillet.pick_edge": "请先点一条…棱（圆角工具，第一版只支持轴对齐凸棱）"
 }

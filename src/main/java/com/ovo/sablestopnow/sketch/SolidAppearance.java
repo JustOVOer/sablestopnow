@@ -18,7 +18,13 @@ import java.util.Objects;
  *
  * <p>⚠ 只依赖 JOML 之外的 JDK，可用 {@code tools/SketchModelCheck.java} 验证。
  */
-public record SolidAppearance(@Nullable String blockId, double blocksPerTile) {
+public record SolidAppearance(@Nullable String blockId, double blocksPerTile,
+                              boolean connected) {
+
+    /** 兼容老代码的两参构造 ✓（connected 默认 false） */
+    public SolidAppearance(final String blockId, final double blocksPerTile) {
+        this(blockId, blocksPerTile, false);
+    }
 
     /** 默认比例：一个方块铺一次，和原版方块一致。 */
     public static final double DEFAULT_BLOCKS_PER_TILE = 1.0;
@@ -77,7 +83,8 @@ public record SolidAppearance(@Nullable String blockId, double blocksPerTile) {
      * @return {@code {blockId 或 "", blocksPerTile}}
      */
     public String[] encode() {
-        return new String[] {blockId == null ? "" : blockId, Double.toString(blocksPerTile)};
+        return new String[] {blockId == null ? "" : blockId, Double.toString(blocksPerTile),
+                Boolean.toString(connected)};
     }
 
     /**
@@ -85,8 +92,16 @@ public record SolidAppearance(@Nullable String blockId, double blocksPerTile) {
      *
      * <p>存档是要长期活着的：一条坏记录不该让整个模型消失（和 {@code SolidData} 同一原则）。
      */
+    /** 兼容老调用（没有 connected 段）✓ */
     public static SolidAppearance decode(@Nullable final String blockId,
                                          @Nullable final String blocksPerTile) {
+        return decode(blockId, blocksPerTile, null);
+    }
+
+    /** item 11：connected = 连接纹理开关 ✓（缺失/坏值 ⇒ false） */
+    public static SolidAppearance decode(@Nullable final String blockId,
+                                         @Nullable final String blocksPerTile,
+                                         @Nullable final String connected) {
         double scale = DEFAULT_BLOCKS_PER_TILE;
         if (blocksPerTile != null && !blocksPerTile.isBlank()) {
             try {

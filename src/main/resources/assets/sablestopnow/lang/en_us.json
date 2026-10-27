@@ -749,5 +749,7 @@
   "model.tool.mirror.short": "Mirror",
   "model.tool.mirror.hint": "Pick a plane face, then select features in the tree",
   "model.mirror.pick_plane": "Pick a plane face first",
-  "model.mirror.no_sources": "No source features selected yet (click feature rows)"
+  "model.mirror.no_sources": "No source features selected yet (click feature rows)",
+  "model.pattern.item": "Pattern %1$s",
+  "model.order.pattern_before_source": "A pattern must come after its sources"
 }

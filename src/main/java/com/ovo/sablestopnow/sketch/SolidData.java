@@ -251,6 +251,28 @@ public class SolidData extends SavedData {
                   }
                   entry.put("mirrorSources", srcList);
               }
+              case Solid.Shape.Pattern pt -> {
+                  // item 10: pattern = up to 3 directions (dir + count + spacing) + sources
+                  entry.putString("shape", "pattern");
+                  final ListTag dirList = new ListTag();
+                  for (final Solid.Shape.Dir dd : pt.dirs()) {
+                      final CompoundTag dt = new CompoundTag();
+                      dt.putDouble("dx", dd.dx());
+                      dt.putDouble("dy", dd.dy());
+                      dt.putDouble("dz", dd.dz());
+                      dt.putInt("count", dd.count());
+                      dt.putDouble("spacing", dd.spacing());
+                      dirList.add(dt);
+                  }
+                  entry.put("patternDirs", dirList);
+                  final ListTag psrc = new ListTag();
+                  for (final java.util.UUID id2 : pt.sources()) {
+                      if (id2 != null) {
+                          psrc.add(net.minecraft.nbt.NbtUtils.createUUID(id2));
+                      }
+                  }
+                  entry.put("patternSources", psrc);
+              }
         }
         // 外观（贴图）：用 SolidAppearance 自己的编码，本层不解释任何规则
         final String[] look = solid.appearance().encode();
@@ -297,6 +319,23 @@ public class SolidData extends SavedData {
                   // ★ item 7：基准面特征 ✓
                   // ★ item 8：圆角特征 ✓
                   // ★ item 9：镜像特征 ✓
+                  // item 10: pattern
+                  case "pattern" -> {
+                      final java.util.List<Solid.Shape.Dir> dirs2 = new java.util.ArrayList<>();
+                      for (final Tag dt : entry.getList("patternDirs", Tag.TAG_COMPOUND)) {
+                          final CompoundTag c = (CompoundTag) dt;
+                          dirs2.add(new Solid.Shape.Dir(c.getDouble("dx"), c.getDouble("dy"),
+                                  c.getDouble("dz"), c.getInt("count"), c.getDouble("spacing")));
+                      }
+                      final java.util.List<java.util.UUID> psrc = new java.util.ArrayList<>();
+                      for (final Tag t2 : entry.getList("patternSources", Tag.TAG_INT_ARRAY)) {
+                          final java.util.UUID u2 = net.minecraft.nbt.NbtUtils.loadUUID(t2);
+                          if (u2 != null) {
+                              psrc.add(u2);
+                          }
+                      }
+                      yield new Solid.Shape.Pattern(dirs2, psrc);
+                  }
                   case "mirror" -> {
                       final java.util.List<java.util.UUID> srcs = new java.util.ArrayList<>();
                       for (final Tag idTag : entry.getList("mirrorSources", Tag.TAG_INT_ARRAY)) {

@@ -105,7 +105,18 @@ public final class FeatureDeps {
                 }
             }
         }
-        // ⑥ 切割必须在第一个实心特征之后
+        // ⑥ 阵列的源特征必须排在它之前 ✓
+        for (final Solid s : solids) {
+            if (s.shape() instanceof final Solid.Shape.Pattern pt) {
+                for (final java.util.UUID src : pt.sources()) {
+                    final Integer si = indexOf.get(src);
+                    if (si != null && si > s.index()) {
+                        return "model.order.pattern_before_source";
+                    }
+                }
+            }
+        }
+        // ⑦ 切割必须在第一个实心特征之后
         final List<Node> ordered = nodes(solids);
         boolean materialSeen = false;
         for (final Node n : ordered) {

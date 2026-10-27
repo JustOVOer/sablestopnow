@@ -749,5 +749,7 @@
   "model.tool.mirror.short": "镜像",
   "model.tool.mirror.hint": "先点一个面作为镜像面，再在右栏选择要镜像的特征",
   "model.mirror.pick_plane": "请先点一个面作为镜像面",
-  "model.mirror.no_sources": "还没有选择要镜像的特征（在右栏点特征行）"
+  "model.mirror.no_sources": "还没有选择要镜像的特征（在右栏点特征行）",
+  "model.pattern.item": "阵列%1$s",
+  "model.order.pattern_before_source": "阵列必须排在其源特征之后"
 }

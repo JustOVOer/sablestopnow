@@ -1157,9 +1157,9 @@ public final class SketchHud {
         }
         // 界线 = 两条线**自身**（延伸出弧外 10px ✓ 与 SolirdWorks 一致 ✓）
         crispLine(g, ox, oy,
-                ox + Math.cos(a1) * (r + 10.0), oy + Math.sin(a1) * (r + 10.0), 1.0f, argb);
+                ox + Math.cos(a1) * (r + 10.0), oy + Math.sin(a1) * (r + 10.0), 1.0f, argb & 0x00FFFFFF);
         crispLine(g, ox, oy,
-                ox + Math.cos(a2) * (r + 10.0), oy + Math.sin(a2) * (r + 10.0), 1.0f, argb);
+                ox + Math.cos(a2) * (r + 10.0), oy + Math.sin(a2) * (r + 10.0), 1.0f, argb & 0x00FFFFFF);
         // 弧线：折线逼近（24 段 ✓ 看不出是折线 ✓）
         final int steps = 24;
         double px = ox + Math.cos(a1) * r;
@@ -1168,7 +1168,7 @@ public final class SketchHud {
             final double a = a1 + sweep * i / steps;
             final double nx = ox + Math.cos(a) * r;
             final double ny = oy + Math.sin(a) * r;
-            crispLine(g, px, py, nx, ny, 1.0f, argb);
+            crispLine(g, px, py, nx, ny, 1.0f, argb & 0x00FFFFFF);
             px = nx;
             py = ny;
         }
@@ -1454,7 +1454,7 @@ public final class SketchHud {
         final double over = 6.0;   // 超出尺寸线 ✓
         crispLine(g,
                 gx + ux * gap, gy + uy * gap,
-                dx2 + ux * over, dy2 + uy * over, 1.0f, argb);
+                dx2 + ux * over, dy2 + uy * over, 1.0f, argb & 0x00FFFFFF);
     }
 
     private static void dimArrow(final net.minecraft.client.gui.GuiGraphics g,

@@ -1421,7 +1421,9 @@ public final class SketchRenderer {
         final StringBuilder diag = new StringBuilder("dims=" + dims.size());
         for (final var d : dims) {
             if (d.labelKey() != null && d.labelKey().contains("angle")) {
-                continue; // 角度：保持 HUD 弧线 ✓
+                // ★ 角度尺寸也改 3D：平面内折线弧 + 两端切向箭头 ✓
+                drawn += angleDim3D(vcq, pose, cameraPos, renderPose, sketch, d, white);
+                continue;
             }
             final double[] ends = com.ovo.sablestopnow.sketch.SketchMeasure.endpointsOf(sketch, d);
             diag.append(' ').append(d.labelKey() == null ? "?" : d.labelKey())
@@ -1467,8 +1469,14 @@ public final class SketchRenderer {
             ext3(vcq, pose, cameraPos, renderPose, sketch, u2, v2, a2, b2, white);
             drawn += 2;
             // 箭头（两端各两条短线，±25°）✓
-            drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2, white);
-            drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a2, b2, a1, b1, white);
+            // ★ 半径/直径的箭头规范化：半径**只在圆周端**画箭头；直径两端都画 ✓
+            //   （用户："半径/直径的尺寸线要过圆心、只在圆周端有箭头"✓）
+            if (lk.contains("radius")) {
+                drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a2, b2, a1, b1, white);
+            } else {
+                drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2, white);
+                drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a2, b2, a1, b1, white);
+            }
         }
         final String diagText = diag.toString();
         if (!diagText.equals(lastDim3dDiag)) {
@@ -1481,6 +1489,111 @@ public final class SketchRenderer {
     private static String lastDim3dDiag = "";
 
     private static String lastQuadDiag = "";
+
+    /** 角度尺寸的 3D 弧（半径 0.8 格、16 段折线 + 两端切向箭头）✓ */
+    private static int angleDim3D(final VertexConsumer vcq, final PoseStack.Pose pose,
+                                  final Vec3 cameraPos, final Pose3dc renderPose,
+                                  final Sketch sketch,
+                                  final com.ovo.sablestopnow.sketch.SketchMeasure.Dimension d,
+                                  final float[] white) {
+        final java.util.List<com.ovo.sablestopnow.sketch.Sketch.Constraint> cs = sketch.constraints();
+        final int ci = d.constraintIndex();
+        if (ci < 0 || ci >= cs.size()) {
+            return 0;
+        }
+        final int[] v = cs.get(ci).operands();
+        if (v.length < 8) {
+            return 0;
+        }
+        final double ax0 = sketch.variable(v[0]);
+        final double ay0 = sketch.variable(v[1]);
+        final double ax1 = sketch.variable(v[2]);
+        final double ay1 = sketch.variable(v[3]);
+        final double bx0 = sketch.variable(v[4]);
+        final double by0 = sketch.variable(v[5]);
+        final double bx1 = sketch.variable(v[6]);
+        final double by1 = sketch.variable(v[7]);
+        final double[] ip = intersectUv(ax0, ay0, ax1, ay1, bx0, by0, bx1, by1);
+        if (ip == null) {
+            return 0;
+        }
+        // 每条线取"离交点较远"的那一端定方向（这样弧落在两条线张开的一侧 ✓）
+        final double[] da = farEnd(ip[0], ip[1], ax0, ay0, ax1, ay1);
+        final double[] db = farEnd(ip[0], ip[1], bx0, by0, bx1, by1);
+        if (da == null || db == null) {
+            return 0;
+        }
+        final double a0 = Math.atan2(da[1], da[0]);
+        final double a1 = Math.atan2(db[1], db[0]);
+        double sweep = a1 - a0;
+        while (sweep > Math.PI) {
+            sweep -= 2 * Math.PI;
+        }
+        while (sweep < -Math.PI) {
+            sweep += 2 * Math.PI;
+        }
+        final double r = 0.8;
+        final int steps = 16;
+        int drawn = 0;
+        double pu = ip[0] + Math.cos(a0) * r;
+        double pv = ip[1] + Math.sin(a0) * r;
+        for (int k = 1; k <= steps; k++) {
+            final double ang = a0 + sweep * k / steps;
+            final double cu = ip[0] + Math.cos(ang) * r;
+            final double cv = ip[1] + Math.sin(ang) * r;
+            seg3(vcq, pose, cameraPos, renderPose, sketch, pu, pv, cu, cv, white);
+            drawn++;
+            pu = cu;
+            pv = cv;
+        }
+        // 两端切向箭头（沿弧的切线方向）✓
+        final double endA = a0;
+        final double endB = a0 + sweep;
+        final double sign = sweep >= 0 ? 1.0 : -1.0;
+        final double tAx = -Math.sin(endA) * sign;
+        final double tAy = Math.cos(endA) * sign;
+        final double tBx = -Math.sin(endB) * sign;
+        final double tBy = Math.cos(endB) * sign;
+        final double tipAu = ip[0] + Math.cos(endA) * r;
+        final double tipAv = ip[1] + Math.sin(endA) * r;
+        final double tipBu = ip[0] + Math.cos(endB) * r;
+        final double tipBv = ip[1] + Math.sin(endB) * r;
+        drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, tipAu, tipAv,
+                tipAu - tAx, tipAv - tAy, white);
+        drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, tipBu, tipBv,
+                tipBu - tBx, tipBv - tBy, white);
+        return drawn;
+    }
+
+    /** 两线段交点（平面 uv）✓，平行返回 null */
+    private static double[] intersectUv(final double ax0, final double ay0, final double ax1,
+                                        final double ay1, final double bx0, final double by0,
+                                        final double bx1, final double by1) {
+        final double d1x = ax1 - ax0;
+        final double d1y = ay1 - ay0;
+        final double d2x = bx1 - bx0;
+        final double d2y = by1 - by0;
+        final double den = d1x * d2y - d1y * d2x;
+        if (Math.abs(den) < 1.0e-9) {
+            return null;
+        }
+        final double t = ((bx0 - ax0) * d2y - (by0 - ay0) * d2x) / den;
+        return new double[] {ax0 + d1x * t, ay0 + d1y * t};
+    }
+
+    /** 取"离交点更远"的那一端的方向（单位向量）✓ */
+    private static double[] farEnd(final double ix, final double iy, final double x0,
+                                   final double y0, final double x1, final double y1) {
+        final double d0 = Math.hypot(x0 - ix, y0 - iy);
+        final double d1 = Math.hypot(x1 - ix, y1 - iy);
+        final double x = d0 >= d1 ? x0 : x1;
+        final double y = d0 >= d1 ? y0 : y1;
+        final double len = Math.hypot(x - ix, y - iy);
+        if (len < 1.0e-9) {
+            return null;
+        }
+        return new double[] {(x - ix) / len, (y - iy) / len};
+    }
 
     /** 平面里的一条线段 ⇒ 世界细条 ✓。 */
     private static void seg3(final VertexConsumer vcq, final PoseStack.Pose pose,
@@ -1564,9 +1677,11 @@ public final class SketchRenderer {
     }
 
     /** 细条半宽（格）✓ 与背景网格同一档。 */
-    // ★ 用户反馈"线条非常粗糙、像像素线"⇒ 细条太窄（0.02 格在远处≈1px，严重走样）✗
-    //   调成网格的 **2.5 倍**（0.05 格 ≈ 4~6px）⇒ 抗锯齿明显改善、和网格同一套几何但更"实"✓
-    private static final double QUAD_LINE_HALF = 0.05;
+    /** 3D 棒的**半宽**（格）✓ 方向在基准面内、垂直于线段。 */
+    private static final double BAR_WIDTH_HALF = 0.025;
+
+    /** 3D 棒的**半厚**（格）✓ 沿基准面法线 ⇒ 侧看也有厚度，不是一张纸。 */
+    private static final double BAR_THICK_HALF = 0.01;
 
     /**
      * 用**四边形细条**画一条线 ✓ —— 尺寸/预览线要"和背景网格一样的呈现方式"。
@@ -1576,33 +1691,57 @@ public final class SketchRenderer {
      */
     private static void quadLine(final VertexConsumer vc, final PoseStack.Pose pose,
                                  final Vec3 a, final Vec3 b, final float[] colour) {
+        // ★★ 3D **立体棒**（有长、宽、厚）✓
+        //   宽 W = 0.05 格：方向 = normalize(dir × 平面法线) ⇒ **永远躺在基准面内** ✓
+        //     （以前用 quadUp 可能是默认值 ⇒ 宽度落到法线方向 ⇒ 正对基准面看没有宽度 ✗）
+        //   厚 T = 0.02 格：方向 = 平面法线 ✓ ⇒ 侧看也有厚度，不再是一张纸 ✓
+        //   每条线段：8 个角点 = 4 个侧面四边形 ✓
         final Vec3 d = b.subtract(a);
         final double len = d.length();
         if (len < 1.0e-6) {
             return;
         }
         final Vec3 dir = d.scale(1.0 / len);
-        final Vec3 mid = a.add(b).scale(0.5);
-        // ★★ 修实测"线条看起来仍是屏幕上的 2D 渲染"✗✗
-        //   真因：之前用"线段方向 × 视线方向"作侧向量 ⇒ 细条**永远正对相机**（广告牌）✗
-        //   ⇒ 屏幕上粗细恒定、没有透视压扁 ⇒ 看着就是一条 2D 屏幕线 ✓
-        //   而**背景网格的细条是躺在草图平面里的**（侧向量 = 平面法线 × 线段方向）✓
-        //   ⇒ 这里改成与网格**同一种几何**：侧向量取 (平面法线 × 线段方向) ✓
-        //     于是侧视时它会变窄、正对时最宽 ⇒ 与网格的 3D 观感完全一致 ✓
-        final Vec3 up = quadUp == null ? new Vec3(0, 1, 0) : quadUp;
-        Vec3 side = dir.cross(up);
+        Vec3 n = quadUp == null ? new Vec3(0, 1, 0) : quadUp;
+        if (n.lengthSqr() < 1.0e-9) {
+            n = new Vec3(0, 1, 0);
+        }
+        n = n.normalize();
+        Vec3 side = dir.cross(n);
         if (side.lengthSqr() < 1.0e-9) {
+            // 线段与法线平行（理论上不该出现）：退回到任意垂直方向 ✓
             side = dir.cross(new Vec3(0, 0, 1));
+            if (side.lengthSqr() < 1.0e-9) {
+                side = dir.cross(new Vec3(1, 0, 0));
+            }
         }
-        if (side.lengthSqr() < 1.0e-9) {
-            side = dir.cross(new Vec3(1, 0, 0));
-        }
-        side = side.normalize().scale(QUAD_LINE_HALF);
-        quadsWritten++;
-        colourVertex(vc, pose, a.subtract(side), colour);
-        colourVertex(vc, pose, a.add(side), colour);
-        colourVertex(vc, pose, b.add(side), colour);
-        colourVertex(vc, pose, b.subtract(side), colour);
+        side = side.normalize().scale(BAR_WIDTH_HALF);
+        final Vec3 th = n.scale(BAR_THICK_HALF);
+        // 端点 a/b 各四个角（±side ±th）✓
+        final Vec3 a00 = a.subtract(side).subtract(th);
+        final Vec3 a01 = a.subtract(side).add(th);
+        final Vec3 a10 = a.add(side).subtract(th);
+        final Vec3 a11 = a.add(side).add(th);
+        final Vec3 b00 = b.subtract(side).subtract(th);
+        final Vec3 b01 = b.subtract(side).add(th);
+        final Vec3 b10 = b.add(side).subtract(th);
+        final Vec3 b11 = b.add(side).add(th);
+        // 四个侧面：上 / 下 / 左 / 右 ✓（QUADS 需要 4 个顶点成一组）
+        quadOf(vc, pose, a10, b10, b11, a11, colour);
+        quadOf(vc, pose, a00, a01, b01, b00, colour);
+        quadOf(vc, pose, a01, a11, b11, b01, colour);
+        quadOf(vc, pose, a00, b00, b10, a10, colour);
+        quadsWritten += 4;
+    }
+
+    /** 一个四边形（4 个顶点，QUADS 模式）✓。 */
+    private static void quadOf(final VertexConsumer vc, final PoseStack.Pose pose,
+                               final Vec3 p0, final Vec3 p1, final Vec3 p2, final Vec3 p3,
+                               final float[] colour) {
+        colourVertex(vc, pose, p0, colour);
+        colourVertex(vc, pose, p1, colour);
+        colourVertex(vc, pose, p2, colour);
+        colourVertex(vc, pose, p3, colour);
     }
 
     private static void quad(final VertexConsumer vc, final PoseStack.Pose pose,

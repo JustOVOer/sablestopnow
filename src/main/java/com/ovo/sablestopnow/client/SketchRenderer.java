@@ -62,7 +62,7 @@ public final class SketchRenderer {
      * 辅助线（构造几何）的颜色 ✓ —— 比实体线暗一档、偏蓝灰 ✓
      * （需求 ①：辅助线必须画成**虚线** ✓ 用户实测"仍然没有画成虚线"✗）
      */
-    private static final float[] CONSTRUCTION_COLOR = {0.62f, 0.66f, 0.78f, 1.00f};
+    private static float[] CONSTRUCTION_COLOR = {0.62f, 0.66f, 0.78f, 1.00f};
 
     /**
      * 画草图时**其它模型**的不透明度 ✓（需求：进入草图时其它模型半透明 10% ✓）。
@@ -79,13 +79,13 @@ public final class SketchRenderer {
     private static final double MARKER_HALF = 0.09;
 
     /** 普通草图线的颜色（淡蓝，和选择标记区分开）。 */
-    private static final float[] IDLE_COLOR = {0.42f, 0.62f, 0.95f};
+    private static float[] IDLE_COLOR = {0.42f, 0.62f, 0.95f};
     /** 正在编辑的那张草图的颜色（亮青，一眼能认出在编辑哪个）。 */
-    private static final float[] EDITING_COLOR = {0.25f, 0.95f, 0.85f};
+    private static float[] EDITING_COLOR = {0.25f, 0.95f, 0.85f};
     /** 被选中的那个图元的颜色（亮橙，与编辑色、预览色都能区分）。 */
-    private static final float[] SELECTED_COLOR = {1.0f, 0.55f, 0.15f};
+    private static float[] SELECTED_COLOR = {1.0f, 0.55f, 0.15f};
     /** 鼠标**指到**的图元的颜色（亮白）。选中是橙色、悬停是白色，两者一眼分得开。 */
-    private static final float[] HOVER_COLOR = {1.0f, 1.0f, 1.0f};
+    private static float[] HOVER_COLOR = {1.0f, 1.0f, 1.0f};
     /** 悬停图元的关键点标识（端点/中点/圆心）的颜色。 */
     private static final float[] MARKER_COLOR = {1.0f, 0.95f, 0.45f};
     /** 基准板的颜色（灰蓝，比草图的线暗，不抢视线）。 */
@@ -94,7 +94,7 @@ public final class SketchRenderer {
     private static final float[] DATUM_HOVER_COLOR = {0.98f, 0.82f, 0.30f};
     /** 橡皮筋预览线的颜色。 */
     // ★ 用户要求：尺寸显示/预览的线条**像背景网格**那样细而实，**不透明白色** ✓
-    private static final float[] PREVIEW_COLOR = {1.0f, 1.0f, 1.0f};
+    private static float[] PREVIEW_COLOR = {1.0f, 1.0f, 1.0f};
     /**
      * 推理虚线颜色（淡青）。
      *
@@ -117,7 +117,7 @@ public final class SketchRenderer {
      * 照搬黑色会直接看不见 —— 要的是"在视觉上退到后面"这个语义。
      */
     // ★ 用户要求：完全定义的线 = **亮草绿色** ✓
-    private static final float[] FULLY_DEFINED_COLOR = {0.35f, 1.00f, 0.32f};
+    private static float[] FULLY_DEFINED_COLOR = {0.35f, 1.00f, 0.32f};
     /** **欠定义**的图元颜色（亮蓝）—— 还没被约束钉住，需要玩家注意。 */
     private static final float[] UNDER_DEFINED_COLOR = {0.30f, 0.62f, 1.0f};
     /**
@@ -196,6 +196,8 @@ public final class SketchRenderer {
         final List<Solid.Placed> solids = SolidClientState.placed(level);
         // ★ 只有**真的在编辑草图**才虚化模型、关掉模型面拾取 ✓（选基准面阶段不虚化 ✓）
         final boolean sketching = SketchClient.editing();
+        // ★ item 2：每帧从配置刷新颜色（8 次解析，开销可忽略）✓
+        reloadColors();
         // ★ 模型视图：每帧更新"面/棱/点"的悬停拾取 ✓（画草图时不拾取模型面 ✓）
         if (!sketching) {
             com.ovo.sablestopnow.client.model.FeatureHover.update(mc);
@@ -1309,8 +1311,26 @@ public final class SketchRenderer {
     private static final int GRID_HALF = 40;
     /** 网格线半宽（格）：0.02 格 ≈ 2cm，细且稳定（不依赖 GL 线宽）✓ */
     private static final double GRID_LINE_HALF = 0.02;
+
+    /**
+     * **从配置重新读取 8 项颜色** ✓（item 2）。
+     *
+     * <p>每帧开始时调一次（8 次十六进制解析 ≈ 无开销）⇒ 玩家在调色里改完立刻生效 ✓
+     * 解析失败一律回退默认值（见 {@link Colors}）✓
+     */
+    public static void reloadColors() {
+        IDLE_COLOR = Colors.sketchLine();
+        EDITING_COLOR = Colors.sketchLine();
+        FULLY_DEFINED_COLOR = Colors.fullyDefined();
+        SELECTED_COLOR = Colors.selected();
+        HOVER_COLOR = Colors.hover();
+        CONSTRUCTION_COLOR = Colors.reference();
+        PREVIEW_COLOR = Colors.dimension();
+        final int grid = Colors.gridArgb();
+        GRID_GREY = (((grid >> 16) & 0xFF) + ((grid >> 8) & 0xFF) + (grid & 0xFF)) / (3.0f * 255.0f);
+    }
     /** 淡灰 #C8C8C8 ✓ */
-    private static final float GRID_GREY = 0.784f;
+    private static float GRID_GREY = 0.784f;
 
     /**
      * 画**草图常驻背景网格** ✓（需求 ②）。
@@ -1372,7 +1392,7 @@ public final class SketchRenderer {
                 : rp.transformPosition(nrm, new org.joml.Vector3d());
         final Vec3 up = new Vec3(wn.x, wn.y, wn.z);
         quadUp = up.lengthSqr() < 1.0e-9 ? new Vec3(0, 1, 0) : up.normalize();
-        final float[] yellow = {1.00f, 0.83f, 0.00f};
+        final float[] yellow = Colors.preview();
         int drawn = 0;
         for (final var seg : segs) {
             final Vec3 a = world(cameraPos, rp, seg.a());

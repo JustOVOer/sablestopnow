@@ -297,6 +297,16 @@ public class SablestopNowConfig {
         public final ModConfigSpec.IntValue hullMaxPieces;
         public final ModConfigSpec.BooleanValue uiAnimations;
         public final ModConfigSpec.DoubleValue uiFontScale;
+
+        // ===== 调色（item 2）===== 8 项颜色，ARGB 十六进制字符串
+        public final ModConfigSpec.ConfigValue<String> colorSketchLine;
+        public final ModConfigSpec.ConfigValue<String> colorFullyDefined;
+        public final ModConfigSpec.ConfigValue<String> colorSelected;
+        public final ModConfigSpec.ConfigValue<String> colorHover;
+        public final ModConfigSpec.ConfigValue<String> colorReference;
+        public final ModConfigSpec.ConfigValue<String> colorDimension;
+        public final ModConfigSpec.ConfigValue<String> colorGrid;
+        public final ModConfigSpec.ConfigValue<String> colorPreview;
     /** 文字自动缩字号的下限（0.6~1.0，默认 0.80）—— 见 UiSettings#textShrinkMin。 */
     public final ModConfigSpec.DoubleValue uiTextShrinkMin;
 
@@ -504,7 +514,39 @@ public class SablestopNowConfig {
             .translation("config.sablestopnow.ui.ui_text_shrink_min")
             .defineInRange("ui_text_shrink_min", 0.80, 0.6, 1.0);
 
+              // ===== 调色（item 2）===== 每项 "AARRGGBB"，设置界面"调色"页可改 ✓
+              builder.comment("Colors used by the sketch/feature renderer. Format: AARRGGBB hex.",
+                              "草图/特征渲染用的颜色，格式 AARRGGBB 十六进制。")
+                      .push("colors");
+              colorSketchLine = colorEntry(builder, "sketch_line", "FF3FF2D9",
+                      "草图线（编辑中）", "Sketch line while editing");
+              colorFullyDefined = colorEntry(builder, "fully_defined", "FF59FF52",
+                      "完全定义", "Fully defined geometry");
+              colorSelected = colorEntry(builder, "selected", "FFFF8C26",
+                      "选中", "Selected geometry");
+              colorHover = colorEntry(builder, "hover", "FFFFFFFF",
+                      "悬停", "Hovered geometry");
+              colorReference = colorEntry(builder, "reference", "FF9EA8C7",
+                      "参考几何", "Reference geometry");
+              colorDimension = colorEntry(builder, "dimension", "FFFFFFFF",
+                      "尺寸标注", "Dimension annotations");
+              colorGrid = colorEntry(builder, "grid", "FFC8C8C8",
+                      "草图网格", "Sketch grid");
+              colorPreview = colorEntry(builder, "preview", "FFFFD400",
+                      "模型操作预览线框", "Feature preview wireframe");
+              builder.pop();
+
             builder.pop();
         }
+          /** 一项颜色 ✓（8 项共用同一段说明）。 */
+          private static ModConfigSpec.ConfigValue<String> colorEntry(
+                  final ModConfigSpec.Builder builder, final String key, final String def,
+                  final String zh, final String en) {
+              return builder.comment(en + " (" + zh + ")",
+                              "十六进制颜色（AARRGGBB），例如 FFD400 是琥珀黄。")
+                      .translation("config.sablestopnow.colors." + key)
+                      .define(key, def);
+          }
+
     }
 }

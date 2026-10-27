@@ -254,6 +254,37 @@ public final class SketchModelCheck {
                 java.util.List.of()) != null, "order: 草图缺失被发现");
     }
 
+    /** item 8：圆角阶梯盒子的基本性质 ✓ */
+    private static void filletGeom() {
+        final org.joml.Vector3d a = new org.joml.Vector3d(0, 0, 0);
+        final org.joml.Vector3d b = new org.joml.Vector3d(0, 0, 2);
+        final org.joml.Vector3d n1 = new org.joml.Vector3d(1, 0, 0);
+        final org.joml.Vector3d n2 = new org.joml.Vector3d(0, 1, 0);
+        final java.util.List<double[]> boxes = com.ovo.sablestopnow.sketch.FilletGeom.boxesFor(
+                a, b, n1, n2, 0.5, true);
+        check(!boxes.isEmpty(), "fillet: 轴对齐凸棱能算出阶梯盒（" + boxes.size() + "）");
+        double removed = 0;
+        boolean allPositive = true;
+        for (final double[] box : boxes) {
+            final double v = (box[3] - box[0]) * (box[4] - box[1]) * (box[5] - box[2]);
+            removed += v;
+            if (box[3] - box[0] <= 1.0e-9 || box[4] - box[1] <= 1.0e-9 || box[5] - box[2] <= 1.0e-9) {
+                allPositive = false;
+            }
+        }
+        check(allPositive, "fillet: 每个盒子体积为正");
+        // 理论挖掉量 = 棱长 × r²(1 − π/4)（阶梯是**外接**近似 ⇒ 略大于理论值 ✓）
+        final double ideal = 2.0 * 0.25 * (1.0 - Math.PI / 4.0);
+        check(removed > ideal * 0.8 && removed < ideal * 2.2,
+                "fillet: 挖掉体积在合理范围（" + String.format(java.util.Locale.ROOT, "%.4f", removed)
+                        + " vs 理论 " + String.format(java.util.Locale.ROOT, "%.4f", ideal) + "）");
+        check(com.ovo.sablestopnow.sketch.FilletGeom.boxesFor(a, b, n1, n2, 0.5, false).isEmpty(),
+                "fillet: 凹棱第一版不处理（返回空）");
+        check(com.ovo.sablestopnow.sketch.FilletGeom.boxesFor(
+                new org.joml.Vector3d(0, 0, 0), new org.joml.Vector3d(1, 1, 0),
+                n1, n2, 0.5, true).isEmpty(), "fillet: 斜棱不支持（返回空）");
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -294,6 +325,7 @@ public final class SketchModelCheck {
     }
 
     public static void main(final String[] args) throws Exception {
+        filletGeom();
         featureOrder();
         undoSnapshot();
         revolveEdges();

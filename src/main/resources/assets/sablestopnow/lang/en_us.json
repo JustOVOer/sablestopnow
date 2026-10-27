@@ -724,5 +724,15 @@
   "gui.sablestopnow.text.delete": "Delete",
   "gui.sablestopnow.text.scale": "Scale",
   "gui.sablestopnow.text.rotation": "Rot°",
-  "model.plane.item": "Plane %1$s"
+  "model.plane.item": "Plane %1$s",
+  "model.tool.plane": "New plane",
+  "model.tool.plane.short": "Plane",
+  "model.tool.plane.hint": "Click a model face, set a (signed) distance, then create a datum plane",
+  "gui.sablestopnow.plane.title": "New datum plane",
+  "gui.sablestopnow.plane.distance": "Distance (signed)",
+  "gui.sablestopnow.plane.ok": "Create",
+  "gui.sablestopnow.plane.cancel": "Cancel",
+  "model.plane.pick_face": "Pick a planar model face first",
+  "model.order.plane_before_source": "A datum plane must come after its source feature",
+  "model.order.plane": "Plane"
 }

@@ -33,6 +33,9 @@ public final class ModelTools {
      */
     public static final String EXTRUDE = "extrude";
 
+    /** **基准面特征**（item 7）：点一个模型面 + 设距离 ⇒ 新建基准面 ✓ */
+    public static final String PLANE = "plane";
+
     /** 上边栏的标签页分组。 */
     public static final String TAB_MATE = "mate";
     public static final String TAB_MODEL = "model";

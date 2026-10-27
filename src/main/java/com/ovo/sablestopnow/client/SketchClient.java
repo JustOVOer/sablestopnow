@@ -733,6 +733,23 @@ public final class SketchClient {
      *
      * @return true = 这次点击被消费了
      */
+    /**
+     * 用**一个已有的基准面特征**作草图基准面 ✓（item 7：右栏点选基准面即可用它开草图）。
+     */
+    public static boolean choosePlaneAt(final org.joml.Vector3dc origin,
+                                        final org.joml.Vector3dc normal) {
+        if (origin == null || normal == null) {
+            return false;
+        }
+        if (!MODE.chooseFace(new org.joml.Vector3d(origin), new org.joml.Vector3d(normal))) {
+            return false;
+        }
+        SketchRenderer.setEditing(MODE.editingId());
+        alignCameraTo(normal);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-plane] from feature plane ✓");
+        return true;
+    }
+
     public static boolean chooseModelFace(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
         // 只有**平面**能当基准面 ✓（曲面可以高亮，但不能建草图 ✓）

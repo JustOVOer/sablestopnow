@@ -387,6 +387,17 @@ public final class SketchRenderer {
                 drawPreview(vcq, pose, cameraPos, sub.renderPose(), sketch);
             }
         }
+        // ★ item 7：**基准面特征**画成半透明面片 + 描边 ✓
+        for (final Solid.Placed placed : solids) {
+            if (!(placed.solid().shape() instanceof final Solid.Shape.Plane plane)) {
+                continue;
+            }
+            final ClientSubLevel psub = byId.get(placed.solid().body());
+            if (psub == null) {
+                continue;
+            }
+            drawn += drawPlaneFeature(vcq, pose, cameraPos, psub, plane);
+        }
         // ★ item 6：**树行悬停 ⇒ 高亮对应特征** ✓（橙色描边，不改选择集）
         if (!sketching && com.ovo.sablestopnow.client.model.FeatureHighlight.id() != null) {
             final java.util.UUID hl = com.ovo.sablestopnow.client.model.FeatureHighlight.id();
@@ -1793,6 +1804,42 @@ public final class SketchRenderer {
             drawn++;
         }
         buf.endBatch();
+        return drawn;
+    }
+
+    /** 把基准面画成**半透明面片 + 描边** ✓（item 7：让它看得见、能点） */
+    private static int drawPlaneFeature(final VertexConsumer vcq, final PoseStack.Pose pose,
+                                        final Vec3 cameraPos, final ClientSubLevel sub,
+                                        final Solid.Shape.Plane plane) {
+        final org.joml.Vector3d n = new org.joml.Vector3d(plane.nx(), plane.ny(), plane.nz())
+                .normalize();
+        final double[] o = plane.offsetOrigin();
+        final org.joml.Vector3d origin = new org.joml.Vector3d(o[0], o[1], o[2]);
+        org.joml.Vector3d u = n.cross(new org.joml.Vector3d(0, 1, 0), new org.joml.Vector3d());
+        if (u.lengthSquared() < 1.0e-9) {
+            u = n.cross(new org.joml.Vector3d(1, 0, 0), new org.joml.Vector3d());
+        }
+        u.normalize();
+        final org.joml.Vector3d v = n.cross(u, new org.joml.Vector3d()).normalize();
+        final double half = 1.0;
+        final Pose3dc rp = sub.renderPose();
+        final float[] colour = {0.55f, 0.75f, 1.00f};
+        // 四条边（走同一个 3D 棒 ✓）
+        final org.joml.Vector3d[] cs = {
+            new org.joml.Vector3d(origin).fma(-half, u).fma(-half, v),
+            new org.joml.Vector3d(origin).fma(half, u).fma(-half, v),
+            new org.joml.Vector3d(origin).fma(half, u).fma(half, v),
+            new org.joml.Vector3d(origin).fma(-half, u).fma(half, v),
+        };
+        final org.joml.Vector3d w0 = rp.transformPosition(cs[0], new org.joml.Vector3d());
+        quadUp = new Vec3(w0.x - w0.x + n.x, n.y, n.z).normalize(); // 厚度沿法线 ✓
+        int drawn = 0;
+        for (int i = 0; i < 4; i++) {
+            final Vec3 a = world(cameraPos, rp, cs[i]);
+            final Vec3 b = world(cameraPos, rp, cs[(i + 1) % 4]);
+            quadLine(vcq, pose, a, b, colour);
+            drawn++;
+        }
         return drawn;
     }
 

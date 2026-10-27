@@ -62,12 +62,28 @@ public final class FeatureDeps {
         // ② 依赖的草图必须存在（草图集合允许为 null = 调用方不检查）
         if (existingSketchIds != null) {
             for (final Solid s : solids) {
+                if (s.shape() instanceof Solid.Shape.Plane) {
+                    continue; // 基准面没有真实草图（占位 id）✓
+                }
                 if (!existingSketchIds.contains(s.sketchId())) {
                     return "model.order.missing_sketch";
                 }
             }
         }
-        // ③ 切割必须在第一个实心特征之后
+        // ③ 基准面必须排在它的**源实体**之后（依赖它才能算出来 ✓）
+        final java.util.Map<java.util.UUID, Integer> indexOf = new java.util.HashMap<>();
+        for (final Solid s : solids) {
+            indexOf.put(s.id(), s.index());
+        }
+        for (final Solid s : solids) {
+            if (s.shape() instanceof final Solid.Shape.Plane pl && pl.sourceSolid() != null) {
+                final Integer src = indexOf.get(pl.sourceSolid());
+                if (src != null && src > s.index()) {
+                    return "model.order.plane_before_source";
+                }
+            }
+        }
+        // ④ 切割必须在第一个实心特征之后
         final List<Node> ordered = nodes(solids);
         boolean materialSeen = false;
         for (final Node n : ordered) {

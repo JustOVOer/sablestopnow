@@ -724,5 +724,15 @@
   "gui.sablestopnow.text.delete": "删除",
   "gui.sablestopnow.text.scale": "缩放",
   "gui.sablestopnow.text.rotation": "旋转°",
-  "model.plane.item": "基准面%1$s"
+  "model.plane.item": "基准面%1$s",
+  "model.tool.plane": "新建基准面",
+  "model.tool.plane.short": "基准面",
+  "model.tool.plane.hint": "点一个模型面，设距离（可负）后创建基准面；可作草图基准面",
+  "gui.sablestopnow.plane.title": "新建基准面",
+  "gui.sablestopnow.plane.distance": "距离（可负）",
+  "gui.sablestopnow.plane.ok": "创建",
+  "gui.sablestopnow.plane.cancel": "取消",
+  "model.plane.pick_face": "请先点一个模型上的**平面**（基准面工具）",
+  "model.order.plane_before_source": "基准面必须排在其源特征之后",
+  "model.order.plane": "基准面"
 }

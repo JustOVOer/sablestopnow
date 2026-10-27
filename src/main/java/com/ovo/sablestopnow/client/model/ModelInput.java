@@ -538,6 +538,17 @@ public final class ModelInput {
             // 生成的，正好把结构整个包在中间；鼠标指向结构时几乎必然先命中某块板。
             // 实测症状就是"只能选到三个基准面，选不到模型上的面"。
             // SolidWorks 也是这个顺序：指到面上高亮面，指到空白处才显示基准面。
+            // ★ item 7：**基准面工具**下点面 ⇒ 记录面并弹"距离"输入框 ✓
+            if (com.ovo.sablestopnow.client.model.ModelTools.PLANE.equals(ModelMode.tool())) {
+                final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf =
+                        com.ovo.sablestopnow.client.model.FeatureHover.get();
+                if (pf != null) {
+                    com.ovo.sablestopnow.client.model.ModelUi.planePickFace(pf);
+                } else {
+                    ModelMode.prompt("model.plane.pick_face");
+                }
+                return;
+            }
             // ★ 需求：**以模型的一个面作草图基准面** ✓ —— 优先级最高
             //   （模型面 > 方块面 > 基准板 ✓ 与"面优先于板"的既有纪律一致）
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit ff =

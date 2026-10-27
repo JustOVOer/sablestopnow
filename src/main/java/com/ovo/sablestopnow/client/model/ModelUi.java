@@ -265,6 +265,13 @@ public final class ModelUi {
                             cutMode = false;   // 普通拉伸 ⇒ 关掉切割 ✓
                             startExtrude();
                         }).tooltipKey("model.tool.extrude.hint"));
+                // ★ item 7：**新建基准面**入口 ✓（上边栏）
+                row.add(shortButton("model.tool.plane", "model.tool.plane.short",
+                        () -> {
+                            cutMode = false;
+                            ModelMode.setTool(ModelTools.PLANE);
+                            refreshLeftPanel();
+                        }).tooltipKey("model.tool.plane.hint"));
                 // ★ 需求 ⑥：**切割台体**独立入口 ✓（与"拉伸台体"平级 ✓ 不是藏在面板里的开关 ✓）
                 row.add(shortButton("model.tool.cut", "model.tool.cut.short",
                         () -> {
@@ -1266,6 +1273,18 @@ public final class ModelUi {
                 ModelForceUi.select(null);
                 ModelCouplingUi.clearSelection();
                 MateClientState.setHighlightedMate(null);
+                  // ★ item 7：点**基准面**行 ⇒ 直接以它为基准面开草图 ✓
+                  if (solid.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane pl) {
+                      final double[] o = pl.offsetOrigin();
+                      if (com.ovo.sablestopnow.client.SketchClient.choosePlaneAt(
+                              new org.joml.Vector3d(o[0], o[1], o[2]),
+                              new org.joml.Vector3d(pl.nx(), pl.ny(), pl.nz()))) {
+                          ModelMode.setTool(ModelTools.SKETCH);
+                          ModelMode.selectModel(solid.body());
+                          refreshLeftPanel();
+                          return;
+                      }
+                  }
                   // ★ item 6.5：点特征行 ⇒ **进入左侧编辑**（预填参数）✓
                   if (solid.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Extrusion e) {
                       ModelMode.setTool(ModelTools.EXTRUDE);
@@ -1889,6 +1908,106 @@ public final class ModelUi {
         } catch (final IllegalArgumentException e) {
             com.ovo.sablestopnow.client.model.FeatureHighlight.clear();
         }
+    }
+
+    /** 基准面工具当前拾取到的面：中心（局部）+ 单位法线 ✓ */
+    private static double[] planeFaceOrigin;
+    private static double[] planeFaceNormal;
+    private static java.util.UUID planeSourceSolid;
+    private static int planeSourceFace = -1;
+
+    /** 基准面工具：点到一个模型面 ⇒ 记下来并打开"距离"输入框（带实时预览）✓ */
+    public static boolean planePickFace(
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
+        if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE
+                || !hit.face().planar()) {
+            ModelMode.prompt("model.plane.pick_face");
+            return false;
+        }
+        planeFaceOrigin = new double[] {hit.localCenter().x, hit.localCenter().y,
+                hit.localCenter().z};
+        planeFaceNormal = new double[] {hit.localNormal().x, hit.localNormal().y,
+                hit.localNormal().z};
+        planeSourceSolid = hit.body();
+        planeSourceFace = hit.face().id();
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        mc.setScreen(new com.ovo.sablestopnow.client.gui.PlaneCreateScreen(mc.screen, 0.5,
+                new com.ovo.sablestopnow.client.gui.PlaneCreateScreen.Sink() {
+                    @Override
+                    public void preview(final double distance) {
+                        updatePlanePreview(distance);
+                    }
+
+                    @Override
+                    public void create(final double distance) {
+                        createPlaneFeature(distance);
+                    }
+
+                    @Override
+                    public void cancel() {
+                        com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+                    }
+                }));
+        updatePlanePreview(0.5);
+        return true;
+    }
+
+    /** 预览：把"偏移后的平面"画成一个黄色方框 ✓ */
+    private static void updatePlanePreview(final double distance) {
+        if (planeFaceOrigin == null || planeFaceNormal == null) {
+            return;
+        }
+        final org.joml.Vector3d o = new org.joml.Vector3d(planeFaceOrigin);
+        final org.joml.Vector3d n = new org.joml.Vector3d(planeFaceNormal).normalize();
+        o.fma(distance, n);
+        // 平面内两个正交方向
+        org.joml.Vector3d u = n.cross(new org.joml.Vector3d(0, 1, 0), new org.joml.Vector3d());
+        if (u.lengthSquared() < 1.0e-9) {
+            u = n.cross(new org.joml.Vector3d(1, 0, 0), new org.joml.Vector3d());
+        }
+        u.normalize();
+        final org.joml.Vector3d v = n.cross(u, new org.joml.Vector3d()).normalize();
+        final double half = 1.0;
+        final org.joml.Vector3d c0 = new org.joml.Vector3d(o).fma(-half, u).fma(-half, v);
+        final org.joml.Vector3d c1 = new org.joml.Vector3d(o).fma(half, u).fma(-half, v);
+        final org.joml.Vector3d c2 = new org.joml.Vector3d(o).fma(half, u).fma(half, v);
+        final org.joml.Vector3d c3 = new org.joml.Vector3d(o).fma(-half, u).fma(half, v);
+        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
+                new java.util.ArrayList<>(4);
+        segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(c0, c1));
+        segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(c1, c2));
+        segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(c2, c3));
+        segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(c3, c0));
+        com.ovo.sablestopnow.client.model.FeaturePreview.set(planeSourceSolid, n, segs);
+    }
+
+    /** 真正创建基准面特征 ✓（与其它特征同级、受序号/依赖约束） */
+    private static void createPlaneFeature(final double distance) {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        if (level == null || planeFaceOrigin == null || planeFaceNormal == null
+                || planeSourceSolid == null) {
+            return;
+        }
+        int index = 1;
+        for (final com.ovo.sablestopnow.sketch.Solid s
+                : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, planeSourceSolid)) {
+            index = Math.max(index, s.index() + 1);
+        }
+        index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(planeSourceSolid, 0) + 1);
+        final com.ovo.sablestopnow.sketch.Solid plane =
+                com.ovo.sablestopnow.sketch.Solid.createPlane(planeSourceSolid, index,
+                        planeFaceOrigin[0], planeFaceOrigin[1], planeFaceOrigin[2],
+                        planeFaceNormal[0], planeFaceNormal[1], planeFaceNormal[2],
+                        distance, planeSourceSolid, planeSourceFace);
+        com.ovo.sablestopnow.network.SolidNetworking.sendSave(plane);
+        LOCAL_SOLID_INDEX.put(planeSourceSolid, plane.index());
+        com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[plane] created idx={} dist={} face={}", plane.index(), distance, planeSourceFace);
+        lastTreeSignature = null;
+        refreshTreeNow();
+        ModelMode.setTool(ModelTools.NONE);
     }
 
     private static void featureAction(final String action,

@@ -387,6 +387,35 @@ public final class SketchRenderer {
                 drawPreview(vcq, pose, cameraPos, sub.renderPose(), sketch);
             }
         }
+        // ★ item 11：**连接纹理的边框** —— 有邻居的边不画、没邻居的边画内缩线 ✓
+        //   （几何侧实现：边框来自模型自己的面邻接 ⇒ 面/棱/角天然正确 ✓）
+        for (final Solid.Placed placed : solids) {
+            if (!placed.solid().appearance().connected()) {
+                continue;
+            }
+            final ClientSubLevel csub = byId.get(placed.solid().body());
+            if (csub == null) {
+                continue;
+            }
+            final com.ovo.sablestopnow.sketch.Features.Graph graph =
+                    com.ovo.sablestopnow.sketch.Features.of(placed);
+            if (graph.faces().isEmpty()) {
+                continue;
+            }
+            final Pose3dc cp = csub.renderPose();
+            final float[] border = {0.22f, 0.22f, 0.22f};
+            for (final com.ovo.sablestopnow.sketch.Features.Face f : graph.faces()) {
+                if (!f.planar()) {
+                    continue;
+                }
+                for (final Vector3d[] seg : com.ovo.sablestopnow.sketch.CtmBorder.borderOf(
+                        f, graph.faces())) {
+                    quadLine(vcq, pose, world(cameraPos, cp, seg[0]),
+                            world(cameraPos, cp, seg[1]), border);
+                    drawn++;
+                }
+            }
+        }
         // ★ item 7：**基准面特征**画成半透明面片 + 描边 ✓
         for (final Solid.Placed placed : solids) {
             if (!(placed.solid().shape() instanceof final Solid.Shape.Plane plane)) {

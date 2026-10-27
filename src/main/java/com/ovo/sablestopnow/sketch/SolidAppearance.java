@@ -82,6 +82,11 @@ public record SolidAppearance(@Nullable String blockId, double blocksPerTile,
      *
      * @return {@code {blockId 或 "", blocksPerTile}}
      */
+    /** item 11: 打开/关闭连接纹理 ✓ */
+    public SolidAppearance withConnected(final boolean on) {
+        return new SolidAppearance(blockId, blocksPerTile, on);
+    }
+
     public String[] encode() {
         return new String[] {blockId == null ? "" : blockId, Double.toString(blocksPerTile),
                 Boolean.toString(connected)};

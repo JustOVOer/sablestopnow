@@ -614,6 +614,9 @@ public final class ModelUi {
         });
         body.add(scaleField);
         // **应用**：把待定的贴图参数真正写到实体上（用户原则：只有"确定"才作出更改）
+          // item 11: connected texture toggle (needs block ctm data)
+          body.add(new com.ovo.sablestopnow.client.gui.lib.Checkbox(
+                  textureConnected, "model.texture.connected"));
         body.add(new Button(Component.translatable("model.texture.apply"), () -> {
             saveAppearance(solid, solid.appearance()
                     .withBlocksPerTile(textureScale.get()));
@@ -1610,6 +1613,10 @@ public final class ModelUi {
     private static java.util.UUID textureSolidId;
 
     /** 贴图平铺比例：几个方块铺一次。 */
+    /** item 11：连接纹理开关（面板内的待定值，应用时才写进实体）✓ */
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> textureConnected =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("solid.texture.connected", false);
+
     private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> textureScale =
             com.ovo.sablestopnow.client.gui.lib.Prop.of("solid.texture.scale", 1.0);
     private static final String CMD_TEXTURE_SCALE = "solid.texture.scale";
@@ -3329,6 +3336,7 @@ public final class ModelUi {
                                 () -> {
                                     textureSolidId = solid.id();
                                     textureScale.set(solid.appearance().blocksPerTile());
+                                    textureConnected.set(solid.appearance().connected());
                                     refreshLeftPanel();
                                 });
                         texBtn.prefW = Widget.FILL;

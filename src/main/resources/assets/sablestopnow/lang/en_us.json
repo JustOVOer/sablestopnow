@@ -764,5 +764,6 @@
   "model.tool.pattern.short": "Pattern",
   "model.tool.pattern.hint": "Pick 1-3 edges as directions, select features, then click the first edge again",
   "model.pattern.pick_edge": "Pick an edge as a pattern direction",
-  "model.pattern.no_sources": "No source features selected yet"
+  "model.pattern.no_sources": "No source features selected yet",
+  "model.texture.connected": "Connected texture (needs ctm data)"
 }

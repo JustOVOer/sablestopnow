@@ -764,5 +764,6 @@
   "model.tool.pattern.short": "阵列",
   "model.tool.pattern.hint": "点 1-3 条棱定方向，右栏选特征，再点第一条棱设次数/间距",
   "model.pattern.pick_edge": "请点一条棱作为阵列方向",
-  "model.pattern.no_sources": "尚未选择被阵列的特征（在右栏点特征行）"
+  "model.pattern.no_sources": "尚未选择被阵列的特征（在右栏点特征行）",
+  "model.texture.connected": "连接纹理（需纹理带 ctm 数据）"
 }

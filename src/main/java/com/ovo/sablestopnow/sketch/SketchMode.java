@@ -247,6 +247,19 @@ public final class SketchMode {
     }
 
     /** 不带 Ctrl 的点击（单选语义）。保留这个重载，免得所有调用方都要多传一个 false。 */
+    /** 线拾取的**外部钩子** ✓（item 1：旋转面板等轴时，"点一条线 = 设轴"）。 */
+    public interface LinePickHook {
+        /** @return true = 这次点击已被钩子消费（不要再当普通选中处理） */
+        boolean onLine(Sketch sketch, Sketch.Entity line);
+    }
+
+    private static LinePickHook linePickHook;
+
+    /** 注册线拾取钩子 ✓（客户端注册；草图包不依赖客户端 ⇒ 离线用例照旧可编译 ✓）。 */
+    public static void setLinePickHook(final LinePickHook hook) {
+        linePickHook = hook;
+    }
+
     public boolean click(final Vector3dc rayOrigin, final Vector3dc rayDir) {
         return click(rayOrigin, rayDir, false);
     }
@@ -299,6 +312,12 @@ public final class SketchMode {
                         if (keyPt != null) {
                             hit = keyPt;
                         }
+                    }
+                    // ★ item 1：若外部（旋转面板）正在等"选轴"，点一条线就直接设轴 ✓
+                    if (hit != null && hit.kind() == Sketch.EntityKind.LINE
+                            && linePickHook != null
+                            && linePickHook.onLine(session.working(), hit)) {
+                        return true;
                     }
                     if (additive) {
                         // Ctrl：增删。点空处**不动**选择集 —— 否则手一抖就把辛苦选好的一堆清空了。

@@ -1110,6 +1110,44 @@ public final class Sketch {
         return count;
     }
 
+    /**
+     * 一份**完整状态快照** ✓（撤销/重做用）。
+     *
+     * <p>图元与约束都是不可变记录 ⇒ 直接存引用即可 ✓；变量数组要**拷贝** ✓。
+     */
+    public record State(double[] vars, java.util.List<Entity> entities,
+                        java.util.List<Constraint> constraints,
+                        java.util.List<String> constructionKeys,
+                        java.util.List<String> referenceKeys) {
+    }
+
+    /** 捕获当前状态 ✓（撤销栈用）。 */
+    public State capture() {
+        return new State(variables(), new java.util.ArrayList<>(entities),
+                new java.util.ArrayList<>(constraints),
+                new java.util.ArrayList<>(this.construction),
+                new java.util.ArrayList<>(this.reference));
+    }
+
+    /** 恢复到某个快照 ✓（图元/约束/标记/变量一起回滚）。 */
+    public void restore(final State state) {
+        if (state == null) {
+            return;
+        }
+        this.variables.clear();
+        for (final double v : state.vars()) {
+            this.variables.add(v);
+        }
+        this.entities.clear();
+        this.entities.addAll(state.entities());
+        this.constraints.clear();
+        this.constraints.addAll(state.constraints());
+        this.construction.clear();
+        this.construction.addAll(state.constructionKeys());
+        this.reference.clear();
+        this.reference.addAll(state.referenceKeys());
+    }
+
     /** 解之前保存的一份变量（解塌时回滚用）。 */
     private double[] preSolve = new double[0];
 

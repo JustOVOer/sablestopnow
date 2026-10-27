@@ -384,6 +384,13 @@ public final class SketchRenderer {
                 drawPreview(vcq, pose, cameraPos, sub.renderPose(), sketch);
             }
         }
+        // ★ item 5：**模型操作的黄色线框预览** ✓（拉伸/切割/旋转/…）
+        if (com.ovo.sablestopnow.client.model.FeaturePreview.active()) {
+            final var fbp = byId.get(com.ovo.sablestopnow.client.model.FeaturePreview.body());
+            if (fbp != null) {
+                drawn += drawFeaturePreview(vcq, pose, cameraPos, fbp);
+            }
+        }
         // ★ 需求：模型视图下 **面 / 棱 / 点** 的悬停预览 ✓
         if (!sketching) {
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit fh =
@@ -1319,6 +1326,37 @@ public final class SketchRenderer {
     }
 
     /** 一个带 alpha 的四边形 ✓（顶点格式 POSITION_COLOR ✓ 给 {@code SKETCH_GRID} 用）。 */
+    /**
+     * 画**模型操作的黄色线框预览** ✓（item 5）。
+     *
+     * <p>走与草图线条**完全相同**的 3D 棒图元（`quadLine`）；颜色先用固定黄
+     * `#FFD400`，M3 接调色表后改成可配置 ✓
+     */
+    private static int drawFeaturePreview(final VertexConsumer vcq, final PoseStack.Pose pose,
+                                          final Vec3 cameraPos, final ClientSubLevel sub) {
+        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
+                com.ovo.sablestopnow.client.model.FeaturePreview.segments();
+        if (segs.isEmpty()) {
+            return 0;
+        }
+        final Pose3dc rp = sub.renderPose();
+        // 厚度方向：优先用基准面法线 ✓（没有就退回世界 +Y，仍比"屏幕线"好）
+        final org.joml.Vector3d nrm = com.ovo.sablestopnow.client.model.FeaturePreview.normal();
+        final org.joml.Vector3d wn = nrm == null ? new org.joml.Vector3d(0, 1, 0)
+                : rp.transformPosition(nrm, new org.joml.Vector3d());
+        final Vec3 up = new Vec3(wn.x, wn.y, wn.z);
+        quadUp = up.lengthSqr() < 1.0e-9 ? new Vec3(0, 1, 0) : up.normalize();
+        final float[] yellow = {1.00f, 0.83f, 0.00f};
+        int drawn = 0;
+        for (final var seg : segs) {
+            final Vec3 a = world(cameraPos, rp, seg.a());
+            final Vec3 b = world(cameraPos, rp, seg.b());
+            quadLine(vcq, pose, a, b, yellow);
+            drawn++;
+        }
+        return drawn;
+    }
+
     /**
      * 画**面/棱/点**的悬停预览 ✓（需求）。
      *

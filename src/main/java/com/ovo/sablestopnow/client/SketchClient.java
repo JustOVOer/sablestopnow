@@ -49,6 +49,42 @@ public final class SketchClient {
         return MODE;
     }
 
+    /** 撤销（Ctrl+Z）✓ item 12 */
+    public static boolean undo() {
+        if (!MODE.active() || MODE.session() == null) {
+            return false;
+        }
+        final boolean ok = MODE.session().undo();
+        if (ok) {
+            MODE.solve();
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-undo] {}",
+                    MODE.session().undoDiag());
+        }
+        return ok;
+    }
+
+    /** 重做（Ctrl+Y / Shift+Ctrl+Z）✓ item 12 */
+    public static boolean redo() {
+        if (!MODE.active() || MODE.session() == null) {
+            return false;
+        }
+        final boolean ok = MODE.session().redo();
+        if (ok) {
+            MODE.solve();
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-redo] {}",
+                    MODE.session().undoDiag());
+        }
+        return ok;
+    }
+
+    static {
+        // ★ item 1：旋转面板等轴时，"点草图里的一条线"即设为旋转轴 ✓
+        com.ovo.sablestopnow.sketch.SketchMode.setLinePickHook((sketch, line) ->
+                com.ovo.sablestopnow.client.model.ModelUi.revolveAxisPicking()
+                        && com.ovo.sablestopnow.client.model.ModelUi
+                                .setRevolveAxisFromLine(sketch, line));
+    }
+
     public static boolean active() {
         return MODE.active();
     }

@@ -912,6 +912,8 @@ public final class ModelUi {
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(
                 com.ovo.sablestopnow.sketch.Solid.createRevolution(
                         source.body(), source.id(), index, params));
+        com.ovo.sablestopnow.client.model.FeaturePreview.clear(); // 已提交 ⇒ 释放预览 ✓
+        lastPreviewSig = "";
         ModelMode.prompt("model.prompt.extrude_created");
         refreshLeftPanel();
     }
@@ -1463,6 +1465,46 @@ public final class ModelUi {
 
     /** 当前是在配"拉伸"还是"旋转"。 */
     private static boolean revolveMode;
+
+    /** 旋转面板是否在等"点选草图线作轴"（item 1）✓ */
+    public static boolean revolveAxisPicking() {
+        return revolveMode
+                && com.ovo.sablestopnow.client.model.ModelTools.EXTRUDE.equals(ModelMode.tool());
+    }
+
+    /**
+     * 用草图里的**一条线**作为旋转轴 ✓（item 1：不用按键，直接点线）。
+     *
+     * <p>轴点 = 线段起点，方向 = 终点 − 起点 ✓；辅助线/参考线也接受（作轴最常见）✓
+     */
+    public static boolean setRevolveAxisFromLine(final com.ovo.sablestopnow.sketch.Sketch sketch,
+                                                 final com.ovo.sablestopnow.sketch.Sketch.Entity line) {
+        if (sketch == null || line == null
+                || line.kind() != com.ovo.sablestopnow.sketch.Sketch.EntityKind.LINE) {
+            return false;
+        }
+        final int[] v = line.vars();
+        if (v.length < 4) {
+            return false;
+        }
+        final double au = sketch.variable(v[0]);
+        final double av = sketch.variable(v[1]);
+        final double du = sketch.variable(v[2]) - au;
+        final double dv = sketch.variable(v[3]) - av;
+        if (Math.hypot(du, dv) < 1.0e-6) {
+            return false;
+        }
+        revolveAxis = new double[] {au, av, du, dv};
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[revolve] axis from line a=({},{}) d=({},{}) cons={} ref={}",
+                String.format(java.util.Locale.ROOT, "%.3f", au),
+                String.format(java.util.Locale.ROOT, "%.3f", av),
+                String.format(java.util.Locale.ROOT, "%.3f", du),
+                String.format(java.util.Locale.ROOT, "%.3f", dv),
+                sketch.isConstruction(line), sketch.isReference(line));
+        refreshLeftPanel();
+        return true;
+    }
     /**
      * 选中的旋转轴：{@code {axisU, axisV, dirU, dirV}}（**坐标**，不是图元引用）。
      *
@@ -1736,6 +1778,68 @@ public final class ModelUi {
      * <p>⚠ 单侧 / 两侧 / 对称三种方式在**模型层早就支持了**（{@code Extrude.Params}），
      * 这里只是把它接到 UI 上 —— 之前只建 {@code oneSided}，等于那两种能力一直够不着。
      */
+    /** 预览签名的上一份（内容没变就不重算 ✓ item 5） */
+    private static String lastPreviewSig = "";
+
+    /**
+     * **item 5：模型操作的黄色线框预览** ✓
+     *
+     * <p>进入拉伸/切割/旋转操作后，每 tick 检查一次"当前参数"算出的线框；
+     * 参数没变就直接返回（签名去重）；退出操作 / 没有源草图 / 已提交 ⇒ 清空预览 ✓
+     * <p>⚠ 输入框回车 = 只更新**预览**（参数对象本来就只在"确认"时才提交 ✓）
+     */
+    public static void tickFeaturePreview() {
+        final boolean modeling = ModelTools.EXTRUDE.equals(ModelMode.tool());
+        final com.ovo.sablestopnow.sketch.Sketch source = modeling ? currentExtrudeSource() : null;
+        if (!modeling || source == null) {
+            if (com.ovo.sablestopnow.client.model.FeaturePreview.active()) {
+                com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+                lastPreviewSig = "";
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info("[preview] cleared (tool/source)");
+            }
+            return;
+        }
+        final double d1 = extrudeDepth.get();
+        final double d2 = extrudeBackDepth.get();
+        final String sig = source.id() + "|" + revolveMode + "|" + cutMode + "|" + extrudeMode
+                + "|" + String.format(java.util.Locale.ROOT, "%.4f", d1) + "|"
+                + String.format(java.util.Locale.ROOT, "%.4f", d2) + "|"
+                + String.format(java.util.Locale.ROOT, "%.2f", revolveAngle.get()) + "|"
+                + (revolveAxis == null ? "-" : java.util.Arrays.toString(revolveAxis));
+        if (sig.equals(lastPreviewSig)) {
+            return;
+        }
+        lastPreviewSig = sig;
+        java.util.List<org.joml.Vector3d[]> edges;
+        if (revolveMode) {
+            if (revolveAxis == null) {
+                com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+                return;
+            }
+            final com.ovo.sablestopnow.sketch.Revolve.Params rp =
+                    new com.ovo.sablestopnow.sketch.Revolve.Params(
+                            revolveAxis[0], revolveAxis[1], revolveAxis[2], revolveAxis[3],
+                            revolveAngle.get(), revolveDirection);
+            edges = com.ovo.sablestopnow.sketch.Revolve.edges(source, rp);
+        } else {
+            final com.ovo.sablestopnow.sketch.Extrude.Params ep = switch (extrudeMode) {
+                case TWO_SIDED -> com.ovo.sablestopnow.sketch.Extrude.Params.twoSided(d1, d2);
+                case SYMMETRIC -> com.ovo.sablestopnow.sketch.Extrude.Params.symmetric(d1);
+                default -> com.ovo.sablestopnow.sketch.Extrude.Params.oneSided(d1);
+            };
+            edges = com.ovo.sablestopnow.sketch.Extrude.prismEdges(source, ep);
+        }
+        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
+                new java.util.ArrayList<>(edges.size());
+        for (final org.joml.Vector3d[] e : edges) {
+            segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(e[0], e[1]));
+        }
+        com.ovo.sablestopnow.client.model.FeaturePreview.set(source.body(),
+                source.plane() == null ? null : source.plane().normal(), segs);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[preview] segs={} cut={} revolve={}",
+                segs.size(), cutMode, revolveMode);
+    }
+
     private static void createExtrude() {
         final com.ovo.sablestopnow.sketch.Sketch source = currentExtrudeSource();
         if (source == null) {

@@ -206,6 +206,26 @@ public final class SketchModelCheck {
 
     }
 
+    /** item 12：快照捕获/恢复（撤销基础）✓ */
+    private static void undoSnapshot() {
+        final com.ovo.sablestopnow.sketch.Sketch s =
+                new com.ovo.sablestopnow.sketch.Sketch(java.util.UUID.randomUUID(),
+                        java.util.UUID.randomUUID(), "undo",
+                        com.ovo.sablestopnow.sketch.SketchPlane.base(
+                                com.ovo.sablestopnow.sketch.SketchPlane.Base.FRONT,
+                                new org.joml.Vector3d(0, 0, 0)));
+        s.addLine(0, 0, 4, 0);
+        final var snap = s.capture();
+        s.addLine(0, 0, 0, 3);
+        s.setConstruction(s.entities().get(1), true);
+        check(s.entities().size() == 2, "undo: 改后 2 个图元");
+        s.restore(snap);
+        check(s.entities().size() == 1, "undo: 恢复后 1 个图元（实际 " + s.entities().size() + "）");
+        check(s.constructionEntities().isEmpty(), "undo: 构造标记也回滚");
+        check(s.usedVariables().length == 4, "undo: 变量表回到 4 个（实际 "
+                + s.usedVariables().length + "）");
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -246,6 +266,7 @@ public final class SketchModelCheck {
     }
 
     public static void main(final String[] args) throws Exception {
+        undoSnapshot();
         revolveEdges();
         referenceNotInDof();
         featuresFromMesh();

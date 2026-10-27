@@ -375,6 +375,7 @@ public final class SketchSession {
     }
 
     public boolean dimensionWith(final int kind, final double value, final int[] vars) {
+        pushUndo(); // ★ 改尺寸前记快照（item 12 撤销）
         if (this.working == null || vars == null || vars.length == 0 || kind == 0) {
             return false;
         }
@@ -475,6 +476,52 @@ public final class SketchSession {
      * @param localSegs 该面的直线边（**实体局部坐标**，{@code {x1,y1,z1,x2,y2,z2}}）
      * @return 实际加了几条
      */
+    // ================= 撤销 / 重做（item 12） =================
+
+    /** 撤销栈（最多 64 步）✓ —— 存的是**完整状态快照**（图元+变量+约束+标记）。 */
+    private final java.util.ArrayDeque<Sketch.State> undoStack = new java.util.ArrayDeque<>();
+    private final java.util.ArrayDeque<Sketch.State> redoStack = new java.util.ArrayDeque<>();
+    private static final int UNDO_LIMIT = 64;
+
+    /** 在**改动之前**记一份快照 ✓（所有会改草图的入口都要调）。 */
+    public void pushUndo() {
+        if (this.working == null) {
+            return;
+        }
+        this.undoStack.push(this.working.capture());
+        while (this.undoStack.size() > UNDO_LIMIT) {
+            this.undoStack.removeLast();
+        }
+        this.redoStack.clear(); // 新操作作废重做链 ✓
+    }
+
+    /** 撤销一步 ✓（不自动求解；DOF 由上层重算）。 */
+    public boolean undo() {
+        if (this.working == null || this.undoStack.isEmpty()) {
+            return false;
+        }
+        this.redoStack.push(this.working.capture());
+        this.working.restore(this.undoStack.pop());
+        this.pending.clear();
+        return true;
+    }
+
+    /** 重做一步 ✓。 */
+    public boolean redo() {
+        if (this.working == null || this.redoStack.isEmpty()) {
+            return false;
+        }
+        this.undoStack.push(this.working.capture());
+        this.working.restore(this.redoStack.pop());
+        this.pending.clear();
+        return true;
+    }
+
+    /** 撤销/重做栈深度（诊断用）✓。 */
+    public String undoDiag() {
+        return "undo=" + this.undoStack.size() + " redo=" + this.redoStack.size();
+    }
+
     public int addReferenceLines(final java.util.List<double[]> localSegs) {
         if (this.working == null || localSegs == null || localSegs.isEmpty()) {
             return 0;
@@ -1198,6 +1245,7 @@ public final class SketchSession {
      * @return 真的删掉了才返回 true
      */
     public boolean removeEntity(final Sketch.Entity entity) {
+        pushUndo(); // ★ item 12：删除前记快照 ✓
         if (entity == null || working == null) {
             return false;
         }
@@ -1695,6 +1743,10 @@ public final class SketchSession {
      * @return 是否刚刚完成了一个图元（完成时 pending 会被清空，方便连续画）
      */
     public boolean click(final double u, final double v) {
+        // ★ item 12：每次"落点/画图"之前记一份快照 ⇒ Ctrl+Z 能逐步回退 ✓
+        if (this.working != null && this.tool() != Tool.SELECT) {
+            pushUndo();
+        }
         if (stage != Stage.EDITING || working == null) {
             return false;
         }

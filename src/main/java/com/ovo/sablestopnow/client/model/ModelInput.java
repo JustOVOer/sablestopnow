@@ -84,6 +84,8 @@ public final class ModelInput {
             return;
         }
         final long window = mc.getWindow().getWindow();
+        tickSketchHotkeys(window);
+        com.ovo.sablestopnow.client.model.ModelUi.tickFeaturePreview(); // item 5 线框预览
         final double x = mc.mouseHandler.xpos();
         final double y = mc.mouseHandler.ypos();
         if (!haveLast) {
@@ -207,6 +209,31 @@ public final class ModelInput {
                 lift * step,
                 ahead.z * forward * step + right.z * strafe * step));
     }
+
+    /**
+     * 草图热键（item 12）：**Ctrl+Z 撤销**、**Ctrl+Y / Shift+Ctrl+Z 重做** ✓
+     *
+     * <p>用"上升沿"触发（按住不会连发）✓；只在草图编辑中生效 ✓。
+     */
+    private static void tickSketchHotkeys(final long window) {
+        final boolean ctrl = isDown(window, GLFW.GLFW_KEY_LEFT_CONTROL, GLFW.GLFW_KEY_RIGHT_CONTROL);
+        final boolean shift = isDown(window, GLFW.GLFW_KEY_LEFT_SHIFT, GLFW.GLFW_KEY_RIGHT_SHIFT);
+        final boolean z = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_Z) == GLFW.GLFW_PRESS;
+        final boolean y = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_Y) == GLFW.GLFW_PRESS;
+        final boolean undoPressed = ctrl && z && !shift;
+        final boolean redoPressed = ctrl && (y || (z && shift));
+        if (undoPressed && !lastUndoDown && com.ovo.sablestopnow.client.SketchClient.active()) {
+            com.ovo.sablestopnow.client.SketchClient.undo();
+        }
+        if (redoPressed && !lastRedoDown && com.ovo.sablestopnow.client.SketchClient.active()) {
+            com.ovo.sablestopnow.client.SketchClient.redo();
+        }
+        lastUndoDown = undoPressed;
+        lastRedoDown = redoPressed;
+    }
+
+    private static boolean lastUndoDown;
+    private static boolean lastRedoDown;
 
     private static void tickCameraDrag(final long window, final Minecraft mc, final double dx, final double dy) {
         final boolean middle = GLFW.glfwGetMouseButton(window, BUTTON_MIDDLE) == GLFW.GLFW_PRESS;

@@ -1872,6 +1872,25 @@ public final class ModelUi {
      *
      * <p>顺序调整 = 交换序号 + **依赖校验**；违反就拒绝并提示，树保持原样 ✓
      */
+    /** 树行悬停 ⇒ 让渲染侧高亮对应特征 ✓（item 6） */
+    public static void syncFeatureHover() {
+        final String key = tree == null ? null : tree.hoveredKey();
+        if (key == null || !key.startsWith("solid:")) {
+            com.ovo.sablestopnow.client.model.FeatureHighlight.clear();
+            return;
+        }
+        final String[] parts = key.split(":");
+        if (parts.length < 3) {
+            com.ovo.sablestopnow.client.model.FeatureHighlight.clear();
+            return;
+        }
+        try {
+            com.ovo.sablestopnow.client.model.FeatureHighlight.set(java.util.UUID.fromString(parts[2]));
+        } catch (final IllegalArgumentException e) {
+            com.ovo.sablestopnow.client.model.FeatureHighlight.clear();
+        }
+    }
+
     private static void featureAction(final String action,
                                       final com.ovo.sablestopnow.sketch.Solid solid) {
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();

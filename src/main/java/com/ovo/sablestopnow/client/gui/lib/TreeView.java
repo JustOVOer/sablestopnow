@@ -306,8 +306,16 @@ public class TreeView extends Container {
         return true;
     }
 
+    /** 当前帧鼠标悬停行的 key ✓（null = 没有悬停）—— 供"树行悬停高亮对应特征"用 ✓ */
+    private String hoveredKey;
+
+    public String hoveredKey() {
+        return hoveredKey;
+    }
+
     @Override
     public void render(final UiContext ctx, final GuiGraphics g) {
+        hoveredKey = null; // 每帧重算 ✓
         if (bg != 0) {
             UiDraw.rect(g, x, y, w, h, bg);
         }

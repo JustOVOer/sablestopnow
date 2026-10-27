@@ -384,6 +384,32 @@ public final class SketchRenderer {
                 drawPreview(vcq, pose, cameraPos, sub.renderPose(), sketch);
             }
         }
+        // ★ item 6：**树行悬停 ⇒ 高亮对应特征** ✓（橙色描边，不改选择集）
+        if (!sketching && com.ovo.sablestopnow.client.model.FeatureHighlight.id() != null) {
+            final java.util.UUID hl = com.ovo.sablestopnow.client.model.FeatureHighlight.id();
+            final float[] hot = {1.00f, 0.48f, 0.10f};
+            for (final Solid.Placed placed : solids) {
+                if (hl == null || !hl.equals(placed.solid().id())) {
+                    continue;
+                }
+                final ClientSubLevel hsub = byId.get(placed.solid().body());
+                if (hsub == null) {
+                    continue;
+                }
+                final Pose3dc hp = hsub.renderPose();
+                final Vector3d hn = placed.planeNormal();
+                if (hn != null) {
+                    final org.joml.Vector3d w = hp.transformPosition(hn, new org.joml.Vector3d());
+                    final Vec3 up = new Vec3(w.x, w.y, w.z);
+                    quadUp = up.lengthSqr() < 1.0e-9 ? new Vec3(0, 1, 0) : up.normalize();
+                }
+                for (final Vector3d[] e : placed.edges()) {
+                    quadLine(vcq, pose, world(cameraPos, hp, e[0]), world(cameraPos, hp, e[1]),
+                            hot);
+                    drawn++;
+                }
+            }
+        }
         // ★ item 5：**模型操作的黄色线框预览** ✓（拉伸/切割/旋转/…）
         if (com.ovo.sablestopnow.client.model.FeaturePreview.active()) {
             final var fbp = byId.get(com.ovo.sablestopnow.client.model.FeaturePreview.body());

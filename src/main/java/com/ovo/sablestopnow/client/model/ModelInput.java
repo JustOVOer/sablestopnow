@@ -86,6 +86,7 @@ public final class ModelInput {
         final long window = mc.getWindow().getWindow();
         tickSketchHotkeys(window);
         com.ovo.sablestopnow.client.model.ModelUi.tickFeaturePreview(); // item 5 线框预览
+        com.ovo.sablestopnow.client.model.ModelUi.syncFeatureHover();     // item 6 树行悬停高亮
         final double x = mc.mouseHandler.xpos();
         final double y = mc.mouseHandler.ypos();
         if (!haveLast) {

@@ -234,6 +234,23 @@ public class SolidData extends SavedData {
                   }
                   entry.put("edges", edgeList);
               }
+              case Solid.Shape.Mirror m -> {
+                  // ★ item 9：镜像特征 ✓（平面点 + 法线 + 被镜像的源特征 id 列表）
+                  entry.putString("shape", "mirror");
+                  entry.putDouble("mo", m.ox());
+                  entry.putDouble("mo2", m.oy());
+                  entry.putDouble("mo3", m.oz());
+                  entry.putDouble("mn", m.nx());
+                  entry.putDouble("mn2", m.ny());
+                  entry.putDouble("mn3", m.nz());
+                  final ListTag srcList = new ListTag();
+                  for (final java.util.UUID id2 : m.sources()) {
+                      if (id2 != null) {
+                          srcList.add(net.minecraft.nbt.NbtUtils.createUUID(id2));
+                      }
+                  }
+                  entry.put("mirrorSources", srcList);
+              }
         }
         // 外观（贴图）：用 SolidAppearance 自己的编码，本层不解释任何规则
         final String[] look = solid.appearance().encode();
@@ -279,6 +296,20 @@ public class SolidData extends SavedData {
                 // ★ 需求 ⑥：切割体 ✓
                   // ★ item 7：基准面特征 ✓
                   // ★ item 8：圆角特征 ✓
+                  // ★ item 9：镜像特征 ✓
+                  case "mirror" -> {
+                      final java.util.List<java.util.UUID> srcs = new java.util.ArrayList<>();
+                      for (final Tag idTag : entry.getList("mirrorSources", Tag.TAG_INT_ARRAY)) {
+                          final java.util.UUID u2 = net.minecraft.nbt.NbtUtils.loadUUID(idTag);
+                          if (u2 != null) {
+                              srcs.add(u2);
+                          }
+                      }
+                      yield new Solid.Shape.Mirror(
+                              entry.getDouble("mo"), entry.getDouble("mo2"), entry.getDouble("mo3"),
+                              entry.getDouble("mn"), entry.getDouble("mn2"), entry.getDouble("mn3"),
+                              srcs);
+                  }
                   case "fillet" -> {
                       final java.util.List<Solid.Shape.EdgeRef> refs = new java.util.ArrayList<>();
                       for (final Tag et : entry.getList("edges", Tag.TAG_COMPOUND)) {

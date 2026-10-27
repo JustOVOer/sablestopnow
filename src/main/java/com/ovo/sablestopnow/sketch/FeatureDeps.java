@@ -94,7 +94,18 @@ public final class FeatureDeps {
                 }
             }
         }
-        // ⑤ 切割必须在第一个实心特征之后
+        // ⑤ 镜像的**源特征**必须排在它之前 ✓
+        for (final Solid s : solids) {
+            if (s.shape() instanceof final Solid.Shape.Mirror m) {
+                for (final java.util.UUID src : m.sources()) {
+                    final Integer si = indexOf.get(src);
+                    if (si != null && si > s.index()) {
+                        return "model.order.mirror_before_source";
+                    }
+                }
+            }
+        }
+        // ⑥ 切割必须在第一个实心特征之后
         final List<Node> ordered = nodes(solids);
         boolean materialSeen = false;
         for (final Node n : ordered) {

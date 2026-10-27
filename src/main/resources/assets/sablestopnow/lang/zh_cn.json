@@ -742,5 +742,12 @@
   "model.tool.fillet.hint": "点一条棱、设半径后创建圆角（等半径；凸棱；轴对齐棱）",
   "gui.sablestopnow.fillet.title": "新建圆角",
   "gui.sablestopnow.fillet.radius": "半径",
-  "model.fillet.pick_edge": "请先点一条…棱（圆角工具，第一版只支持轴对齐凸棱）"
+  "model.fillet.pick_edge": "请先点一条…棱（圆角工具，第一版只支持轴对齐凸棱）",
+  "model.mirror.item": "镜像%1$s",
+  "model.order.mirror_before_source": "镜像必须排在其源特征之后",
+  "model.tool.mirror": "镜像",
+  "model.tool.mirror.short": "镜像",
+  "model.tool.mirror.hint": "先点一个面作为镜像面，再在右栏选择要镜像的特征",
+  "model.mirror.pick_plane": "请先点一个面作为镜像面",
+  "model.mirror.no_sources": "还没有选择要镜像的特征（在右栏点特征行）"
 }

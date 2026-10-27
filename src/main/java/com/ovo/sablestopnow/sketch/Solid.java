@@ -74,6 +74,28 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
          *
          * <p>端点用来在重建时**核对棱是否还存在**（上游改了参数、棱没了 ⇒ 圆角失效并提示）✓
          */
+        /**
+         * **镜像特征** ✓（item 9）：关于一个平面镜像若干特征。
+         *
+         * <p>镜像产物**不单独占树行** —— 它们属于这个镜像特征（{@code placeAll} 会把反射后的
+         * 盒子/线框/网格作为**该特征的 Placed** 输出）✓ 与 SolidWorks 一致 ✓
+         *
+         * <p>限制（第一版）：平面法线按**轴对齐**处理（反射 AABB 仍是 AABB ✓）；斜平面会退化 ✗
+         */
+        record Mirror(double ox, double oy, double oz, double nx, double ny, double nz,
+                      java.util.List<java.util.UUID> sources) implements Shape {
+            public Mirror {
+                final double len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+                if (!Double.isFinite(len) || len < 1.0e-9) {
+                    throw new IllegalArgumentException("镜像平面法线不能是零向量");
+                }
+                nx /= len;
+                ny /= len;
+                nz /= len;
+                sources = sources == null ? java.util.List.of() : java.util.List.copyOf(sources);
+            }
+        }
+
         record EdgeRef(java.util.UUID solidId, double ax, double ay, double az,
                        double bx, double by, double bz) {
         }
@@ -168,6 +190,48 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 ("fillet:" + body + ":" + index).getBytes(java.nio.charset.StandardCharsets.UTF_8));
         return new Solid(UUID.randomUUID(), body, placeholderSketch, index,
                 new Shape.Fillet(radius, edges), SolidAppearance.EMPTY);
+    }
+
+    /** 新建一个**镜像特征** ✓（item 9；占位 sketch id 同其它新特征） */
+    public static Solid createMirror(final UUID body, final int index,
+                                     final double ox, final double oy, final double oz,
+                                     final double nx, final double ny, final double nz,
+                                     final java.util.List<UUID> sources) {
+        final UUID placeholderSketch = UUID.nameUUIDFromBytes(
+                ("mirror:" + body + ":" + index).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return new Solid(UUID.randomUUID(), body, placeholderSketch, index,
+                new Shape.Mirror(ox, oy, oz, nx, ny, nz, sources), SolidAppearance.EMPTY);
+    }
+
+    /** 是不是镜像特征 ✓ */
+    public boolean isMirror() {
+        return this.shape instanceof Shape.Mirror;
+    }
+
+    /** 把一个盒子关于平面（点 + 单位法线）反射 ✓（AABB ⇒ AABB） */
+    public static double[] reflectBox(final double[] box, final double[] o, final double[] n) {
+        double minX = Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double minZ = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+        double maxZ = -Double.MAX_VALUE;
+        for (int i = 0; i < 8; i++) {
+            final double x = ((i & 1) == 0 ? box[0] : box[3]) - o[0];
+            final double y = ((i & 2) == 0 ? box[1] : box[4]) - o[1];
+            final double z = ((i & 4) == 0 ? box[2] : box[5]) - o[2];
+            final double d = x * n[0] + y * n[1] + z * n[2];
+            final double rx = x - 2 * d * n[0] + o[0];
+            final double ry = y - 2 * d * n[1] + o[1];
+            final double rz = z - 2 * d * n[2] + o[2];
+            minX = Math.min(minX, rx);
+            minY = Math.min(minY, ry);
+            minZ = Math.min(minZ, rz);
+            maxX = Math.max(maxX, rx);
+            maxY = Math.max(maxY, ry);
+            maxZ = Math.max(maxZ, rz);
+        }
+        return new double[] {minX, minY, minZ, maxX, maxY, maxZ};
     }
 
     /** 是不是圆角特征 ✓ */
@@ -316,6 +380,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Cut c -> List.of(); // 切割体没有自己的碰撞 ✓
             case Shape.Plane p -> List.of(); // 基准面不是材料 ✓
             case Shape.Fillet f -> List.of(); // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
+            case Shape.Mirror m -> List.of(); // 镜像的材料由反射得出 ✓
             case Shape.Extrusion e -> {
                 // ⚠ **曲面走棱盒（OBB），轴对齐轮廓走扫描线。** 判据是刻意的：
                 //   矩形/L 形的扫描线分解是**精确**的、盒子也最少，没有理由给它加朝向；
@@ -412,6 +477,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Cut c -> 0.0; // 切割体不提供材料体积 ✓
             case Shape.Plane p -> 0.0; // 基准面不是材料 ✓
             case Shape.Fillet f -> 0.0; // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
+            case Shape.Mirror m -> 0.0; // 镜像的材料由反射得出 ✓
         };
     }
 
@@ -523,6 +589,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Cut c -> EMPTY_MESH; // 切割体不渲染 ✓
             case Shape.Plane p -> EMPTY_MESH; // 基准面不是材料 ✓
             case Shape.Fillet f -> EMPTY_MESH; // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
+            case Shape.Mirror m -> EMPTY_MESH; // 镜像的材料由反射得出 ✓
         };
     }
 
@@ -542,6 +609,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Cut c -> List.of(); // 切割体不画线框 ✓
             case Shape.Plane p -> List.of(); // 基准面不是材料 ✓
             case Shape.Fillet f -> List.of(); // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
+            case Shape.Mirror m -> List.of(); // 镜像的材料由反射得出 ✓
         };
     }
 
@@ -836,7 +904,90 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             out.add(new Placed(solid, boxes, drawnEdges, mesh, normal));
         }
+        // ★ item 9：**镜像特征**的产物（反射源特征的盒子/线框/网格）
+        //   它们作为**该镜像特征自己的 Placed** 输出 ⇒ 树里只有"镜像N"一行 ✓（与 SolidWorks 一致）
+        for (final Solid mirror : solids) {
+            if (!(mirror.shape() instanceof final Shape.Mirror m)) {
+                continue;
+            }
+            final double[] o = {m.ox(), m.oy(), m.oz()};
+            final double[] n = {m.nx(), m.ny(), m.nz()};
+            final List<double[]> boxes = new ArrayList<>();
+            final List<Vector3d[]> edges = new ArrayList<>();
+            SolidMesh.Mesh mesh = null;
+            for (final UUID sid : m.sources()) {
+                final Solid src = byId.get(sid);
+                if (src == null || src.shape instanceof Shape.Plane
+                        || src.shape instanceof Shape.Fillet || src.shape instanceof Shape.Mirror
+                        || src.shape instanceof Shape.Cut) {
+                    continue;
+                }
+                final Sketch srcSketch = src.resolve(sketches);
+                if (srcSketch == null) {
+                    continue;
+                }
+                for (final double[] b : src.boxes(srcSketch)) {
+                    boxes.add(reflectBox(b, o, n));
+                }
+                for (final Vector3d[] e : src.edges(srcSketch)) {
+                    edges.add(new Vector3d[] {reflectPoint(e[0], o, n), reflectPoint(e[1], o, n)});
+                }
+                final SolidMesh.Mesh sm = src.mesh(srcSketch);
+                if (sm != null && !sm.isEmpty()) {
+                    mesh = mesh == null ? reflectMesh(sm, o, n) : concatMesh(mesh,
+                            reflectMesh(sm, o, n));
+                }
+            }
+            if (boxes.isEmpty() || edges.isEmpty()) {
+                continue;
+            }
+            out.add(new Placed(mirror, boxes, edges, mesh,
+                    new Vector3d(m.nx(), m.ny(), m.nz())));
+        }
         return out;
+    }
+
+    /** 反射一个点 ✓ */
+    public static Vector3d reflectPoint(final Vector3d p, final double[] o, final double[] n) {
+        final double x = p.x - o[0];
+        final double y = p.y - o[1];
+        final double z = p.z - o[2];
+        final double d = x * n[0] + y * n[1] + z * n[2];
+        return new Vector3d(x - 2 * d * n[0] + o[0], y - 2 * d * n[1] + o[1],
+                z - 2 * d * n[2] + o[2]);
+    }
+
+    /** 反射一个网格 ✓（位置反射、法线取反、三角形绕序翻转） */
+    private static SolidMesh.Mesh reflectMesh(final SolidMesh.Mesh in, final double[] o,
+                                              final double[] n) {
+        final List<SolidMesh.Vertex> vs = new java.util.ArrayList<>(in.vertices().size());
+        for (final SolidMesh.Vertex v : in.vertices()) {
+            final Vector3d p = reflectPoint(v.position(), o, n);
+            vs.add(new SolidMesh.Vertex(p,
+                    new Vector3d(-v.normal().x, -v.normal().y, -v.normal().z), v.u(), v.v()));
+        }
+        final int[] src = in.indices();
+        final int[] outIdx = new int[src.length];
+        for (int i = 0; i + 2 < src.length; i += 3) {
+            outIdx[i] = src[i];
+            outIdx[i + 1] = src[i + 2]; // 绕序翻转 ✓（否则法线朝内）
+            outIdx[i + 2] = src[i + 1];
+        }
+        return new SolidMesh.Mesh(vs, outIdx);
+    }
+
+    /** 拼接两个网格 ✓（镜像多个源特征时用） */
+    private static SolidMesh.Mesh concatMesh(final SolidMesh.Mesh a, final SolidMesh.Mesh b) {
+        final List<SolidMesh.Vertex> vs = new java.util.ArrayList<>(a.vertices());
+        vs.addAll(b.vertices());
+        final int[] ia = a.indices();
+        final int[] ib = b.indices();
+        final int[] outIdx = new int[ia.length + ib.length];
+        System.arraycopy(ia, 0, outIdx, 0, ia.length);
+        for (int i = 0; i < ib.length; i++) {
+            outIdx[ia.length + i] = ib[i] + a.vertices().size();
+        }
+        return new SolidMesh.Mesh(vs, outIdx);
     }
 
     /**

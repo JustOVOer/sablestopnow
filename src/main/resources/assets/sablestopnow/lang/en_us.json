@@ -742,5 +742,12 @@
   "model.tool.fillet.hint": "Click an edge, set the radius, then create an equal-radius fillet",
   "gui.sablestopnow.fillet.title": "New fillet",
   "gui.sablestopnow.fillet.radius": "Radius",
-  "model.fillet.pick_edge": "Pick an edge first (axis-aligned convex edges only, v1)"
+  "model.fillet.pick_edge": "Pick an edge first (axis-aligned convex edges only, v1)",
+  "model.mirror.item": "Mirror %1$s",
+  "model.order.mirror_before_source": "A mirror must come after its sources",
+  "model.tool.mirror": "Mirror",
+  "model.tool.mirror.short": "Mirror",
+  "model.tool.mirror.hint": "Pick a plane face, then select features in the tree",
+  "model.mirror.pick_plane": "Pick a plane face first",
+  "model.mirror.no_sources": "No source features selected yet (click feature rows)"
 }

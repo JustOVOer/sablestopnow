@@ -54,7 +54,7 @@ public final class FeatureHover {
      * @param worldSegs   面的边界直线段（世界坐标）
      * @param worldVerts  面的顶点（世界坐标）
      */
-    public record Hit(UUID body, Features.Face face, Kind kind, int index,
+    public record Hit(UUID body, UUID solidId, Features.Face face, Kind kind, int index,
                       Vector3d localCenter, Vector3d localNormal, Vector3d localU,
                       List<Vec3[]> worldTris, List<Vec3[]> worldSegs, List<Vec3> worldVerts,
                       double distance) {
@@ -118,7 +118,7 @@ public final class FeatureHover {
                         final double t = rayTriangle(localFrom, localDir, tri[0], tri[1], tri[2]);
                         if (t > 0 && t < bestT) {
                             bestT = t;
-                            best = makeHit(bodyId, face, pose, localFrom, localDir, from, t);
+                            best = makeHit(bodyId, p.solid().id(), face, pose, localFrom, localDir, from, t);
                         }
                     }
                 }
@@ -128,7 +128,7 @@ public final class FeatureHover {
     }
 
     /** 命中后的分类（点 → 棱 → 面）与世界坐标缓存 ✓。 */
-    private static Hit makeHit(final UUID bodyId, final Features.Face face, final Pose3dc pose,
+    private static Hit makeHit(final UUID bodyId, final UUID solidId, final Features.Face face, final Pose3dc pose,
                                final Vector3d localFrom, final Vector3d localDir, final Vec3 from,
                                final double t) {
         final Vector3d localHit = localFrom.fma(t, localDir, new Vector3d());
@@ -198,7 +198,7 @@ public final class FeatureHover {
         if (Math.abs(axisU.dot(normal)) > 1.0e-6) {
             axisU.fma(-axisU.dot(normal), normal).normalize();
         }
-        return new Hit(bodyId, face, kind, kind == Kind.VERTEX ? vertIndex : edgeIndex,
+        return new Hit(bodyId, solidId, face, kind, kind == Kind.VERTEX ? vertIndex : edgeIndex,
                 new Vector3d(face.origin()), normal, axisU, worldTris, worldSegs, worldVerts, dist);
     }
 

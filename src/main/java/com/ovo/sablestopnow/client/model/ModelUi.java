@@ -2060,7 +2060,8 @@ public final class ModelUi {
         }
         index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(mirrorBody, 0) + 1);
         final com.ovo.sablestopnow.sketch.Solid mirror =
-                com.ovo.sablestopnow.sketch.Solid.createMirror(mirrorBody, index,
+                com.ovo.sablestopnow.sketch.Solid.createMirror(mirrorBody,
+                        sketchIdOfSolid(mirrorSources.isEmpty() ? null : mirrorSources.get(0)), index,
                         mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z,
                         mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z,
                         new java.util.ArrayList<>(mirrorSources));
@@ -2122,6 +2123,7 @@ public final class ModelUi {
         filletEdgeA = new org.joml.Vector3d(seg[0], seg[1], seg[2]);
         filletEdgeB = new org.joml.Vector3d(seg[3], seg[4], seg[5]);
         filletSourceSolid = hit.body();
+        filletSolidId = hit.solidId();
         updateFilletPreview(filletRadius.get());
         lastLeftSignature = null;
         refreshLeftPanel();
@@ -2184,7 +2186,8 @@ public final class ModelUi {
                         filletEdgeA.x, filletEdgeA.y, filletEdgeA.z,
                         filletEdgeB.x, filletEdgeB.y, filletEdgeB.z);
         final com.ovo.sablestopnow.sketch.Solid fillet =
-                com.ovo.sablestopnow.sketch.Solid.createFillet(filletSourceSolid, index, radius,
+                com.ovo.sablestopnow.sketch.Solid.createFillet(filletSourceSolid,
+                        sketchIdOfSolid(filletSolidId), index, radius,
                         java.util.List.of(ref));
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(fillet);
         LOCAL_SOLID_INDEX.put(filletSourceSolid, fillet.index());
@@ -2209,10 +2212,32 @@ public final class ModelUi {
         return com.ovo.sablestopnow.client.model.FeatureHover.get();
     }
 
+    /**
+     * 由**实体 id** 找它引用的草图 ✓（新特征必须挂在真实草图上，否则树的分组会跳过它 ✗
+     * —— 这也解释了"创建了但右边栏没有"）
+     */
+    private static java.util.UUID sketchIdOfSolid(final java.util.UUID solidId) {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        if (level == null || solidId == null) {
+            return null;
+        }
+        for (final com.ovo.sablestopnow.sketch.Solid.Placed pl
+                : com.ovo.sablestopnow.sketch.SolidClientState.placed(level)) {
+            if (pl.solid().id().equals(solidId)) {
+                return pl.solid().sketchId();
+            }
+        }
+        return null;
+    }
+
     /** 基准面工具当前拾取到的面：中心（局部）+ 单位法线 ✓ */
     private static double[] planeFaceOrigin;
     private static double[] planeFaceNormal;
     private static java.util.UUID planeSourceSolid;
+    /** 拾取到的那条棱/那个面**属于哪个实体**（用于把新特征挂到它的真实草图上）✓ */
+    private static java.util.UUID planeSolidId;
+    private static java.util.UUID filletSolidId;
     private static int planeSourceFace = -1;
 
     /** 基准面工具：点到一个模型面 ⇒ 记下来并打开"距离"输入框（带实时预览）✓ */
@@ -2228,6 +2253,7 @@ public final class ModelUi {
         planeFaceNormal = new double[] {hit.localNormal().x, hit.localNormal().y,
                 hit.localNormal().z};
         planeSourceSolid = hit.body();
+        planeSolidId = hit.solidId();
         planeSourceFace = hit.face().id();
         updatePlanePreview(planeDistance.get());
         // ★ 选完面**只刷新左栏**：参数与"创建"按钮都在左栏（用户要求"进去就有完整菜单"）✓
@@ -2282,7 +2308,8 @@ public final class ModelUi {
         }
         index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(planeSourceSolid, 0) + 1);
         final com.ovo.sablestopnow.sketch.Solid plane =
-                com.ovo.sablestopnow.sketch.Solid.createPlane(planeSourceSolid, index,
+                com.ovo.sablestopnow.sketch.Solid.createPlane(planeSourceSolid,
+                        sketchIdOfSolid(planeSolidId), index,
                         planeFaceOrigin[0], planeFaceOrigin[1], planeFaceOrigin[2],
                         planeFaceNormal[0], planeFaceNormal[1], planeFaceNormal[2],
                         distance, planeSourceSolid, planeSourceFace);

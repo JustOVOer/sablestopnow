@@ -200,45 +200,36 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      * 这样 `SolidData` / 网络 / 校验这些既有链路都能原样复用 ✓
      * 依赖校验那边会**跳过面特征的草图检查**（见 {@code FeatureDeps}）✓
      */
-    public static Solid createPlane(final UUID body, final int index,
+    public static Solid createPlane(final UUID body, final UUID sketchId, final int index,
                                     final double ox, final double oy, final double oz,
                                     final double nx, final double ny, final double nz,
                                     final double distance, final UUID sourceSolid,
                                     final int sourceFace) {
-        final UUID placeholderSketch = UUID.nameUUIDFromBytes(
-                ("plane:" + body + ":" + index).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        return new Solid(UUID.randomUUID(), body, placeholderSketch, index,
-                new Shape.Plane(ox, oy, oz, nx, ny, nz, distance, sourceSolid, sourceFace),
-                SolidAppearance.EMPTY);
+        return new Solid(UUID.randomUUID(), body, sketchId, index,
+                new Shape.Plane(ox, oy, oz, nx, ny, nz, distance, sourceSolid, sourceFace), SolidAppearance.EMPTY);
     }
 
     /** 新建一个**圆角特征** ✓（item 8；与基准面一样用确定性占位 sketch id） */
-    public static Solid createFillet(final UUID body, final int index, final double radius,
+    public static Solid createFillet(final UUID body, final UUID sketchId, final int index, final double radius,
                                      final java.util.List<Shape.EdgeRef> edges) {
-        final UUID placeholderSketch = UUID.nameUUIDFromBytes(
-                ("fillet:" + body + ":" + index).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        return new Solid(UUID.randomUUID(), body, placeholderSketch, index,
+        return new Solid(UUID.randomUUID(), body, sketchId, index,
                 new Shape.Fillet(radius, edges), SolidAppearance.EMPTY);
     }
 
     /** 新建一个**镜像特征** ✓（item 9；占位 sketch id 同其它新特征） */
-    public static Solid createMirror(final UUID body, final int index,
+    public static Solid createMirror(final UUID body, final UUID sketchId, final int index,
                                      final double ox, final double oy, final double oz,
                                      final double nx, final double ny, final double nz,
                                      final java.util.List<UUID> sources) {
-        final UUID placeholderSketch = UUID.nameUUIDFromBytes(
-                ("mirror:" + body + ":" + index).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        return new Solid(UUID.randomUUID(), body, placeholderSketch, index,
+        return new Solid(UUID.randomUUID(), body, sketchId, index,
                 new Shape.Mirror(ox, oy, oz, nx, ny, nz, sources), SolidAppearance.EMPTY);
     }
 
     /** 新建一个**阵列特征** ✓（item 10） */
-    public static Solid createPattern(final UUID body, final int index,
+    public static Solid createPattern(final UUID body, final UUID sketchId, final int index,
                                       final java.util.List<Shape.Dir> dirs,
                                       final java.util.List<UUID> sources) {
-        final UUID placeholderSketch = UUID.nameUUIDFromBytes(
-                ("pattern:" + body + ":" + index).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        return new Solid(UUID.randomUUID(), body, placeholderSketch, index,
+        return new Solid(UUID.randomUUID(), body, sketchId, index,
                 new Shape.Pattern(dirs, sources), SolidAppearance.EMPTY);
     }
 

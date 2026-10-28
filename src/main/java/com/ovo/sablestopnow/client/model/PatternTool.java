@@ -186,7 +186,15 @@ public final class PatternTool {
             dirs.add(new Solid.Shape.Dir(DIRS.get(1).dx(), DIRS.get(1).dy(), DIRS.get(1).dz(),
                     n2, s2));
         }
-        final Solid pat = Solid.createPattern(body, index, dirs, new ArrayList<>(SOURCES));
+        // 挂到第一个源特征的真实草图上（否则树里不会显示）
+        java.util.UUID sk = null;
+        for (final Solid sd : SolidClientState.ofBody(level, body)) {
+            if (SOURCES.contains(sd.id())) {
+                sk = sd.sketchId();
+                break;
+            }
+        }
+        final Solid pat = Solid.createPattern(body, sk, index, dirs, new ArrayList<>(SOURCES));
         SolidNetworking.sendSave(pat);
         LOCAL_INDEX.put(body, pat.index());
         SablestopNow.LOGGER.info("[pattern] created idx={} dirs={} sources={}",

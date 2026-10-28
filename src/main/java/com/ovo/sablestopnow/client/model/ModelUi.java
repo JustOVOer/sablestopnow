@@ -3842,6 +3842,27 @@ public final class ModelUi {
     // ============ 查询 / 工具 ============
 
     /** 鼠标是否落在任一模型模式面板上（决定要不要把点击交给世界）。 */
+    /**
+     * 是否真的点在一个**控件**上（而不是图层根容器）✓
+     *
+     * <p>为什么需要它：模型视图的几个图层（top/tree/left/hud）的**根容器铺满全屏且 consume=true**，
+     * 于是"点在模型上空地"也会被 `Ui.handleMouse` 吞掉 ⇒ `ModelInput` 永远收不到点击
+     *（实测：`[ui-diag] ... model.top=root(consume=true) ...`，且完全没有 `[mouse] leftPress`）✗
+     * 判据改成"命中到非根控件"才让 UI 先处理 ✓
+     */
+    public static boolean pointerOverWidget() {
+        for (final UiLayer layer : Ui.layers()) {
+            if (!layer.visible) {
+                continue;
+            }
+            final Widget hit = layer.root.hitTest(Ui.mouseXd(), Ui.mouseYd());
+            if (hit != null && hit != layer.root) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static boolean pointerOverPanel() {
         for (final UiLayer layer : Ui.layers()) {
             if (!layer.visible) {

@@ -24,6 +24,16 @@ public class MouseHandlerStaffEnhanceMixin {
     private void sablestopnow$staffEnhancePress(final long windowPointer, final int button, final int action,
                                                 final int modifiers, final CallbackInfo ci) {
         try {
+            // 模型视图优先：各图层的根容器铺满全屏且 consume=true，会把"点在模型空地"也吞掉
+            // （实测 [ui-diag] model.top=root(consume=true) 且完全没有 [mouse] leftPress）
+            // ⇒ 只在**没点中任何控件**时抢在 UI 之前，面板按钮/输入框照旧归 UI ✓
+            if (com.ovo.sablestopnow.client.model.ModelMode.isOn()
+                    && !com.ovo.sablestopnow.client.model.ModelUi.pointerOverWidget()) {
+                if (com.ovo.sablestopnow.client.model.ModelInput.handleMouse(button, action, modifiers)) {
+                    ci.cancel();
+                    return;
+                }
+            }
             if (com.ovo.sablestopnow.client.gui.lib.Ui.handleMouse(button, action, modifiers)) {
                 ci.cancel();
                 return;

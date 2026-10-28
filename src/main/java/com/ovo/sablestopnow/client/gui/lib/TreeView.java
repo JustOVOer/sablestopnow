@@ -392,6 +392,11 @@ public class TreeView extends Container {
 
         @Override
         public void render(final UiContext ctx, final GuiGraphics g) {
+            // ★ 悬停行 key：**按几何位置判**（ctx.isHovered 依赖 mouse-move 派发，实测拿不到）
+            if (ctx.mouseX >= x && ctx.mouseX <= x + w
+                    && ctx.mouseY >= y && ctx.mouseY <= y + h && item.selectable) {
+                hoveredKey = item.key;
+            }
             final UiTheme th = ctx.theme;
             final float alpha = rowOpen;
             final boolean isSelected = item.selectAnim.value() > 0.01;

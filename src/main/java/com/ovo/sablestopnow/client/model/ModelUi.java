@@ -2153,16 +2153,32 @@ public final class ModelUi {
             filletSourceSolid = bh.body();
             filletSolidId = null;
             {
-                // 盒棱沿某个轴 ⇒ 另外两个轴就是两个外向面法线（符号用"内外探测"定 ✓）
+                // 盒棱沿某个世界轴 ⇒ **另外两个轴**就是两个面法线 ✓（符号用"内外探测"定）
                 final org.joml.Vector3d d = new org.joml.Vector3d(filletEdgeB).sub(filletEdgeA)
                         .normalize();
+                final double ax = Math.abs(d.x);
+                final double ay = Math.abs(d.y);
+                final double az = Math.abs(d.z);
+                final int edgeAxis = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
+                final int a1 = (edgeAxis + 1) % 3;
+                final int a2 = (edgeAxis + 2) % 3;
                 final org.joml.Vector3d n1 = new org.joml.Vector3d();
-                n1.setComponent(bh.axis(), 1);
-                n1.fma(-n1.dot(d), d);
-                if (n1.lengthSquared() > 1.0e-9) {
-                    n1.normalize();
-                    inferFilletNormals(d, n1,
-                            new org.joml.Vector3d(filletEdgeA).add(filletEdgeB).mul(0.5));
+                n1.setComponent(a1, 1);
+                final org.joml.Vector3d n2 = new org.joml.Vector3d();
+                n2.setComponent(a2, 1);
+                if (n1.lengthSquared() > 1.0e-9 && n2.lengthSquared() > 1.0e-9) {
+                    // 用 n1 定符号（探测朝外），再以 n1 为基准把 n2 定向
+                    final org.joml.Vector3d mid = new org.joml.Vector3d(filletEdgeA)
+                            .add(filletEdgeB).mul(0.5);
+                    inferFilletNormals(d, n1, mid);
+                    if (filletNormal1 != null) {
+                        final org.joml.Vector3d probe = new org.joml.Vector3d(mid)
+                                .fma(5.0e-2, n2);
+                        if (insideAnyBox(probe)) {
+                            n2.negate();
+                        }
+                        filletNormal2 = n2;
+                    }
                 }
             }
             updateFilletPreview(filletRadius.get());

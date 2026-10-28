@@ -2151,6 +2151,11 @@ public final class ModelUi {
     /** Creates the mirror feature. */
     /** 特征在左栏列表里的短标签 ✓（例如"圆角3/拉伸1"） */
     private static String solidShortLabel(final com.ovo.sablestopnow.sketch.Solid sd) {
+        // ★ 用**永久名字**（创建时分配，移动不改变）✓ 排序由树里的行位置体现 ✓
+        return com.ovo.sablestopnow.client.model.FeatureNames.of(sd, true);
+    }
+
+    private static String solidShortLabelOld(final com.ovo.sablestopnow.sketch.Solid sd) {
         final String kind;
         if (sd.isPattern()) {
             kind = "model.pattern.item";

@@ -323,6 +323,19 @@ public class TreeView extends Container {
             UiDraw.rectOutline(g, x, y, w, h, outline, 1);
         }
         renderChildren(ctx, g);
+        // ★ 悬停行：在**树这一层**按几何位置算 ✓
+        //   （行自己的 render 不一定会被调用；这里遍历 rows 用它们的实时矩形，最稳）
+        for (final Row row : rows) {
+            final RowWidget rw = row.widget;
+            if (!rw.visible || rw.w <= 0 || rw.h <= 0) {
+                continue;
+            }
+            if (ctx.mouseX >= rw.x && ctx.mouseX <= rw.x + rw.w
+                    && ctx.mouseY >= rw.y && ctx.mouseY <= rw.y + rw.h) {
+                hoveredKey = row.item.key;
+                break;
+            }
+        }
         final double max = Math.max(0, contentHeight - (h - padTop - padBottom));
         if (max > 0.5) {
             final double track = h - padTop - padBottom;

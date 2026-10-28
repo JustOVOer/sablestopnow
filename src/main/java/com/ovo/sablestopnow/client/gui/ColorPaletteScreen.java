@@ -8,25 +8,30 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * **通用调色板** ✓（item 2）。
  *
- * <p>8 项颜色，每项：色块预览 + **H/S/V 三条滑条** + **十六进制输入框** + **恢复默认** ✓
- * 改动立刻写进配置并保存 ⇒ 渲染侧每帧读配置，**即时生效** ✓
+ * <p>每项一行：名称 + 色块 + **R / G / B 三条滑条（0–255，就是玩家熟悉的 RGB）** + 十六进制 + 复位 ✓
  *
- * <p>用原版控件（Slider/EditBox/Button）实现：调色是纯 2D 表单，
- * 没必要引入自研 UI 库的层/动画体系（少一层就少一类层叠 bug ✓ 见 GUI 自查清单）。
+ * <p>⚠ 三个用户实测反馈的坑，全部在这里定点修掉：
+ * <ol>
+ *   <li><b>滑条乱跑</b>：以前在滑条回调里回写滑条自己的值（还绕过十六进制输入框的 responder），
+ *       拖动时值被反复重置。现在**滑条 → 颜色 → 输入框文字**是单向的；
+ *       回写输入框时用 {@link #suppress} 抑制 responder，**绝不回写滑条** ✓</li>
+ *   <li><b>退出后界面紊乱（凭空多一行退出键）</b>：以前退出时把**同一个**设置页实例再 setScreen 一次，
+ *       而设置页布局是"一次性构建"的，复用实例会留下上一代控件。现在退出时**新建**一个干净的分类页 ✓</li>
+ *   <li><b>按钮没字</b>：全部走本模组语言键，不再依赖父界面残留控件 ✓</li>
+ * </ol>
  */
 public final class ColorPaletteScreen extends Screen {
 
-    /** 一项可调颜色 ✓ */
     private record Item(String key, Component label, String defaultValue,
-                        java.util.function.Function<SablestopNowConfig.Config,
-                                net.neoforged.neoforge.common.ModConfigSpec.ConfigValue<String>> getter) {
+                        Function<SablestopNowConfig.Config, ModConfigSpec.ConfigValue<String>> getter) {
     }
 
     private static final List<Item> ITEMS = List.of(
@@ -49,82 +54,144 @@ public final class ColorPaletteScreen extends Screen {
 
     private final Screen parent;
     private final EditBox[] hexFields = new EditBox[ITEMS.size()];
-    private final ChannelSlider[] hue = new ChannelSlider[ITEMS.size()];
-    private final ChannelSlider[] sat = new ChannelSlider[ITEMS.size()];
-    private final ChannelSlider[] val = new ChannelSlider[ITEMS.size()];
+    private final RgbSlider[][] sliders = new RgbSlider[ITEMS.size()][3];
 
-    /** 每行的当前颜色（0xRRGGBB，不含 alpha）✓ —— 作为滑条/输入的单一真相。 */
+    /** 每行的当前颜色（0xRRGGBB）—— 唯一真相 ✓ */
     private final int[] rgb = new int[ITEMS.size()];
+
+    /** 回写输入框时置位，抑制 responder 递归 ✓ */
+    private boolean suppress;
 
     public ColorPaletteScreen(final Screen parent) {
         super(Component.translatable("gui.sablestopnow.color.title"));
         this.parent = parent;
     }
 
+    // ================= 布局 =================
+
+    private int left() {
+        return Math.max(8, this.width / 2 - 186);
+    }
+
+    private int rowY(final int i) {
+        return 42 + i * 21;
+    }
+
     @Override
     protected void init() {
-        final int rowH = 22;
-        final int top = 40;
-        final int left = Math.max(10, this.width / 2 - 170);
-        final int labelW = 74;
+        final int labelW = 78;
         final int swatchW = 14;
-        final int sliderW = 52;
-        final int hexW = 66;
-        for (int i = 0; i < ITEMS.size(); i++) {
-            final int idx = i;
-            final int y = top + i * rowH;
+        final int sliderW = 48;
+        final int hexW = 68;
+        final String[] names = {"R", "G", "B"};
+        for (int row = 0; row < ITEMS.size(); row++) {
+            final int i = row;
             rgb[i] = parseRgb(read(ITEMS.get(i)));
-            final int sx = left + labelW + swatchW + 6;
-            hue[i] = addRenderableWidget(new ChannelSlider(sx, y, sliderW, "H", 0, 360,
-                    hueOf(rgb[i]), v -> setChannel(idx, 0, v)));
-            sat[i] = addRenderableWidget(new ChannelSlider(sx + sliderW + 2, y, sliderW, "S", 0, 100,
-                    satOf(rgb[i]), v -> setChannel(idx, 1, v)));
-            val[i] = addRenderableWidget(new ChannelSlider(sx + (sliderW + 2) * 2, y, sliderW, "V", 0, 100,
-                    valOf(rgb[i]), v -> setChannel(idx, 2, v)));
+            final int sx = left() + labelW + swatchW + 6;
+            final int y = rowY(i);
+            for (int ch = 0; ch < 3; ch++) {
+                final int idx = i;
+                final int c = ch;
+                sliders[i][ch] = addRenderableWidget(new RgbSlider(
+                        sx + ch * (sliderW + 2), y, sliderW, channelOf(rgb[i], ch), names[ch],
+                        v -> onChannel(idx, c, v)));
+            }
             final EditBox hex = new EditBox(this.font,
-                    sx + (sliderW + 2) * 3 + 4, y + 1, hexW, 18,
+                    sx + 3 * (sliderW + 2) + 4, y + 1, hexW, 18,
                     Component.translatable("gui.sablestopnow.color.hex"));
-            hex.setMaxLength(8);
+            hex.setMaxLength(6);
             hex.setValue(String.format("%06X", rgb[i] & 0xFFFFFF));
-            hex.setResponder(text -> applyHex(idx, text));
+            hex.setResponder(text -> {
+                if (suppress) {
+                    return;
+                }
+                final int parsed = parseRgb(text);
+                if (parsed >= 0) {
+                    rgb[i] = parsed;
+                    write(ITEMS.get(i), argbOf(rgb[i]));
+                    syncSliders(i);
+                }
+            });
             hexFields[i] = addRenderableWidget(hex);
             addRenderableWidget(Button.builder(
                             Component.translatable("gui.sablestopnow.color.reset"),
-                            b -> resetRow(idx))
-                    .bounds(sx + (sliderW + 2) * 3 + 4 + hexW + 4, y, 34, 20).build());
+                            b -> resetRow(i))
+                    .bounds(sx + 3 * (sliderW + 2) + 4 + hexW + 4, y, 38, 20).build());
         }
+        final int bottom = rowY(ITEMS.size()) + 4;
         addRenderableWidget(Button.builder(Component.translatable("gui.sablestopnow.color.done"),
-                b -> this.onClose()).bounds(this.width / 2 - 50, top + ITEMS.size() * rowH + 10,
-                100, 20).build());
+                        b -> this.onClose())
+                .bounds(this.width / 2 - 50, bottom, 100, 20).build());
     }
 
     @Override
     public void render(final GuiGraphics g, final int mouseX, final int mouseY, final float partial) {
-        this.renderBackground(g, mouseX, mouseY, partial);
-        g.drawCenteredString(this.font, this.title, this.width / 2, 16, 0xFFFFFF);
-        final int left = Math.max(10, this.width / 2 - 170);
-        final int labelW = 74;
-        final int rowH = 22;
-        final int top = 40;
+        // 只铺一层暗色：不调 renderBackground ⇒ 不会把底下的设置页糊成一片 ✓
+        g.fill(0, 0, this.width, this.height, 0xF0101418);
+        g.drawCenteredString(this.font, this.title, this.width / 2, 18, 0xFFFFFF);
+        final int labelW = 78;
         for (int i = 0; i < ITEMS.size(); i++) {
-            final int y = top + i * rowH;
-            g.drawString(this.font, ITEMS.get(i).label(), left, y + 6, 0xE6E6E6);
-            // 色块预览 ✓（完整 ARGB，含 alpha：让玩家看到实际不透明度）
+            final int y = rowY(i);
+            g.drawString(this.font, ITEMS.get(i).label(), left(), y + 6, 0xE6E6E6, false);
             final int argb = 0xFF000000 | (rgb[i] & 0xFFFFFF);
-            g.fill(left + labelW, y + 1, left + labelW + 14, y + 19, argb);
-            g.renderOutline(left + labelW, y + 1, 14, 18, 0xFF303840);
+            g.fill(left() + labelW, y + 1, left() + labelW + 14, y + 19, argb);
+            g.renderOutline(left() + labelW, y + 1, 14, 18, 0xFF39424C);
         }
         super.render(g, mouseX, mouseY, partial);
     }
 
     @Override
     public void onClose() {
-        if (this.minecraft != null) {
-            this.minecraft.setScreen(this.parent);
+        if (this.minecraft == null) {
+            return;
+        }
+        // ★ 退出时**新建**一个干净的分类页：复用旧实例会让布局残留上一代控件（"多出一行退出键"）✓
+        final ModSettingsScreen home = new ModSettingsScreen(this.parent);
+        this.minecraft.setScreen(new ModSettingsCategoryScreen(home, ModConfigCategory.COLORS,
+                Math.round(this.width * 0.5f), Math.round(this.height * 0.38f), 4.0f));
+    }
+
+    // ================= 读写 =================
+
+    private void onChannel(final int idx, final int channel, final double value) {
+        final int v = (int) Math.max(0, Math.min(255, Math.round(value)));
+        rgb[idx] = withChannel(rgb[idx], channel, v);
+        write(ITEMS.get(idx), argbOf(rgb[idx]));
+        suppress = true;
+        try {
+            if (hexFields[idx] != null) {
+                final String text = String.format("%06X", rgb[idx] & 0xFFFFFF);
+                if (!text.equalsIgnoreCase(hexFields[idx].getValue())) {
+                    hexFields[idx].setValue(text);
+                }
+            }
+        } finally {
+            suppress = false;
         }
     }
 
-    // ===================== 读写 =====================
+    private void resetRow(final int idx) {
+        final String def = ITEMS.get(idx).defaultValue();
+        rgb[idx] = parseRgb(def);
+        write(ITEMS.get(idx), def);
+        syncSliders(idx);
+        suppress = true;
+        try {
+            if (hexFields[idx] != null) {
+                hexFields[idx].setValue(String.format("%06X", rgb[idx] & 0xFFFFFF));
+            }
+        } finally {
+            suppress = false;
+        }
+    }
+
+    private void syncSliders(final int idx) {
+        for (int ch = 0; ch < 3; ch++) {
+            if (sliders[idx][ch] != null) {
+                sliders[idx][ch].setFromModel(channelOf(rgb[idx], ch));
+            }
+        }
+    }
 
     private static String read(final Item item) {
         try {
@@ -134,63 +201,30 @@ public final class ColorPaletteScreen extends Screen {
         }
     }
 
-    private static void write(final Item item, final String hex) {
+    private static void write(final Item item, final String argbHex) {
         try {
-            item.getter().apply(SablestopNowConfig.INSTANCE).set(hex);
+            item.getter().apply(SablestopNowConfig.INSTANCE).set(argbHex);
             SablestopNowConfig.SPEC.save();
         } catch (final RuntimeException e) {
-            SablestopNow.LOGGER.warn("[color] cannot save {} = {}", item.key(), hex, e);
+            SablestopNow.LOGGER.warn("[color] cannot save {} = {}", item.key(), argbHex, e);
         }
     }
 
-    private void setChannel(final int idx, final int channel, final double value) {
-        final double h = hueOf(rgb[idx]);
-        final double s = satOf(rgb[idx]);
-        final double v = valOf(rgb[idx]);
-        final double nh = channel == 0 ? value : h;
-        final double ns = channel == 1 ? value / 100.0 : s;
-        final double nv = channel == 2 ? value / 100.0 : v;
-        rgb[idx] = hsvToRgb(nh, ns, nv);
-        final String hex = String.format("FF%06X", rgb[idx] & 0xFFFFFF);
-        write(ITEMS.get(idx), hex);
-        final EditBox field = hexFields[idx];
-        if (field != null) {
-            field.setValue(String.format("%06X", rgb[idx] & 0xFFFFFF));
-        }
+    /** 保留固定 alpha，只写 RGB ✓ */
+    private static String argbOf(final int rgb) {
+        return String.format("FF%06X", rgb & 0xFFFFFF);
     }
 
-    private void applyHex(final int idx, final String text) {
-        final int parsed = parseRgb("FF" + text);
-        if (parsed < 0) {
-            return; // 还没输完 / 非法 ⇒ 不动 ✓
-        }
-        rgb[idx] = parsed;
-        write(ITEMS.get(idx), String.format("FF%06X", parsed & 0xFFFFFF));
-        refreshSliders(idx);
+    private static int channelOf(final int rgb, final int ch) {
+        return (rgb >> (16 - ch * 8)) & 0xFF;
     }
 
-    private void resetRow(final int idx) {
-        final String def = ITEMS.get(idx).defaultValue();
-        rgb[idx] = parseRgb(def);
-        write(ITEMS.get(idx), def);
-        final EditBox field = hexFields[idx];
-        if (field != null) {
-            field.setValue(String.format("%06X", rgb[idx] & 0xFFFFFF));
-        }
-        refreshSliders(idx);
+    private static int withChannel(final int rgb, final int ch, final int value) {
+        final int shift = 16 - ch * 8;
+        return (rgb & ~(0xFF << shift)) | ((value & 0xFF) << shift);
     }
 
-    private void refreshSliders(final int idx) {
-        if (hue[idx] != null) {
-            hue[idx].setValue(hueOf(rgb[idx]));
-            sat[idx].setValue(satOf(rgb[idx]));
-            val[idx].setValue(valOf(rgb[idx]));
-        }
-    }
-
-    // ===================== 颜色工具 =====================
-
-    /** "AARRGGBB" / "RRGGBB" ⇒ 0xRRGGBB（失败 -1）。 */
+    /** "RRGGBB"/"AARRGGBB"/"#RRGGBB" ⇒ 0xRRGGBB；非法 -1 ✓ */
     private static int parseRgb(final String hex) {
         if (hex == null) {
             return -1;
@@ -200,7 +234,7 @@ public final class ColorPaletteScreen extends Screen {
             s = s.substring(1);
         }
         if (s.length() == 8) {
-            s = s.substring(2); // 丢掉 alpha
+            s = s.substring(2);
         }
         if (s.length() != 6 || !s.matches("[0-9a-fA-F]{6}")) {
             return -1;
@@ -208,123 +242,34 @@ public final class ColorPaletteScreen extends Screen {
         return (int) Long.parseLong(s, 16);
     }
 
-    private static double hueOf(final int rgb) {
-        final double[] hsv = rgbToHsv(rgb);
-        return hsv[0];
-    }
-
-    private static double satOf(final int rgb) {
-        return rgbToHsv(rgb)[1] * 100.0;
-    }
-
-    private static double valOf(final int rgb) {
-        return rgbToHsv(rgb)[2] * 100.0;
-    }
-
-    /** 0xRRGGBB ⇒ {h(0..360), s(0..1), v(0..1)} ✓ */
-    private static double[] rgbToHsv(final int rgb) {
-        final double r = ((rgb >> 16) & 0xFF) / 255.0;
-        final double g = ((rgb >> 8) & 0xFF) / 255.0;
-        final double b = (rgb & 0xFF) / 255.0;
-        final double max = Math.max(r, Math.max(g, b));
-        final double min = Math.min(r, Math.min(g, b));
-        final double d = max - min;
-        double h = 0;
-        if (d > 1.0e-9) {
-            if (max == r) {
-                h = 60 * (((g - b) / d) % 6);
-            } else if (max == g) {
-                h = 60 * ((b - r) / d + 2);
-            } else {
-                h = 60 * ((r - g) / d + 4);
-            }
-        }
-        if (h < 0) {
-            h += 360;
-        }
-        final double s = max < 1.0e-9 ? 0 : d / max;
-        return new double[] {h, s, max};
-    }
-
-    /** {h(0..360), s(0..1), v(0..1)} ⇒ 0xRRGGBB ✓ */
-    private static int hsvToRgb(final double hIn, final double s, final double v) {
-        final double h = ((hIn % 360.0) + 360.0) % 360.0;
-        final double c = v * s;
-        final double x = c * (1 - Math.abs(((h / 60.0) % 2) - 1));
-        final double m = v - c;
-        double r;
-        double g;
-        double b;
-        if (h < 60) {
-            r = c;
-            g = x;
-            b = 0;
-        } else if (h < 120) {
-            r = x;
-            g = c;
-            b = 0;
-        } else if (h < 180) {
-            r = 0;
-            g = c;
-            b = x;
-        } else if (h < 240) {
-            r = 0;
-            g = x;
-            b = c;
-        } else if (h < 300) {
-            r = x;
-            g = 0;
-            b = c;
-        } else {
-            r = c;
-            g = 0;
-            b = x;
-        }
-        final int ri = (int) Math.round((r + m) * 255.0);
-        final int gi = (int) Math.round((g + m) * 255.0);
-        final int bi = (int) Math.round((b + m) * 255.0);
-        return ((ri & 0xFF) << 16) | ((gi & 0xFF) << 8) | (bi & 0xFF);
-    }
-
-    /** 一个"通道"滑条：显示 名称+数值，回调值 ✓ */
-    private static final class ChannelSlider extends AbstractSliderButton {
+    /** R/G/B 通道滑条：显示"名称 + 数值"，只在拖动时向外发，**不因外部变化重置拖动态** ✓ */
+    private static final class RgbSlider extends AbstractSliderButton {
 
         private final String caption;
-        private final double min;
-        private final double max;
         private final java.util.function.DoubleConsumer onChange;
 
-        private ChannelSlider(final int x, final int y, final int w, final String caption,
-                              final double min, final double max, final double initial,
-                              final java.util.function.DoubleConsumer onChange) {
-            super(x, y, w, 20, Component.empty(),
-                    (initial - min) / Math.max(1.0e-9, max - min));
+        private RgbSlider(final int x, final int y, final int w, final int initial,
+                          final String caption, final java.util.function.DoubleConsumer onChange) {
+            super(x, y, w, 20, Component.empty(), initial / 255.0);
             this.caption = caption;
-            this.min = min;
-            this.max = max;
             this.onChange = onChange;
             this.updateMessage();
         }
 
-        private double realValue() {
-            return this.min + this.value * (this.max - this.min);
-        }
-
-        private void setValue(final double real) {
-            this.value = (real - this.min) / Math.max(1.0e-9, this.max - this.min);
-            this.value = Math.max(0, Math.min(1, this.value));
+        /** 外部（复位 / 十六进制）改值：只更新显示，不回调 ✓ */
+        private void setFromModel(final int value) {
+            this.value = Math.max(0, Math.min(1, value / 255.0));
             this.updateMessage();
         }
 
         @Override
         protected void updateMessage() {
-            this.setMessage(Component.literal(this.caption + " "
-                    + Math.round(this.realValue())));
+            this.setMessage(Component.literal(this.caption + " " + Math.round(this.value * 255.0)));
         }
 
         @Override
         protected void applyValue() {
-            this.onChange.accept(this.realValue());
+            this.onChange.accept(this.value * 255.0);
         }
     }
 }

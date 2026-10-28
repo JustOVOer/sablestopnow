@@ -79,38 +79,6 @@ public final class SketchClient {
 
     static {
         // ★ item 3：画完文字图元 ⇒ 弹出多行编辑框（模态）✓
-        com.ovo.sablestopnow.sketch.SketchSession.setTextCreatedHook(index -> {
-            final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-            if (mc == null || MODE.session() == null || MODE.session().working() == null) {
-                return;
-            }
-            final com.ovo.sablestopnow.sketch.Sketch work = MODE.session().working();
-            if (index < 0 || index >= work.texts().size()) {
-                return;
-            }
-            final com.ovo.sablestopnow.sketch.Sketch.TextNote note = work.texts().get(index);
-            mc.setScreen(new com.ovo.sablestopnow.client.gui.TextNoteEditScreen(mc.screen, note,
-                    new com.ovo.sablestopnow.client.gui.TextNoteEditScreen.Sink() {
-                        @Override
-                        public void save(final String text, final int argb, final double scale,
-                                         final double rotationDeg) {
-                            work.replaceText(index, note.withText(text)
-                                    .withLook(argb, scale, rotationDeg));
-                            com.ovo.sablestopnow.network.SketchNetworking.sendSave(work);
-                            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                                    "[sketch-text] saved idx={} lines={} scale={} rot={}",
-                                      index, text.split("\n", -1).length, scale, rotationDeg);
-                        }
-
-                        @Override
-                        public void delete() {
-                            work.removeText(index);
-                            com.ovo.sablestopnow.network.SketchNetworking.sendSave(work);
-                            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                                    "[sketch-text] deleted idx={}", index);
-                        }
-                    }));
-        });
 
         // ★ item 1：旋转面板等轴时，"点草图里的一条线"即设为旋转轴 ✓
         com.ovo.sablestopnow.sketch.SketchMode.setLinePickHook((sketch, line) ->
@@ -605,6 +573,27 @@ public final class SketchClient {
             return true; // 消费掉 ✓ 不让草图模式再把它当成"落点"✗
         }
         final boolean additive = net.minecraft.client.gui.screens.Screen.hasControlDown();
+          // ★ item 3：**双击已有文本 ⇒ 打开编辑框** ✓（用户要求"双击可以修改"）
+          if (MODE.session() != null
+                  && MODE.session().tool() == com.ovo.sablestopnow.sketch.SketchSession.Tool.SELECT) {
+              final double hu = MODE.session().hoverU();
+              final double hv = MODE.session().hoverV();
+              final int ti = MODE.session().working() == null ? -1
+                      : MODE.session().working().textAt(hu, hv);
+              if (ti >= 0) {
+                  final long now = System.currentTimeMillis();
+                  if (now - lastTextClickAt < 350L
+                          && Math.abs(hu - lastTextU) < 0.25 && Math.abs(hv - lastTextV) < 0.25) {
+                      openTextEditor(ti);
+                      lastTextClickAt = 0L;
+                      return true;
+                  }
+                  lastTextClickAt = now;
+                  lastTextU = hu;
+                  lastTextV = hv;
+              }
+          }
+
         final boolean consumed = MODE.click(localFrom, localDir, additive);
         diagPlaneClick(stageBefore, consumed, MODE.stage(), MODE.planes().size());
         if (!consumed) {
@@ -612,8 +601,53 @@ public final class SketchClient {
         }
         // 刚建好草图 / 正在编辑，把当前草图 id 同步给渲染器（高亮用）
         SketchRenderer.setEditing(MODE.editingId());
+          // ★ item 3：刚画出来的文字图元 ⇒ 立刻弹编辑框（"画出来没有输入框"）
+          final int freshText = MODE.session() == null ? -1 : MODE.session().consumeCreatedText();
+          if (freshText >= 0) {
+              openTextEditor(freshText);
+          }
         diagEntity();
         return true;
+    }
+
+    /** 双击检测：上次点中文本的时间与位置 ✓ */
+    private static long lastTextClickAt = 0L;
+    private static double lastTextU = 0.0;
+    private static double lastTextV = 0.0;
+
+    /** 打开某个文本图元的编辑框（模态；保存后写回并同步）✓ */
+    public static void openTextEditor(final int index) {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc == null || MODE.session() == null || MODE.session().working() == null) {
+            return;
+        }
+        final com.ovo.sablestopnow.sketch.Sketch work = MODE.session().working();
+        if (index < 0 || index >= work.texts().size()) {
+            return;
+        }
+        final com.ovo.sablestopnow.sketch.Sketch.TextNote note = work.texts().get(index);
+        mc.setScreen(new com.ovo.sablestopnow.client.gui.TextNoteEditScreen(mc.screen, note,
+                new com.ovo.sablestopnow.client.gui.TextNoteEditScreen.Sink() {
+                    @Override
+                    public void save(final String text, final int argb, final double scale,
+                                     final double rotationDeg) {
+                        work.replaceText(index, note.withText(text)
+                                .withLook(argb, scale, rotationDeg));
+                        com.ovo.sablestopnow.network.SketchNetworking.sendSave(work);
+                        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                                "[sketch-text] saved idx={} chars={} scale={} rot={}",
+                                index, text.length(), scale, rotationDeg);
+                    }
+
+                    @Override
+                    public void delete() {
+                        work.removeText(index);
+                        com.ovo.sablestopnow.network.SketchNetworking.sendSave(work);
+                        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                                "[sketch-text] deleted idx={}", index);
+                    }
+                }));
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-text] editor opened idx={}", index);
     }
 
     /** 点击诊断：记录点击**前后**的阶段与实际有没有被消费（无条件打）。 */

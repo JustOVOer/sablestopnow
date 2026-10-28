@@ -95,7 +95,8 @@ public final class PatternTool {
         SablestopNow.LOGGER.info("[pattern] sources={}", SOURCES.size());
     }
 
-    private static void openDialog() {
+    /** 左栏"确认"按钮与"再点棱"都走这里 ✓ */
+    public static void openDialog() {
         final Minecraft mc = Minecraft.getInstance();
         mc.setScreen(new PatternCreateScreen(mc.screen, DIRS.size(), 2, 1.0, 1, 0.0,
                 new PatternCreateScreen.Sink() {

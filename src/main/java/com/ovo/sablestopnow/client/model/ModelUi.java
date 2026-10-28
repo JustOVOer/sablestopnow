@@ -270,8 +270,7 @@ public final class ModelUi {
                         () -> {
                             cutMode = false;
                             com.ovo.sablestopnow.client.model.PatternTool.reset();
-                            ModelMode.setTool(ModelTools.PATTERN);
-                            refreshLeftPanel();
+                            startTool(ModelTools.PATTERN);
                         }).tooltipKey("model.tool.pattern.hint"));
                 // item 9: mirror entry
                 row.add(shortButton("model.tool.mirror", "model.tool.mirror.short",
@@ -280,21 +279,20 @@ public final class ModelUi {
                             mirrorSources.clear();
                             mirrorPlaneOrigin = null;
                             mirrorPlaneNormal = null;
-                            ModelMode.setTool(ModelTools.MIRROR);
-                            refreshLeftPanel();
+                            startTool(ModelTools.MIRROR);
                         }).tooltipKey("model.tool.mirror.hint"));
                 // ★ item 8：**圆角**入口 ✓（上边栏）
                 row.add(shortButton("model.tool.fillet", "model.tool.fillet.short",
                         () -> {
                             cutMode = false;
-                            ModelMode.setTool(ModelTools.FILLET);
+                            startTool(ModelTools.FILLET);
                             refreshLeftPanel();
                         }).tooltipKey("model.tool.fillet.hint"));
                 // ★ item 7：**新建基准面**入口 ✓（上边栏）
                 row.add(shortButton("model.tool.plane", "model.tool.plane.short",
                         () -> {
                             cutMode = false;
-                            ModelMode.setTool(ModelTools.PLANE);
+                            startTool(ModelTools.PLANE);
                             refreshLeftPanel();
                         }).tooltipKey("model.tool.plane.hint"));
                 // ★ 需求 ⑥：**切割台体**独立入口 ✓（与"拉伸台体"平级 ✓ 不是藏在面板里的开关 ✓）
@@ -614,14 +612,14 @@ public final class ModelUi {
         });
         body.add(scaleField);
         // **应用**：把待定的贴图参数真正写到实体上（用户原则：只有"确定"才作出更改）
-          // item 11: connected texture toggle (needs block ctm data)
-          body.add(new com.ovo.sablestopnow.client.gui.lib.Checkbox(
-                  textureConnected, "model.texture.connected"));
         body.add(new Button(Component.translatable("model.texture.apply"), () -> {
             saveAppearance(solid, solid.appearance()
                     .withBlocksPerTile(textureScale.get()));
             refreshLeftPanel();
         }).width(Widget.FILL));
+          // item 11: connected texture toggle (needs block ctm data)
+          body.add(new com.ovo.sablestopnow.client.gui.lib.Checkbox(
+                  textureConnected, "model.texture.connected"));
 
         if (look.hasTexture()) {
             body.add(new Button(Component.translatable("model.texture.clear"),
@@ -1909,11 +1907,8 @@ public final class ModelUi {
                             revolveAngle.get(), revolveDirection);
             edges = com.ovo.sablestopnow.sketch.Revolve.edges(source, rp);
         } else {
-            final com.ovo.sablestopnow.sketch.Extrude.Params ep = switch (extrudeMode) {
-                case TWO_SIDED -> com.ovo.sablestopnow.sketch.Extrude.Params.twoSided(d1, d2);
-                case SYMMETRIC -> com.ovo.sablestopnow.sketch.Extrude.Params.symmetric(d1);
-                default -> com.ovo.sablestopnow.sketch.Extrude.Params.oneSided(d1);
-            };
+            final com.ovo.sablestopnow.sketch.Extrude.Params ep =
+                    buildExtrudeParams(d1, d2);
             edges = com.ovo.sablestopnow.sketch.Extrude.prismEdges(source, ep);
         }
         final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
@@ -2265,6 +2260,31 @@ public final class ModelUi {
         ModelMode.setTool(ModelTools.NONE);
     }
 
+    /**
+     * 由"模式 + 待定深度"构造 {@code Extrude.Params} ✓。
+     *
+     * <p>**负深度 = 反向**：单侧模式下负数改用 {@code ONE_SIDED_BACK}；
+     * 双向/对称模式下负号只表示"填错了符号"，一律取绝对值 ✓
+     */
+    private static com.ovo.sablestopnow.sketch.Extrude.Params buildExtrudeParams(
+            final double depth1, final double depth2) {
+        final double d1 = Math.max(0.1, Math.abs(depth1));
+        final double d2 = Math.abs(depth2);
+        final boolean back = depth1 < 0.0;
+        return switch (extrudeMode) {
+            case TWO_SIDED -> com.ovo.sablestopnow.sketch.Extrude.Params.twoSided(d1, d2);
+            case SYMMETRIC -> com.ovo.sablestopnow.sketch.Extrude.Params.symmetric(d1);
+            case MID_PLANE -> new com.ovo.sablestopnow.sketch.Extrude.Params(
+                    com.ovo.sablestopnow.sketch.Extrude.Mode.MID_PLANE, d1, 0.0);
+            case ONE_SIDED_BACK -> new com.ovo.sablestopnow.sketch.Extrude.Params(
+                    com.ovo.sablestopnow.sketch.Extrude.Mode.ONE_SIDED_BACK, d1, 0.0);
+            default -> back
+                    ? new com.ovo.sablestopnow.sketch.Extrude.Params(
+                            com.ovo.sablestopnow.sketch.Extrude.Mode.ONE_SIDED_BACK, d1, 0.0)
+                    : com.ovo.sablestopnow.sketch.Extrude.Params.oneSided(d1);
+        };
+    }
+
     private static void featureAction(final String action,
                                       final com.ovo.sablestopnow.sketch.Solid solid) {
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
@@ -2319,11 +2339,7 @@ public final class ModelUi {
         final double d1 = extrudeDepth.get();
         final double d2 = extrudeBackDepth.get();
         final com.ovo.sablestopnow.sketch.Extrude.Params params =
-                switch (extrudeMode) {
-                    case TWO_SIDED -> com.ovo.sablestopnow.sketch.Extrude.Params.twoSided(d1, d2);
-                    case SYMMETRIC -> com.ovo.sablestopnow.sketch.Extrude.Params.symmetric(d1);
-                    default -> com.ovo.sablestopnow.sketch.Extrude.Params.oneSided(d1);
-                };
+                buildExtrudeParams(d1, d2);
         // 先确认真的能拉出东西：轮廓不闭合 / 全是退化轮廓时给出提示，
         // 而不是建一个永远画不出来的空实体。
         if (com.ovo.sablestopnow.sketch.Extrude.boxesOf(source, params).isEmpty()) {
@@ -2965,6 +2981,87 @@ public final class ModelUi {
             return;
         }
 
+          // ===== item 7/8/9/10：四个新特征工具的**左栏说明页** ✓ =====
+          //   要点：点进工具后左栏必须**立刻有反应**（用户实测："都点不进去" ——
+          //   其实工具切了，但左栏没有对应分支 ⇒ 看起来什么都没发生）
+          if (ModelTools.PLANE.equals(tool)) {
+              body.add(new Label(Component.translatable("model.tool.plane.hint")).color(0xFFCFD8FF));
+              body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+              body.add(new Label(Component.translatable(planeFaceOrigin == null
+                      ? "model.plane.step1" : "model.plane.step2")).color(0xFF8FA0D8));
+              if (planeFaceOrigin != null) {
+                  body.add(new Button(Component.translatable("model.plane.cancel"), () -> {
+                      planeFaceOrigin = null;
+                      planeFaceNormal = null;
+                      planeSourceSolid = null;
+                      com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+                      lastLeftSignature = null;
+                      refreshLeftPanel();
+                  }).width(Widget.FILL));
+              }
+              return;
+          }
+          if (ModelTools.FILLET.equals(tool)) {
+              body.add(new Label(Component.translatable("model.tool.fillet.hint")).color(0xFFCFD8FF));
+              body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+              body.add(new Label(Component.translatable(filletEdgeA == null
+                      ? "model.fillet.step1" : "model.fillet.step2")).color(0xFF8FA0D8));
+              if (filletEdgeA != null) {
+                  body.add(new Button(Component.translatable("model.fillet.cancel"), () -> {
+                      filletEdgeA = null;
+                      filletEdgeB = null;
+                      filletSourceSolid = null;
+                      com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+                      lastLeftSignature = null;
+                      refreshLeftPanel();
+                  }).width(Widget.FILL));
+              }
+              return;
+          }
+          if (ModelTools.MIRROR.equals(tool)) {
+              body.add(new Label(Component.translatable("model.tool.mirror.hint")).color(0xFFCFD8FF));
+              body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+              body.add(new Label(Component.translatable(mirrorPlaneOrigin == null
+                      ? "model.mirror.step1" : "model.mirror.step2")).color(0xFF8FA0D8));
+              body.add(new Label(Component.literal("• " + mirrorSources.size())).color(0xFFFFFFFF));
+              if (mirrorPlaneOrigin != null && !mirrorSources.isEmpty()) {
+                  body.add(new Button(Component.translatable("model.mirror.confirm"),
+                          () -> {
+                              if (createMirrorFeature()) {
+                                  lastLeftSignature = null;
+                                  refreshLeftPanel();
+                              }
+                          }).width(Widget.FILL));
+              }
+              body.add(new Button(Component.translatable("model.mirror.clear"), () -> {
+                  mirrorSources.clear();
+                  mirrorPlaneOrigin = null;
+                  mirrorPlaneNormal = null;
+                  com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+                  lastLeftSignature = null;
+                  refreshLeftPanel();
+              }).width(Widget.FILL));
+              return;
+          }
+          if (ModelTools.PATTERN.equals(tool)) {
+              body.add(new Label(Component.translatable("model.tool.pattern.hint")).color(0xFFCFD8FF));
+              body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+              body.add(new Label(Component.translatable("model.pattern.step")).color(0xFF8FA0D8));
+              body.add(new Label(Component.literal("方向 " + com.ovo.sablestopnow.client.model.PatternTool.dirCount()
+                      + " / 源特征 " + com.ovo.sablestopnow.client.model.PatternTool.sourceCount()))
+                      .color(0xFFFFFFFF));
+              if (com.ovo.sablestopnow.client.model.PatternTool.dirCount() > 0
+                      && com.ovo.sablestopnow.client.model.PatternTool.sourceCount() > 0) {
+                  body.add(new Button(Component.translatable("model.pattern.confirm"),
+                          com.ovo.sablestopnow.client.model.PatternTool::openDialog).width(Widget.FILL));
+              }
+              body.add(new Button(Component.translatable("model.pattern.clear"), () -> {
+                  com.ovo.sablestopnow.client.model.PatternTool.reset();
+                  lastLeftSignature = null;
+                  refreshLeftPanel();
+              }).width(Widget.FILL));
+              return;
+          }
         if (ModelTools.MATE.equals(tool)) {
             final List<MateRef> picked = ModelMode.picked();
             if (picked.size() < 2) {

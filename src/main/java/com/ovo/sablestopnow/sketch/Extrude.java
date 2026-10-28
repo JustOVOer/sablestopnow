@@ -42,6 +42,14 @@ public final class Extrude {
         SYMMETRIC,
         /** 中面为基准。 */
         MID_PLANE
+,
+          /**
+           * **反向单侧** ✓：往草图的**另一侧**拉（用户要求"填负数就能翻转方向"）。
+           *
+           * <p>几何完全由 {@link Params#depthRange()} 决定，所有盒子/线框/网格都从那里取，
+           * 所以加这一个枚举值就够了，不需要改任何几何代码 ✓
+           */
+          ONE_SIDED_BACK
     }
 
     /** 总厚上限（格）：挡住手滑输入一个会把世界撑爆的数。 */
@@ -83,6 +91,7 @@ public final class Extrude {
         public double[] depthRange() {
             return switch (mode) {
                 case ONE_SIDED, MID_PLANE -> new double[] {0.0, depth1};
+                case ONE_SIDED_BACK -> new double[] {-depth1, 0.0};
                 case TWO_SIDED -> new double[] {-depth2, depth1};
                 case SYMMETRIC -> new double[] {-depth1 * 0.5, depth1 * 0.5};
             };

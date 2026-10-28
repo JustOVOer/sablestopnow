@@ -1434,13 +1434,21 @@ public final class SketchRenderer {
         final Vec3 up = new Vec3(wn.x, wn.y, wn.z);
         quadUp = up.lengthSqr() < 1.0e-9 ? new Vec3(0, 1, 0) : up.normalize();
         final float[] yellow = Colors.preview();
+        // 第二遍：**不做深度测试**再画一次（暗一点）⇒ 被模型挡住的那一半预览也看得见
+        // （用户实测："双向拉伸/切割其中一个方向没有预览线框" —— 其实是被实体挡住了）
+        final MultiBufferSource.BufferSource flatBuf =
+                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+        final VertexConsumer vflat = flatBuf.getBuffer(ModRenderTypes.SKETCH_LINES_QUADS_FLAT);
+        final float[] dim = {yellow[0] * 0.55f, yellow[1] * 0.55f, yellow[2] * 0.55f};
         int drawn = 0;
         for (final var seg : segs) {
             final Vec3 a = world(cameraPos, rp, seg.a());
             final Vec3 b = world(cameraPos, rp, seg.b());
             quadLine(vcq, pose, a, b, yellow);
+            quadLine(vflat, pose, a, b, dim);
             drawn++;
         }
+        flatBuf.endBatch();
         return drawn;
     }
 
@@ -1815,14 +1823,47 @@ public final class SketchRenderer {
         if (texts.isEmpty()) {
             return 0;
         }
+        final com.ovo.sablestopnow.sketch.SketchPlane plane = sketch.plane();
+        if (plane == null) {
+            return 0;
+        }
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         final MultiBufferSource.BufferSource buf = mc.renderBuffers().bufferSource();
+        final MultiBufferSource.BufferSource quadBuf =
+                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+        final VertexConsumer vcq = quadBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
         int drawn = 0;
+        // 草图平面的基向量（世界方向）—— 文字**贴着基准面**写，不再朝相机 ✓
+        final org.joml.Vector3d uW = new org.joml.Vector3d(plane.axisU()).normalize();
+        final org.joml.Vector3d vW = new org.joml.Vector3d(plane.axisV()).normalize();
+        final org.joml.Vector3d nW = new org.joml.Vector3d(uW).cross(vW).normalize();
         for (final Sketch.TextNote note : texts) {
-            final Vec3 p = world(cameraPos, renderPose, sketch, note.u(), note.v());
+            // ① 辅助线长方形（用户要求"本质是辅助线组成的长方形"）✓
+            final double u0 = note.u();
+            final double v0 = note.v();
+            final double u1 = note.u() + note.w();
+            final double v1 = note.v() + note.h();
+            final Vec3 c00 = world(cameraPos, renderPose, sketch, u0, v0);
+            final Vec3 c10 = world(cameraPos, renderPose, sketch, u1, v0);
+            final Vec3 c11 = world(cameraPos, renderPose, sketch, u1, v1);
+            final Vec3 c01 = world(cameraPos, renderPose, sketch, u0, v1);
+            final float[] boxColour = Colors.reference();
+            quadLine(vcq, pose, c00, c10, boxColour);
+            quadLine(vcq, pose, c10, c11, boxColour);
+            quadLine(vcq, pose, c11, c01, boxColour);
+            quadLine(vcq, pose, c01, c00, boxColour);
+
+            // ② 文字：贴在平面内（+X = axisU，+Y = -axisV）✓
+            final Vec3 at = c01; // 左上角
             final org.joml.Matrix4f m = new org.joml.Matrix4f(pose.pose())
-                    .translate((float) p.x, (float) p.y, (float) p.z)
-                    .rotate((float) Math.toRadians(-note.rotationDeg()), 0, 0, 1)
+                    .translate((float) at.x, (float) at.y, (float) at.z)
+                    .mul(new org.joml.Matrix4f()
+                            // 列主序：R = uW, U = -vW, F = -nW（屏幕 y 向下）
+                            .set((float) uW.x, (float) -vW.x, (float) -nW.x, 0.0f,
+                                    (float) uW.y, (float) -vW.y, (float) -nW.y, 0.0f,
+                                    (float) uW.z, (float) -vW.z, (float) -nW.z, 0.0f,
+                                    0.0f, 0.0f, 0.0f, 1.0f))
+                    .rotateZ((float) Math.toRadians(-note.rotationDeg()))
                     .scale(0.022f * (float) Math.max(0.25, Math.min(8.0, note.scale())));
             final String[] lines = (note.text() == null ? "" : note.text()).split("\n", -1);
             final int colour = (note.argb() & 0xFFFFFF) | 0xFF000000;
@@ -1832,6 +1873,7 @@ public final class SketchRenderer {
             }
             drawn++;
         }
+        quadBuf.endBatch();
         buf.endBatch();
         return drawn;
     }
@@ -1853,17 +1895,16 @@ public final class SketchRenderer {
         final double half = 1.0;
         final Pose3dc rp = sub.renderPose();
         final float[] colour = {0.55f, 0.75f, 1.00f};
-        // 四条边（走同一个 3D 棒 ✓）
-        final org.joml.Vector3d[] cs = {
-            new org.joml.Vector3d(origin).fma(-half, u).fma(-half, v),
-            new org.joml.Vector3d(origin).fma(half, u).fma(-half, v),
-            new org.joml.Vector3d(origin).fma(half, u).fma(half, v),
-            new org.joml.Vector3d(origin).fma(-half, u).fma(half, v),
-        };
-        final org.joml.Vector3d w0 = rp.transformPosition(cs[0], new org.joml.Vector3d());
-        quadUp = new Vec3(w0.x - w0.x + n.x, n.y, n.z).normalize(); // 厚度沿法线 ✓
+        quadUp = new Vec3(n.x, n.y, n.z).normalize();
         int drawn = 0;
         for (int i = 0; i < 4; i++) {
+            final org.joml.Vector3d pa = new org.joml.Vector3d(origin).fma(-half, u)
+                    .fma(-half, v);
+            final org.joml.Vector3d pb = new org.joml.Vector3d(origin).fma(half, u)
+                    .fma(-half, v);
+            final org.joml.Vector3d pc = new org.joml.Vector3d(origin).fma(half, u).fma(half, v);
+            final org.joml.Vector3d pd = new org.joml.Vector3d(origin).fma(-half, u).fma(half, v);
+            final org.joml.Vector3d[] cs = {pa, pb, pc, pd};
             final Vec3 a = world(cameraPos, rp, cs[i]);
             final Vec3 b = world(cameraPos, rp, cs[(i + 1) % 4]);
             quadLine(vcq, pose, a, b, colour);

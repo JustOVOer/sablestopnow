@@ -765,5 +765,18 @@
   "model.tool.pattern.hint": "点 1-3 条棱定方向，右栏选特征，再点第一条棱设次数/间距",
   "model.pattern.pick_edge": "请点一条棱作为阵列方向",
   "model.pattern.no_sources": "尚未选择被阵列的特征（在右栏点特征行）",
-  "model.texture.connected": "连接纹理（需纹理带 ctm 数据）"
+  "model.texture.connected": "连接纹理（需纹理带 ctm 数据）",
+  "model.plane.step1": "① 点模型上的一个平面",
+  "model.plane.step2": "② 在弹出的框里填距离（可负），点\"创建\"",
+  "model.plane.cancel": "取消（清掉预览）",
+  "model.fillet.step1": "① 点模型上的一条棱（只支持轴对齐凸棱）",
+  "model.fillet.step2": "② 在弹出的框里填半径，点\"创建\"",
+  "model.fillet.cancel": "取消（清掉预览）",
+  "model.mirror.step1": "① 点一个平面作为镜像面",
+  "model.mirror.step2": "② 在右栏点特征行加入（可多个）→ 点\"创建镜像\"",
+  "model.mirror.confirm": "创建镜像",
+  "model.mirror.clear": "清空选择",
+  "model.pattern.step": "点 1–3 条棱定方向 → 右栏点特征加入 → 点\"设置次数/间距\"",
+  "model.pattern.confirm": "设置次数 / 间距",
+  "model.pattern.clear": "清空选择"
 }

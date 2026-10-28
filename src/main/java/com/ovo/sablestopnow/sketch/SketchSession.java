@@ -276,6 +276,16 @@ public final class SketchSession {
     /** 上一次文字图元的诊断 ✓（item 3）。 */
     public static String lastTextDiag = "none";
 
+    /** 最近一次创建的文本下标（-1 = 没有）；客户端每帧/每次点击后取走 ✓ */
+    private int createdTextIndex = -1;
+
+    /** 取走"刚创建的文本下标" ✓（取一次就清空，避免重复弹窗）。 */
+    public int consumeCreatedText() {
+        final int v = createdTextIndex;
+        createdTextIndex = -1;
+        return v;
+    }
+
     /** 文字图元创建后的回调 ✓（客户端用它弹出编辑框；草图包不依赖客户端 ✓）。 */
     public interface TextCreatedHook {
         void onCreated(int index);
@@ -1803,6 +1813,7 @@ public final class SketchSession {
                     final int idx2 = this.working.texts().size() - 1;
                     lastTextDiag = "created idx=" + idx2 + " rect=(" + u0 + "," + v0 + ","
                             + w + "," + h + ")";
+                    createdTextIndex = idx2;
                     if (textCreatedHook != null) {
                         textCreatedHook.onCreated(idx2);
                     }

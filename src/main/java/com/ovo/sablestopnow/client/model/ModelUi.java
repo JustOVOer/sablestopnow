@@ -1181,6 +1181,54 @@ public final class ModelUi {
 
         // ★ 记住当前这棵树 ✓：草图里选中图元后要**反查**对应节点并高亮 ✓
         //   （用户要求"草图和右侧树状图联动" ✓ —— 树 → 图形区已做 ✓，这是反方向 ✓）
+          // ★ **特征列表**（按钮版）✓
+          //   为什么另建一份：TreeView 的行依赖它自己的命中测试，实测点不到（[ui-diag] 显示
+          //   命中到图层根）。用普通按钮列表 ⇒ 100% 可点，点一下即选中该特征，
+          //   左栏随即给出 上移/下移/贴图/删除，模型里也会橙色高亮 ✓
+          {
+              final net.minecraft.client.Minecraft mc0 =
+                      net.minecraft.client.Minecraft.getInstance();
+              final net.minecraft.world.level.Level lv0 = mc0 == null ? null : mc0.level;
+              if (lv0 != null) {
+                  java.util.UUID b0 = ModelMode.selectedModel();
+                  if (b0 == null) {
+                      for (final com.ovo.sablestopnow.sketch.Solid sd
+                              : com.ovo.sablestopnow.sketch.SolidClientState.in(
+                                      lv0.dimension().location())) {
+                          b0 = sd.body();
+                          break;
+                      }
+                  }
+                  if (b0 != null) {
+                      final java.util.List<com.ovo.sablestopnow.sketch.Solid> list =
+                              new java.util.ArrayList<>(
+                                      com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv0, b0));
+                      list.sort(java.util.Comparator
+                              .comparingInt(com.ovo.sablestopnow.sketch.Solid::index));
+                      if (!list.isEmpty()) {
+                          final com.ovo.sablestopnow.client.gui.lib.ScrollPane feats =
+                                  new com.ovo.sablestopnow.client.gui.lib.ScrollPane();
+                          feats.prefH = Math.min(96, 13 + list.size() * 13);
+                          for (final com.ovo.sablestopnow.sketch.Solid sd : list) {
+                              final String labelText = sd.index() + "  " + solidShortLabel(sd)
+                                      + (sd.id().equals(selectedSolidId) ? "  ◀" : "");
+                              final com.ovo.sablestopnow.client.gui.lib.Button fb =
+                                      new com.ovo.sablestopnow.client.gui.lib.Button(
+                                              Component.literal(labelText), () -> {
+                                                  selectedSolidId = sd.id();
+                                                  textureSolidId = null;
+                                                  textureBlockQuery.set("");
+                                                  forceRefreshLeft();
+                                              });
+                              fb.prefW = Widget.FILL;
+                              feats.add(fb);
+                          }
+                          panel.add(feats);
+                      }
+                  }
+              }
+          }
+
         final TreeView view = new TreeView();
         activeTree = view;
         view.prefH = Widget.FILL;
@@ -2278,7 +2326,10 @@ public final class ModelUi {
                 com.ovo.sablestopnow.sketch.FilletCutter.outline(filletEdgeA, filletEdgeB,
                         n1, n2, radius);
         final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
-                new java.util.ArrayList<>(segsRaw.size());
+                new java.util.ArrayList<>(segsRaw.size() + 1);
+        // ★ 把**选中的那条棱**本身也画出来（参考棱高亮 ✓）
+        segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
+                new org.joml.Vector3d(filletEdgeA), new org.joml.Vector3d(filletEdgeB)));
         for (final org.joml.Vector3d[] e : segsRaw) {
             segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(e[0], e[1]));
         }

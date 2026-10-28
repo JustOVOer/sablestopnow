@@ -2079,11 +2079,41 @@ public final class ModelUi {
 
     public static boolean filletPickEdge(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
-        if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.EDGE) {
+        if (hit == null) {
             ModelMode.prompt("model.fillet.pick_edge");
             return false;
         }
-        final int idx = hit.index();
+        // ★ 容错：拾取可能把"棱"判成"面"（容差随距离变化）。这种情况下退一步：
+        //   取这个面里**离命中点最近的那条棱** ✓（用户只要"指哪条棱倒哪条"，不关心判级细节）
+        int idx = hit.index();
+        if (hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.EDGE) {
+            if (hit.face() == null || hit.face().segments().isEmpty()) {
+                ModelMode.prompt("model.fillet.pick_edge");
+                return false;
+            }
+            // 参考点：这一帧的射线与面交点的近似（用面的命中中心）
+            final org.joml.Vector3d p = new org.joml.Vector3d(hit.localCenter());
+            double best = Double.MAX_VALUE;
+            int bestIdx = -1;
+            final java.util.List<double[]> segs = hit.face().segments();
+            for (int i = 0; i < segs.size(); i++) {
+                final double[] sg = segs.get(i);
+                final org.joml.Vector3d a = new org.joml.Vector3d(sg[0], sg[1], sg[2]);
+                final org.joml.Vector3d b = new org.joml.Vector3d(sg[3], sg[4], sg[5]);
+                final org.joml.Vector3d ab = new org.joml.Vector3d(b).sub(a);
+                final double len2 = ab.lengthSquared();
+                double t = len2 < 1.0e-12 ? 0.0 : new org.joml.Vector3d(p).sub(a).dot(ab) / len2;
+                t = Math.max(0.0, Math.min(1.0, t));
+                final double d = new org.joml.Vector3d(a).fma(t, ab).distance(p);
+                if (d < best) {
+                    best = d;
+                    bestIdx = i;
+                }
+            }
+            idx = bestIdx;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[fillet] hover was {} -> nearest edge idx={} dist={}", hit.kind(), idx, best);
+        }
         if (idx < 0 || idx >= hit.face().segments().size()) {
             ModelMode.prompt("model.fillet.pick_edge");
             return false;

@@ -312,6 +312,13 @@ public final class Ui {
                 continue;
             }
             CTX.begin(layer.root, lastDt(), mouseX, mouseY, guiW, guiH);
+            // ★ 只在**真的点中控件**时才交给这一层 ✓
+            //   模型视图的几个图层根容器铺满全屏，若直接 `root.mouseDown` 就会把
+            //   "点在模型空地/树空白处"也吞掉 ⇒ 模型拾取与树行交互全部失效（实测）✗
+            final Widget underCursor = layer.root.hitTest(mouseX, mouseY);
+            if (underCursor == null || underCursor == layer.root) {
+                continue;
+            }
             if (action == GLFW.GLFW_PRESS) {
                 if (layer.root.mouseDown(CTX, mouseX, mouseY, button)) {
                     consumed = true;

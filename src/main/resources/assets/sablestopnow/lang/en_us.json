@@ -797,5 +797,6 @@
   "model.mirror.pick_sources_hint": "Features to mirror (click to toggle):",
   "model.mirror.use_plane": "Use plane %1$s as mirror plane",
   "model.pattern.pick_sources_hint": "Features to pattern (click to toggle):",
-  "model.sketch.use_plane": "Sketch on plane %1$s"
+  "model.sketch.use_plane": "Sketch on plane %1$s",
+  "model.fillet.degenerate": "That edge is degenerate; please pick another one"
 }

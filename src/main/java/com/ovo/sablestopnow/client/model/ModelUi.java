@@ -2351,6 +2351,21 @@ public final class ModelUi {
                 || filletSourceSolid == null) {
             return;
         }
+        final double edgeLen = new org.joml.Vector3d(filletEdgeB)
+                .sub(filletEdgeA).length();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[fillet] create a={} b={} len={} n1={} n2={} r={}",
+                String.format(java.util.Locale.ROOT, "%.3f,%.3f,%.3f",
+                        filletEdgeA.x, filletEdgeA.y, filletEdgeA.z),
+                String.format(java.util.Locale.ROOT, "%.3f,%.3f,%.3f",
+                        filletEdgeB.x, filletEdgeB.y, filletEdgeB.z),
+                String.format(java.util.Locale.ROOT, "%.3f", edgeLen),
+                filletNormal1, filletNormal2, radius);
+        if (edgeLen < 1.0e-3) {
+            // 退化棱：硬建一个"什么都不切"的特征只会让玩家以为功能坏了 ✓ 直接说清楚
+            ModelMode.prompt("model.fillet.degenerate");
+            return;
+        }
         int index = 1;
         for (final com.ovo.sablestopnow.sketch.Solid s
                 : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, filletSourceSolid)) {

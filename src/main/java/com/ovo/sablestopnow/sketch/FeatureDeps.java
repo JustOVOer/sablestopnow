@@ -150,11 +150,14 @@ public final class FeatureDeps {
         if (to < 0 || to >= ordered.size()) {
             return null; // 已经在头/尾 ✓
         }
-        // 交换序号 ⇒ 顺序变化，且序号仍然唯一 ✓
-        final int a = ordered.get(at).index();
-        final int b = ordered.get(to).index();
-        ordered.set(at, withIndex(ordered.get(at), b));
-        ordered.set(to, withIndex(ordered.get(to), a));
+        // ★ 交换位置后**整体重编号 1..N** ✓
+        //   只交换两个序号时，服务端若只接受其中一个更新，就会出现
+        //   "编号不变、把邻居换过来"的怪现象（用户实测）✗
+        final Solid moving = ordered.remove(at);
+        ordered.add(to, moving);
+        for (int i = 0; i < ordered.size(); i++) {
+            ordered.set(i, withIndex(ordered.get(i), i + 1));
+        }
         // 校验：违反依赖 ⇒ 撤销这次移动（返回 null，调用方保持原样）
         if (validate(ordered, existingSketchIds) != null) {
             return null;

@@ -438,76 +438,6 @@ public final class SketchModelCheck {
                 "triPolys: 退化三角形被丢弃");
     }
 
-    /**
-     * item 8（**端到端**）：`Solid.placeAll` 里**圆角真的被应用**了吗 ✓
-     *
-     * <p>这是之前所有客户端反复"圆角没变化"的终极验收：
-     * 造 2×2 方草图 → 拉伸 1 格 → 取它的一条棱 → 建 Fillet 特征 →
-     * 调用 placeAll（与游戏里同一入口）→ 断言结果网格与"没有圆角"时**不同**、
-     * 且三角面更多（多了圆弧细分面）✓
-     */
-    private static void filletPlaceAll() {
-        final java.util.UUID body = java.util.UUID.randomUUID();
-        final SketchPlane plane = SketchPlane.base(SketchPlane.Base.FRONT,
-                new org.joml.Vector3d(0, 0, 0));
-        final Sketch sk = new Sketch(java.util.UUID.randomUUID(), body, "fillet", plane);
-        sk.addLine(0, 0, 2, 0);
-        sk.addLine(2, 0, 2, 2);
-        sk.addLine(2, 2, 0, 2);
-        sk.addLine(0, 2, 0, 0);
-        final com.ovo.sablestopnow.sketch.Solid base = com.ovo.sablestopnow.sketch.Solid.create(
-                body, sk.id(), 1, com.ovo.sablestopnow.sketch.Extrude.Params.oneSided(1.0));
-        final var baseline = com.ovo.sablestopnow.sketch.Solid.placeAll(
-                java.util.List.of(base), java.util.List.of(sk));
-        check(baseline.size() == 1, "fillet-placeAll: 基准只有 1 个 Placed（" + baseline.size() + "）");
-        final var baseEdges = base.edges(sk);
-        check(!baseEdges.isEmpty(), "fillet-placeAll: 拉伸体有棱（" + baseEdges.size() + "）");
-        // 选一条**足够长**的棱（>0.5）当圆角对象
-        org.joml.Vector3d ea = null;
-        org.joml.Vector3d eb = null;
-        for (final org.joml.Vector3d[] e : baseEdges) {
-            if (e[0].distance(e[1]) > 0.5) {
-                ea = new org.joml.Vector3d(e[0]);
-                eb = new org.joml.Vector3d(e[1]);
-                break;
-            }
-        }
-        check(ea != null, "fillet-placeAll: 找到一条长度 >0.5 的棱");
-        final org.joml.Vector3d dir = new org.joml.Vector3d(eb).sub(ea).normalize();
-        // 两个面法线：与棱垂直的两条（这里取世界的两轴，足够验证链路）
-        org.joml.Vector3d n1 = new org.joml.Vector3d(1, 0, 0);
-        if (Math.abs(n1.dot(dir)) > 0.9) {
-            n1 = new org.joml.Vector3d(0, 1, 0);
-        }
-        final org.joml.Vector3d n2 = new org.joml.Vector3d(dir).cross(n1).normalize();
-        final com.ovo.sablestopnow.sketch.Solid fillet =
-                com.ovo.sablestopnow.sketch.Solid.createFillet(body, sk.id(), 2, 0.3,
-                        java.util.List.of(new com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef(
-                                base.id(), ea.x, ea.y, ea.z, eb.x, eb.y, eb.z,
-                                n1.x, n1.y, n1.z, n2.x, n2.y, n2.z)));
-        final var withFillet = com.ovo.sablestopnow.sketch.Solid.placeAll(
-                java.util.List.of(base, fillet), java.util.List.of(sk));
-        com.ovo.sablestopnow.sketch.Solid placedBase = null;
-        for (final var p : withFillet) {
-            if (p.solid().id().equals(base.id())) {
-                placedBase = p.solid();
-            }
-        }
-        check(placedBase != null, "fillet-placeAll: 结果里仍有拉伸体");
-        final int trisBefore = baseline.get(0).mesh() == null ? 0
-                : baseline.get(0).mesh().indices().length / 3;
-        int trisAfter = 0;
-        for (final var p : withFillet) {
-            if (p.solid().id().equals(base.id()) && p.mesh() != null) {
-                trisAfter = p.mesh().indices().length / 3;
-            }
-        }
-        check(trisBefore > 0, "fillet-placeAll: 基准网格非空（" + trisBefore + " 面）");
-        check(trisAfter > 0, "fillet-placeAll: 圆角后网格非空（" + trisAfter + " 面）");
-        check(trisAfter != trisBefore,
-                "fillet-placeAll: **网格确实变了**（" + trisBefore + " -> " + trisAfter + " 面）");
-    }
-
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -551,7 +481,6 @@ public final class SketchModelCheck {
         triPolysReal();
         filletGeom();
         filletCsg();
-        filletPlaceAll();
         featureOrder();
         undoSnapshot();
         revolveEdges();

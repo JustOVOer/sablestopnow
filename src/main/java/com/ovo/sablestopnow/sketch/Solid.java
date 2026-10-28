@@ -1003,7 +1003,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 // ★ item 8：圆角参与 CSG 减法 —— **通用方案**：沿棱扫出多边形棱柱（任意朝向）✓
                 //   盒子路径仍保留：给碰撞用（轴对齐时精确），渲染用棱柱 ⇒ 斜棱也能倒圆 ✓
                 if (!filletPolys.isEmpty()) {
-                    acc = Csg.subtract(acc, filletPolys);
+                    acc = Csg.subtract(acc, ensureOutward(filletPolys));
                 }
                 if (!filletCuts.isEmpty()) {
                     final List<Csg.Polygon> fb = CsgMesh.fromMesh(
@@ -1211,11 +1211,45 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         if (base.isEmpty()) {
             return mesh;
         }
-        final List<Csg.Polygon> cut = Csg.subtract(base, filletPolys);
+        final List<Csg.Polygon> cut = Csg.subtract(base, ensureOutward(filletPolys));
         if (cut.isEmpty()) {
             return mesh;
         }
         return CsgMesh.toMesh(cut);
+    }
+
+
+    /**
+     * 保证一组多边形是**外向**的 ✓（有向体积为正）
+     *
+     * <p>为什么必须做 ✗✓：`csg.js` 的 BSP 要求实体多边形朝外；朝里的切割体会被当成"外部"
+     * ⇒ `subtract` 什么都剪不到 ⇒ 圆角"建了但看不出变化"（实测症状）。
+     * 这里按**有向体积**判断，负的就整体翻面，不依赖我们对绕序的推理 ✓
+     */
+    public static List<Csg.Polygon> ensureOutward(final List<Csg.Polygon> polys) {
+        if (polys == null || polys.isEmpty()) {
+            return polys;
+        }
+        double sum = 0.0;
+        for (final Csg.Polygon poly : polys) {
+            final List<Csg.Vertex> vs = poly.vertices;
+            for (int i = 1; i + 1 < vs.size(); i++) {
+                final Csg.V3 p0 = vs.get(0).pos();
+                final Csg.V3 p1 = vs.get(i).pos();
+                final Csg.V3 p2 = vs.get(i + 1).pos();
+                sum += p0.x() * (p1.y() * p2.z() - p1.z() * p2.y())
+                        - p0.y() * (p1.x() * p2.z() - p1.z() * p2.x())
+                        + p0.z() * (p1.x() * p2.y() - p1.y() * p2.x());
+            }
+        }
+        if (sum >= 0.0) {
+            return polys;
+        }
+        final List<Csg.Polygon> flipped = new ArrayList<>(polys.size());
+        for (final Csg.Polygon poly : polys) {
+            flipped.add(poly.flipped());
+        }
+        return flipped;
     }
 
     /** 平移一个盒子 ✓ */

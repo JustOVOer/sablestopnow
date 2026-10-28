@@ -779,5 +779,19 @@
   "model.pattern.step": "Pick 1-3 edges as directions, add sources, then set counts/spacing",
   "model.pattern.confirm": "Counts / spacing",
   "model.pattern.clear": "Clear selection",
-  "gui.sablestopnow.opt.color_palette.button": "Open palette"
+  "gui.sablestopnow.opt.color_palette.button": "Open palette",
+  "model.plane.picked": "Face picked: %1$s",
+  "model.plane.distance": "Distance (negative = flip)",
+  "model.plane.create": "Create plane",
+  "model.fillet.picked": "Edge picked: %1$s",
+  "model.fillet.radius": "Radius",
+  "model.fillet.create": "Create fillet",
+  "model.mirror.plane_ok": "Mirror plane set — pick features in the tree",
+  "model.mirror.sources": "Source features: %1$s",
+  "model.pattern.state": "Directions %1$s · sources %2$s",
+  "model.pattern.n1": "Dir1 count",
+  "model.pattern.s1": "Dir1 spacing (signed)",
+  "model.pattern.n2": "Dir2 count",
+  "model.pattern.s2": "Dir2 spacing (signed)",
+  "model.pattern.create": "Create pattern"
 }

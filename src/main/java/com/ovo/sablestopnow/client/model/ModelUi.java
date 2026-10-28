@@ -1512,6 +1512,26 @@ public final class ModelUi {
     private static final String CMD_SKETCH_DIM = "sketch.dimension";
 
     /** 拉伸深度输入框的当前值（静态：左栏重建时不能丢）。 */
+    // ===== item 7/8/10：左栏内联参数（待定值，按"创建"才落地）✓ =====
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> planeDistance =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.plane.distance", 0.5);
+    private static final String CMD_PLANE_DISTANCE = "feature.plane.distance";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> filletRadius =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.fillet.radius", 0.25);
+    private static final String CMD_FILLET_RADIUS = "feature.fillet.radius";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> patternN1 =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.pattern.n1", 2.0);
+    private static final String CMD_PATTERN_N1 = "feature.pattern.n1";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> patternS1 =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.pattern.s1", 1.0);
+    private static final String CMD_PATTERN_S1 = "feature.pattern.s1";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> patternN2 =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.pattern.n2", 1.0);
+    private static final String CMD_PATTERN_N2 = "feature.pattern.n2";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> patternS2 =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.pattern.s2", 0.0);
+    private static final String CMD_PATTERN_S2 = "feature.pattern.s2";
+
     private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> extrudeDepth =
             com.ovo.sablestopnow.client.gui.lib.Prop.of("extrude.depth", 2.0);
     /** 拉伸深度输入框的命令名。 */
@@ -2072,25 +2092,11 @@ public final class ModelUi {
         filletEdgeA = new org.joml.Vector3d(seg[0], seg[1], seg[2]);
         filletEdgeB = new org.joml.Vector3d(seg[3], seg[4], seg[5]);
         filletSourceSolid = hit.body();
-        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-        mc.setScreen(new com.ovo.sablestopnow.client.gui.PlaneCreateScreen(mc.screen, 0.25,
-                new com.ovo.sablestopnow.client.gui.PlaneCreateScreen.Sink() {
-                    @Override
-                    public void preview(final double radius) {
-                        updateFilletPreview(radius);
-                    }
-
-                    @Override
-                    public void create(final double radius) {
-                        createFilletFeature(radius);
-                    }
-
-                    @Override
-                    public void cancel() {
-                        com.ovo.sablestopnow.client.model.FeaturePreview.clear();
-                    }
-                }, "gui.sablestopnow.fillet.title", "gui.sablestopnow.fillet.radius"));
-        updateFilletPreview(0.25);
+        updateFilletPreview(filletRadius.get());
+        lastLeftSignature = null;
+        refreshLeftPanel();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[fillet] edge picked body={} a={} b={}",
+                filletSourceSolid, filletEdgeA, filletEdgeB);
         return true;
     }
 
@@ -2160,6 +2166,19 @@ public final class ModelUi {
         ModelMode.setTool(ModelTools.NONE);
     }
 
+    /**
+     * **点击时按需重算一次拾取** ✓：`FeatureHover` 是渲染帧更新的，点击恰好落在
+     * "还没更新"的帧就会拿到 null（用户实测"点棱/点面没反应"）。这里主动刷一次 ✓
+     */
+    public static com.ovo.sablestopnow.client.model.FeatureHover.Hit pickOnDemand() {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc == null || mc.level == null) {
+            return null;
+        }
+        com.ovo.sablestopnow.client.model.FeatureHover.update(mc);
+        return com.ovo.sablestopnow.client.model.FeatureHover.get();
+    }
+
     /** 基准面工具当前拾取到的面：中心（局部）+ 单位法线 ✓ */
     private static double[] planeFaceOrigin;
     private static double[] planeFaceNormal;
@@ -2180,25 +2199,12 @@ public final class ModelUi {
                 hit.localNormal().z};
         planeSourceSolid = hit.body();
         planeSourceFace = hit.face().id();
-        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-        mc.setScreen(new com.ovo.sablestopnow.client.gui.PlaneCreateScreen(mc.screen, 0.5,
-                new com.ovo.sablestopnow.client.gui.PlaneCreateScreen.Sink() {
-                    @Override
-                    public void preview(final double distance) {
-                        updatePlanePreview(distance);
-                    }
-
-                    @Override
-                    public void create(final double distance) {
-                        createPlaneFeature(distance);
-                    }
-
-                    @Override
-                    public void cancel() {
-                        com.ovo.sablestopnow.client.model.FeaturePreview.clear();
-                    }
-                }));
-        updatePlanePreview(0.5);
+        updatePlanePreview(planeDistance.get());
+        // ★ 选完面**只刷新左栏**：参数与"创建"按钮都在左栏（用户要求"进去就有完整菜单"）✓
+        lastLeftSignature = null;
+        refreshLeftPanel();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[plane] face picked body={} face={}",
+                planeSourceSolid, planeSourceFace);
         return true;
     }
 
@@ -2981,15 +2987,36 @@ public final class ModelUi {
             return;
         }
 
-          // ===== item 7/8/9/10：四个新特征工具的**左栏说明页** ✓ =====
-          //   要点：点进工具后左栏必须**立刻有反应**（用户实测："都点不进去" ——
-          //   其实工具切了，但左栏没有对应分支 ⇒ 看起来什么都没发生）
+          // ===== item 7/8/9/10：四个特征的**左栏完整面板** ✓ =====
+          //   要点：一进入工具，左栏就把「要你做什么 / 已经选了哪些 / 参数 / 创建」全部摆出来 ✓
+          //   （用户实测："应该一进入就在左侧显示完整的菜单，然后有专门的地方显示选了哪些东西，还有调整参数"）
           if (ModelTools.PLANE.equals(tool)) {
               body.add(new Label(Component.translatable("model.tool.plane.hint")).color(0xFFCFD8FF));
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
-              body.add(new Label(Component.translatable(planeFaceOrigin == null
-                      ? "model.plane.step1" : "model.plane.step2")).color(0xFF8FA0D8));
+              body.add(new Label(planeFaceOrigin == null
+                      ? Component.translatable("model.plane.step1")
+                      : Component.translatable("model.plane.picked",
+                              String.format(java.util.Locale.ROOT, "%.2f, %.2f, %.2f",
+                                      planeFaceOrigin[0], planeFaceOrigin[1], planeFaceOrigin[2])))
+                      .color(0xFFB9C0EE));
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PLANE_DISTANCE);
+              final com.ovo.sablestopnow.client.gui.lib.UiField planeDist =
+                      com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                              "model.plane.distance", CMD_PLANE_DISTANCE, planeDistance,
+                              -com.ovo.sablestopnow.sketch.Extrude.MAX_DEPTH,
+                              com.ovo.sablestopnow.sketch.Extrude.MAX_DEPTH, 0.25);
+              planeDist.format(v -> String.format(java.util.Locale.ROOT, "%.2f", v));
+              planeDist.commit(v -> {
+                  planeDistance.set(v);
+                  updatePlanePreview(v);
+              });
+              body.add(planeDist);
               if (planeFaceOrigin != null) {
+                  body.add(new Button(Component.translatable("model.plane.create"), () -> {
+                      createPlaneFeature(planeDistance.get());
+                      lastLeftSignature = null;
+                      refreshLeftPanel();
+                  }).width(Widget.FILL));
                   body.add(new Button(Component.translatable("model.plane.cancel"), () -> {
                       planeFaceOrigin = null;
                       planeFaceNormal = null;
@@ -3004,9 +3031,29 @@ public final class ModelUi {
           if (ModelTools.FILLET.equals(tool)) {
               body.add(new Label(Component.translatable("model.tool.fillet.hint")).color(0xFFCFD8FF));
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
-              body.add(new Label(Component.translatable(filletEdgeA == null
-                      ? "model.fillet.step1" : "model.fillet.step2")).color(0xFF8FA0D8));
+              body.add(new Label(filletEdgeA == null
+                      ? Component.translatable("model.fillet.step1")
+                      : Component.translatable("model.fillet.picked",
+                              String.format(java.util.Locale.ROOT, "%.2f, %.2f, %.2f",
+                                      filletEdgeA.x, filletEdgeA.y, filletEdgeA.z)))
+                      .color(0xFFB9C0EE));
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_FILLET_RADIUS);
+              final com.ovo.sablestopnow.client.gui.lib.UiField radiusField =
+                      com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                              "model.fillet.radius", CMD_FILLET_RADIUS, filletRadius,
+                              0.05, 8.0, 0.05);
+              radiusField.format(v -> String.format(java.util.Locale.ROOT, "%.2f", v));
+              radiusField.commit(v -> {
+                  filletRadius.set(v);
+                  updateFilletPreview(v);
+              });
+              body.add(radiusField);
               if (filletEdgeA != null) {
+                  body.add(new Button(Component.translatable("model.fillet.create"), () -> {
+                      createFilletFeature(filletRadius.get());
+                      lastLeftSignature = null;
+                      refreshLeftPanel();
+                  }).width(Widget.FILL));
                   body.add(new Button(Component.translatable("model.fillet.cancel"), () -> {
                       filletEdgeA = null;
                       filletEdgeB = null;
@@ -3021,17 +3068,17 @@ public final class ModelUi {
           if (ModelTools.MIRROR.equals(tool)) {
               body.add(new Label(Component.translatable("model.tool.mirror.hint")).color(0xFFCFD8FF));
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
-              body.add(new Label(Component.translatable(mirrorPlaneOrigin == null
-                      ? "model.mirror.step1" : "model.mirror.step2")).color(0xFF8FA0D8));
-              body.add(new Label(Component.literal("• " + mirrorSources.size())).color(0xFFFFFFFF));
+              body.add(new Label(mirrorPlaneOrigin == null
+                      ? Component.translatable("model.mirror.step1")
+                      : Component.translatable("model.mirror.plane_ok")).color(0xFFB9C0EE));
+              body.add(new Label(Component.translatable("model.mirror.sources",
+                      mirrorSources.size())).color(0xFFFFFFFF));
               if (mirrorPlaneOrigin != null && !mirrorSources.isEmpty()) {
-                  body.add(new Button(Component.translatable("model.mirror.confirm"),
-                          () -> {
-                              if (createMirrorFeature()) {
-                                  lastLeftSignature = null;
-                                  refreshLeftPanel();
-                              }
-                          }).width(Widget.FILL));
+                  body.add(new Button(Component.translatable("model.mirror.confirm"), () -> {
+                      createMirrorFeature();
+                      lastLeftSignature = null;
+                      refreshLeftPanel();
+                  }).width(Widget.FILL));
               }
               body.add(new Button(Component.translatable("model.mirror.clear"), () -> {
                   mirrorSources.clear();
@@ -3046,17 +3093,54 @@ public final class ModelUi {
           if (ModelTools.PATTERN.equals(tool)) {
               body.add(new Label(Component.translatable("model.tool.pattern.hint")).color(0xFFCFD8FF));
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
-              body.add(new Label(Component.translatable("model.pattern.step")).color(0xFF8FA0D8));
-              body.add(new Label(Component.literal("方向 " + com.ovo.sablestopnow.client.model.PatternTool.dirCount()
-                      + " / 源特征 " + com.ovo.sablestopnow.client.model.PatternTool.sourceCount()))
-                      .color(0xFFFFFFFF));
+              body.add(new Label(Component.translatable("model.pattern.state",
+                      com.ovo.sablestopnow.client.model.PatternTool.dirCount(),
+                      com.ovo.sablestopnow.client.model.PatternTool.sourceCount()))
+                      .color(0xFFB9C0EE));
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_N1);
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_S1);
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_N2);
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_S2);
+              final com.ovo.sablestopnow.client.gui.lib.UiField n1Field =
+                      com.ovo.sablestopnow.client.gui.lib.UiField.integer(
+                              "model.pattern.n1", CMD_PATTERN_N1, patternN1, 1, 64);
+              n1Field.commit(v -> {
+                  patternN1.set(v);
+                  PatternTool.preview((int) (double) patternN1.get(), (double) patternS1.get(),
+                          (int) (double) patternN2.get(), (double) patternS2.get());
+              });
+              body.add(n1Field);
+              final com.ovo.sablestopnow.client.gui.lib.UiField s1Field =
+                      com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                              "model.pattern.s1", CMD_PATTERN_S1, patternS1, -32.0, 32.0, 0.25);
+              s1Field.commit(v -> {
+                  patternS1.set(v);
+                  PatternTool.preview((int) (double) patternN1.get(), (double) patternS1.get(),
+                          (int) (double) patternN2.get(), (double) patternS2.get());
+              });
+              body.add(s1Field);
+              final com.ovo.sablestopnow.client.gui.lib.UiField n2Field =
+                      com.ovo.sablestopnow.client.gui.lib.UiField.integer(
+                              "model.pattern.n2", CMD_PATTERN_N2, patternN2, 1, 64);
+              n2Field.commit(v -> patternN2.set(v));
+              body.add(n2Field);
+              final com.ovo.sablestopnow.client.gui.lib.UiField s2Field =
+                      com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                              "model.pattern.s2", CMD_PATTERN_S2, patternS2, -32.0, 32.0, 0.25);
+              s2Field.commit(v -> patternS2.set(v));
+              body.add(s2Field);
               if (com.ovo.sablestopnow.client.model.PatternTool.dirCount() > 0
                       && com.ovo.sablestopnow.client.model.PatternTool.sourceCount() > 0) {
-                  body.add(new Button(Component.translatable("model.pattern.confirm"),
-                          com.ovo.sablestopnow.client.model.PatternTool::openDialog).width(Widget.FILL));
+                  body.add(new Button(Component.translatable("model.pattern.create"), () -> {
+                      PatternTool.create((int) (double) patternN1.get(),
+                              (double) patternS1.get(),
+                              (int) (double) patternN2.get(), (double) patternS2.get());
+                      lastLeftSignature = null;
+                      refreshLeftPanel();
+                  }).width(Widget.FILL));
               }
               body.add(new Button(Component.translatable("model.pattern.clear"), () -> {
-                  com.ovo.sablestopnow.client.model.PatternTool.reset();
+                  PatternTool.reset();
                   lastLeftSignature = null;
                   refreshLeftPanel();
               }).width(Widget.FILL));

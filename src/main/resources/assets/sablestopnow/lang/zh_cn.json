@@ -779,5 +779,19 @@
   "model.pattern.step": "点 1–3 条棱定方向 → 右栏点特征加入 → 点\"设置次数/间距\"",
   "model.pattern.confirm": "设置次数 / 间距",
   "model.pattern.clear": "清空选择",
-  "gui.sablestopnow.opt.color_palette.button": "打开调色板"
+  "gui.sablestopnow.opt.color_palette.button": "打开调色板",
+  "model.plane.picked": "已选面：%1$s",
+  "model.plane.distance": "距离（可负 = 反向）",
+  "model.plane.create": "创建基准面",
+  "model.fillet.picked": "已选棱：起点 %1$s",
+  "model.fillet.radius": "半径",
+  "model.fillet.create": "创建圆角",
+  "model.mirror.plane_ok": "镜像面已选定 ✓ 现在在右栏点要镜像的特征",
+  "model.mirror.sources": "已选源特征：%1$s 个",
+  "model.pattern.state": "方向 %1$s 条 · 源特征 %2$s 个",
+  "model.pattern.n1": "方向1 次数",
+  "model.pattern.s1": "方向1 间距（可负）",
+  "model.pattern.n2": "方向2 次数",
+  "model.pattern.s2": "方向2 间距（可负）",
+  "model.pattern.create": "创建阵列"
 }

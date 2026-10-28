@@ -554,7 +554,7 @@ public final class ModelInput {
                           ModelMode.hoveredRef() == null ? "null"
                                   : ModelMode.hoveredRef().describe());
                 final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf2 =
-                        com.ovo.sablestopnow.client.model.FeatureHover.get();
+                        com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
                 if (pf2 != null) {
                     com.ovo.sablestopnow.client.model.PatternTool.pickEdge(pf2);
                 } else {
@@ -571,7 +571,7 @@ public final class ModelInput {
                           ModelMode.hoveredRef() == null ? "null"
                                   : ModelMode.hoveredRef().describe());
                 final com.ovo.sablestopnow.client.model.FeatureHover.Hit mf =
-                        com.ovo.sablestopnow.client.model.FeatureHover.get();
+                        com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
                 if (mf != null) {
                     com.ovo.sablestopnow.client.model.ModelUi.mirrorPickPlane(mf);
                 } else {
@@ -588,7 +588,7 @@ public final class ModelInput {
                           ModelMode.hoveredRef() == null ? "null"
                                   : ModelMode.hoveredRef().describe());
                 final com.ovo.sablestopnow.client.model.FeatureHover.Hit hf =
-                        com.ovo.sablestopnow.client.model.FeatureHover.get();
+                        com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
                 if (hf != null) {
                     com.ovo.sablestopnow.client.model.ModelUi.filletPickEdge(hf);
                 } else {
@@ -605,7 +605,7 @@ public final class ModelInput {
                           ModelMode.hoveredRef() == null ? "null"
                                   : ModelMode.hoveredRef().describe());
                 final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf =
-                        com.ovo.sablestopnow.client.model.FeatureHover.get();
+                        com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
                 if (pf != null) {
                     com.ovo.sablestopnow.client.model.ModelUi.planePickFace(pf);
                 } else {
@@ -616,7 +616,7 @@ public final class ModelInput {
             // ★ 需求：**以模型的一个面作草图基准面** ✓ —— 优先级最高
             //   （模型面 > 方块面 > 基准板 ✓ 与"面优先于板"的既有纪律一致）
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit ff =
-                    com.ovo.sablestopnow.client.model.FeatureHover.get();
+                    com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
             if (ff != null
                     && ff.kind() == com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE
                     && com.ovo.sablestopnow.client.SketchClient.chooseModelFace(ff)) {

@@ -3181,7 +3181,11 @@ public final class ModelUi {
         }
         final TreeView.TreeItem node = new TreeView.TreeItem("solids:" + bodyId)
                 .label(Component.translatable("model.node.solids"));
-        final java.util.List<com.ovo.sablestopnow.sketch.Solid> solids = currentSolidsOf(bodyId);
+        // 按序号排序再建行：数据源是 map 顺序，交换序号后行位置不变，看起来像"没反应"
+        final java.util.List<com.ovo.sablestopnow.sketch.Solid> solids =
+                new java.util.ArrayList<>(currentSolidsOf(bodyId));
+        solids.sort(java.util.Comparator.comparingInt(
+                com.ovo.sablestopnow.sketch.Solid::index));
         final java.util.List<com.ovo.sablestopnow.sketch.Sketch> sketches =
                 currentSketchesOf(bodyId);
         // 草图表：id → 草图，用来把"被吸收的草图 id"还原成可点开的行

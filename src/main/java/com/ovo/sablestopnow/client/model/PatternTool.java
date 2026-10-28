@@ -125,6 +125,12 @@ public final class PatternTool {
                     bestIdx = i;
                 }
             }
+            // ★ 阈值：面判级时，离棱太远就不许当方向（用户："不应该能选到面作为方向"）
+            if (best > 0.35) {
+                ModelMode.prompt("model.pattern.pick_edge");
+                SablestopNow.LOGGER.info("[pattern] reject: nearest edge dist={} (too far)", best);
+                return false;
+            }
             edgeIdx = bestIdx;
             SablestopNow.LOGGER.info("[pattern] hover {} -> nearest edge idx={} dist={}",
                     hit.kind(), edgeIdx, best);

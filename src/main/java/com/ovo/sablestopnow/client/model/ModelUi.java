@@ -2228,6 +2228,12 @@ public final class ModelUi {
                     bestIdx = i;
                 }
             }
+            if (best > 0.35) {
+                ModelMode.prompt("model.fillet.pick_edge");
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                        "[fillet] reject: nearest edge dist={} (too far)", best);
+                return false;
+            }
             idx = bestIdx;
             com.ovo.sablestopnow.SablestopNow.LOGGER.info(
                     "[fillet] hover was {} -> nearest edge idx={} dist={}", hit.kind(), idx, best);
@@ -2277,8 +2283,11 @@ public final class ModelUi {
         }
         com.ovo.sablestopnow.client.model.FeaturePreview.set(filletSourceSolid,
                 new org.joml.Vector3d(n1).cross(n2), segs);
-        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[fillet] preview segs={} r={}",
-                segs.size(), radius);
+        if (System.currentTimeMillis() - lastFilletPreviewLog > 2000L) {
+            lastFilletPreviewLog = System.currentTimeMillis();
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[fillet] preview segs={} r={}",
+                    segs.size(), radius);
+        }
     }
 
     /**
@@ -2518,6 +2527,8 @@ public final class ModelUi {
     private static java.util.UUID planeSolidId;
     /** 当前在树里选中的实体（左栏据此显示"特征操作"：上移/下移/删除/贴图）✓ */
     private static java.util.UUID selectedSolidId;
+    private static long lastFilletPreviewLog;
+    private static long lastPlanePreviewLog;
 
     /** 当前在树里选中的特征 id ✓（渲染侧用于"选中也高亮"） */
     public static java.util.UUID selectedSolid() {
@@ -2611,8 +2622,11 @@ public final class ModelUi {
         com.ovo.sablestopnow.client.model.FeaturePreview.set(planeSourceSolid,
                 new org.joml.Vector3d(planeFaceNormal[0], planeFaceNormal[1], planeFaceNormal[2]),
                 segs);
-        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[plane] preview segs=4 dist={} corners={}",
-                distance, cs);
+        if (System.currentTimeMillis() - lastPlanePreviewLog > 2000L) {
+            lastPlanePreviewLog = System.currentTimeMillis();
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[plane] preview segs=4 dist={}",
+                    distance);
+        }
     }
 
     /** 真正创建基准面特征 ✓（与其它特征同级、受序号/依赖约束） */

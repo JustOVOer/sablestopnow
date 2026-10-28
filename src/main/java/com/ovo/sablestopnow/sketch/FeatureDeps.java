@@ -150,40 +150,20 @@ public final class FeatureDeps {
         if (to < 0 || to >= ordered.size()) {
             return null; // 已经在头/尾 ✓
         }
-        // ★ **插入并平移受影响区间** ✓
-        //   整体重编号会让所有标签一起变（用户实测："10 变成 3、11 变成 ..."）✗；
-        //   只交换两个序号又像"把邻居换过来"✗。
-        //   正确语义：被移动的特征拿到目标位置原来的序号，区间内的其它特征顺移一位，
-        //   **区间之外的编号完全不动** ✓
-        final Solid moving = ordered.remove(at);
-        final int movingIndex = moving.index();
-        final int targetIndex = at < to ? ordered.get(at).index() : ordered.get(to).index();
-        ordered.add(to, moving);
-        for (int i = Math.min(at, to); i <= Math.max(at, to); i++) {
-            final Solid cur = ordered.get(i);
-            if (cur.id().equals(moving.id())) {
-                ordered.set(i, withIndex(cur, targetIndex));
-            } else {
-                ordered.set(i, withIndex(cur, cur.index() + (dir > 0 ? -1 : 1)));
-            }
+        // ★ 先把整条链**规范化成 1..N**（消除历史遗留的空号/重号）✓
+        //   否则"上移一格"会因为中间缺号而跳好几个数字（用户实测：15→13）✗
+        //   由于特征名已经是**永久名字**，规范化不会改变玩家看到的标签 ✓
+        final java.util.List<Solid> normalized = new ArrayList<>(ordered.size());
+        for (int i = 0; i < ordered.size(); i++) {
+            normalized.add(withIndex(ordered.get(i), i + 1));
         }
-        // 兜底：若区间平移出现重复（数据本来就有重复序号），退回"整体重编号"
-        final java.util.Set<Integer> seen = new java.util.HashSet<>();
-        boolean dup = false;
-        for (final Solid cur : ordered) {
-            if (!seen.add(cur.index())) {
-                dup = true;
-                break;
-            }
-        }
-        if (dup) {
-            for (int i = 0; i < ordered.size(); i++) {
-                ordered.set(i, withIndex(ordered.get(i), i + 1));
-            }
-        }
-        if (movingIndex == targetIndex) {
-            return null; // 没有变化
-        }
+        // 在规范化后的列表里交换相邻两项 ⇒ 上移/下移永远是 ±1 ✓
+        final Solid a0 = normalized.get(at);
+        final Solid b0 = normalized.get(to);
+        normalized.set(at, withIndex(b0, at + 1));
+        normalized.set(to, withIndex(a0, to + 1));
+        ordered.clear();
+        ordered.addAll(normalized);
         // 校验：违反依赖 ⇒ 撤销这次移动（返回 null，调用方保持原样）
         if (validate(ordered, existingSketchIds) != null) {
             return null;

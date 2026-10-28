@@ -308,6 +308,7 @@ public class TreeView extends Container {
 
     /** 当前帧鼠标悬停行的 key ✓（null = 没有悬停）—— 供"树行悬停高亮对应特征"用 ✓ */
     private String hoveredKey;
+    private static long lastHoverDiag;
 
     public String hoveredKey() {
         return hoveredKey;
@@ -323,6 +324,11 @@ public class TreeView extends Container {
             UiDraw.rectOutline(g, x, y, w, h, outline, 1);
         }
         renderChildren(ctx, g);
+        final long nowHover = System.currentTimeMillis();
+        final boolean diagHover = nowHover - lastHoverDiag > 2000L;
+        if (diagHover) {
+            lastHoverDiag = nowHover;
+        }
         // ★ 悬停行：在**树这一层**按几何位置算 ✓
         //   （行自己的 render 不一定会被调用；这里遍历 rows 用它们的实时矩形，最稳）
         for (final Row row : rows) {

@@ -150,13 +150,39 @@ public final class FeatureDeps {
         if (to < 0 || to >= ordered.size()) {
             return null; // 已经在头/尾 ✓
         }
-        // ★ 交换位置后**整体重编号 1..N** ✓
-        //   只交换两个序号时，服务端若只接受其中一个更新，就会出现
-        //   "编号不变、把邻居换过来"的怪现象（用户实测）✗
+        // ★ **插入并平移受影响区间** ✓
+        //   整体重编号会让所有标签一起变（用户实测："10 变成 3、11 变成 ..."）✗；
+        //   只交换两个序号又像"把邻居换过来"✗。
+        //   正确语义：被移动的特征拿到目标位置原来的序号，区间内的其它特征顺移一位，
+        //   **区间之外的编号完全不动** ✓
         final Solid moving = ordered.remove(at);
+        final int movingIndex = moving.index();
+        final int targetIndex = at < to ? ordered.get(at).index() : ordered.get(to).index();
         ordered.add(to, moving);
-        for (int i = 0; i < ordered.size(); i++) {
-            ordered.set(i, withIndex(ordered.get(i), i + 1));
+        for (int i = Math.min(at, to); i <= Math.max(at, to); i++) {
+            final Solid cur = ordered.get(i);
+            if (cur.id().equals(moving.id())) {
+                ordered.set(i, withIndex(cur, targetIndex));
+            } else {
+                ordered.set(i, withIndex(cur, cur.index() + (dir > 0 ? -1 : 1)));
+            }
+        }
+        // 兜底：若区间平移出现重复（数据本来就有重复序号），退回"整体重编号"
+        final java.util.Set<Integer> seen = new java.util.HashSet<>();
+        boolean dup = false;
+        for (final Solid cur : ordered) {
+            if (!seen.add(cur.index())) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) {
+            for (int i = 0; i < ordered.size(); i++) {
+                ordered.set(i, withIndex(ordered.get(i), i + 1));
+            }
+        }
+        if (movingIndex == targetIndex) {
+            return null; // 没有变化
         }
         // 校验：违反依赖 ⇒ 撤销这次移动（返回 null，调用方保持原样）
         if (validate(ordered, existingSketchIds) != null) {

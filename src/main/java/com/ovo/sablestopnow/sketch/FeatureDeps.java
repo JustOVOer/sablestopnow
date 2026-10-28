@@ -174,9 +174,25 @@ public final class FeatureDeps {
         final Solid b0 = ordered.get(to);
         ordered.set(at, withIndex(b0, a0.index()));
         ordered.set(to, withIndex(a0, b0.index()));
-        // 校验：违反依赖 ⇒ 撤销这次移动（返回 null，调用方保持原样）
+        // ★ 移动只保证**序号唯一**，不再做依赖校验 ✓
+        //   理由：`placeAll` 是按 **id** 解析源特征的（圆角/镜像/阵列都按 id 找源），
+        //   顺序**不影响几何结果**；依赖顺序只是"建议"。之前用 validate 挡，
+        //   结果任何一步都可能被拒 ⇒ 用户实测"只有提示违反依赖，根本移不动" ✗
+        final java.util.Set<Integer> uniq = new java.util.HashSet<>();
+        for (final Solid cur : ordered) {
+            if (!uniq.add(cur.index())) {
+                // 极端情况：仍然重复 ⇒ 规范化一次（保证唯一）
+                for (int i = 0; i < ordered.size(); i++) {
+                    ordered.set(i, withIndex(ordered.get(i), i + 1));
+                }
+                break;
+            }
+        }
+        // ★ 只保留**一条**真正影响几何的规则：切割必须在材料之后 ✓
+        //   其它依赖（圆角/镜像/阵列的"源在前面"）只是建议 —— placeAll 按 id 解析源，
+        //   顺序不影响结果，用它们去挡会把"移动"整个堵死（用户实测）✗
         final String why = validate(ordered, existingSketchIds);
-        if (why != null) {
+        if (why != null && why.contains("cut_before_material")) {
             lastRejectReason = why;
             return null;
         }

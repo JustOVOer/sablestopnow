@@ -2005,7 +2005,12 @@ public final class ModelUi {
     /** 树行悬停 ⇒ 让渲染侧高亮对应特征 ✓（item 6） */
     public static void syncFeatureHover() {
         // hoveredKey 现在会在 RowWidget.update 里赋值 ⇒ 直接用它（行高/展开变化都自动正确）
-        final String key = tree == null ? null : tree.hoveredKey();
+        // ★ **按坐标直接算**（不依赖渲染帧顺序）：mouseXd/mouseYd 是 UI 设计空间坐标，
+        //   行矩形由布局每帧写入 ⇒ 展开/收起/滚动都自动正确 ✓
+        com.ovo.sablestopnow.client.gui.lib.Ui.refreshMouse();
+        final String key = tree == null ? null
+                : tree.hoverAt(com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd(),
+                        com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd());
         // 悬停诊断：只在变化时打一行（用户要求"对 hover 做日志"）
         if (key == null ? lastHoverLogged != null
                 : !key.equals(lastHoverLogged)) {

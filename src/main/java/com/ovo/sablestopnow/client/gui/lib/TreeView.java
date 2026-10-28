@@ -310,6 +310,25 @@ public class TreeView extends Container {
     private String hoveredKey;
     private static long lastHoverDiag;
 
+    /**
+     * 按坐标算悬停行的 key ✓（不依赖渲染帧、也不依赖 mouse-move 派发）
+     *
+     * @param mx 设计空间坐标（与 {@code Ui.mouseXd()} 同一套）
+     * @return 命中的行 key；没有返回 null
+     */
+    public String hoverAt(final double mx, final double my) {
+        for (final Row row : rows) {
+            final RowWidget rw = row.widget;
+            if (!rw.visible || rw.w <= 0 || rw.h <= 0) {
+                continue;
+            }
+            if (mx >= rw.x && mx <= rw.x + rw.w && my >= rw.y && my <= rw.y + rw.h) {
+                return row.item.key;
+            }
+        }
+        return null;
+    }
+
     public String hoveredKey() {
         return hoveredKey;
     }

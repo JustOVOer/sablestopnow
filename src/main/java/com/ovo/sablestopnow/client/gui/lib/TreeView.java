@@ -365,6 +365,10 @@ public class TreeView extends Container {
 
         @Override
         public void update(final UiContext ctx, final double dt) {
+            // ★ 记录**悬停行的 key** ✓（之前只有"每帧清空"，从没赋值 ⇒ 外部永远拿不到）
+            if (ctx.isHovered(this) && item.selectable) {
+                hoveredKey = item.key;
+            }
             hover.to(ctx.isHovered(this) && item.selectable ? 1.0 : 0.0).tick(ctx.animations, dt);
             super.update(ctx, dt);
         }

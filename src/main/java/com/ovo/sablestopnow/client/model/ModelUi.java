@@ -2794,6 +2794,9 @@ public final class ModelUi {
             return;
         }
         if ("del".equals(action)) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[feature] DELETE request id={} idx={} body={}",
+                    solid.id(), solid.index(), solid.body());
             com.ovo.sablestopnow.network.SolidNetworking.sendRemove(solid.id());
             com.ovo.sablestopnow.client.model.FeaturePreview.clear();
             com.ovo.sablestopnow.SablestopNow.LOGGER.info("[feature] delete solid idx={}",
@@ -2803,6 +2806,9 @@ public final class ModelUi {
             return;
         }
         final int dir = "up".equals(action) ? -1 : 1;
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[feature] MOVE request action={} id={} idx={} count={}",
+                action, solid.id(), solid.index(), 0);
         final java.util.List<com.ovo.sablestopnow.sketch.Solid> solids =
                 com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, solid.body());
         final java.util.List<java.util.UUID> sketchIds = new java.util.ArrayList<>();

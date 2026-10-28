@@ -1294,6 +1294,7 @@ public final class ModelUi {
                   }
                   return;
             } else if (item.data instanceof com.ovo.sablestopnow.sketch.Solid solid) {
+                selectedSolidId = solid.id();
                   if (ModelTools.PATTERN.equals(ModelMode.tool())) {
                       com.ovo.sablestopnow.client.model.PatternTool.toggleSource(solid);
                       refreshLeftPanel();
@@ -2419,6 +2420,8 @@ public final class ModelUi {
     private static java.util.UUID planeSourceSolid;
     /** 拾取到的那条棱/那个面**属于哪个实体**（用于把新特征挂到它的真实草图上）✓ */
     private static java.util.UUID planeSolidId;
+    /** 当前在树里选中的实体（左栏据此显示"特征操作"：上移/下移/删除/贴图）✓ */
+    private static java.util.UUID selectedSolidId;
     private static java.util.UUID filletSolidId;
     /** 圆角棱相邻的两个面法线（局部）✓ 由拾取时确定 */
     private static org.joml.Vector3d filletNormal1;
@@ -3268,8 +3271,51 @@ public final class ModelUi {
           // ===== item 7/8/9/10：四个特征的**左栏完整面板** ✓ =====
           //   要点：一进入工具，左栏就把「要你做什么 / 已经选了哪些 / 参数 / 创建」全部摆出来 ✓
           //   （用户实测："应该一进入就在左侧显示完整的菜单，然后有专门的地方显示选了哪些东西，还有调整参数"）
-          if (ModelTools.PLANE.equals(tool)) {
-              body.add(new Label(Component.translatable("model.tool.plane.hint")).color(0xFFCFD8FF));
+          // ★ 选中某个特征 ⇒ 左栏给"特征操作"（上移/下移/删除/贴图）✓
+          //   不依赖右栏树子行是否展开（用户实测："上移下移无反应"，多半是子行没展开/点不到）✓
+          if (ModelTools.NONE.equals(tool) && selectedSolidId != null) {
+              final net.minecraft.client.Minecraft mc0 =
+                      net.minecraft.client.Minecraft.getInstance();
+              final net.minecraft.world.level.Level lv0 = mc0 == null ? null : mc0.level;
+              com.ovo.sablestopnow.sketch.Solid sel = null;
+              if (lv0 != null) {
+                  for (final com.ovo.sablestopnow.sketch.Solid sd
+                          : com.ovo.sablestopnow.sketch.SolidClientState.in(
+                                  lv0.dimension().location())) {
+                      if (sd.id().equals(selectedSolidId)) {
+                          sel = sd;
+                          break;
+                      }
+                  }
+              }
+              if (sel != null) {
+                  final com.ovo.sablestopnow.sketch.Solid target = sel;
+                  body.add(new Label(Component.literal(solidShortLabel(target)))
+                          .color(0xFFFFFFFF));
+                  body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+                  body.add(new Button(Component.translatable("model.order.up"), () -> {
+                      featureAction("up", target);
+                      forceRefreshLeft();
+                  }).width(Widget.FILL));
+                  body.add(new Button(Component.translatable("model.order.down"), () -> {
+                      featureAction("down", target);
+                      forceRefreshLeft();
+                  }).width(Widget.FILL));
+                  body.add(new Button(Component.translatable("model.texture.open"), () -> {
+                      textureSolidId = target.id();
+                      textureScale.set(target.appearance().blocksPerTile());
+                      textureConnected.set(target.appearance().connected());
+                      forceRefreshLeft();
+                  }).width(Widget.FILL));
+                  body.add(new Button(Component.translatable("model.order.delete"), () -> {
+                      featureAction("del", target);
+                      selectedSolidId = null;
+                      forceRefreshLeft();
+                  }).width(Widget.FILL));
+                  return;
+              }
+          }
+          if (ModelTools.PLANE.equals(tool)) {              body.add(new Label(Component.translatable("model.tool.plane.hint")).color(0xFFCFD8FF));
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
               body.add(new Label(planeFaceOrigin == null
                       ? Component.translatable("model.plane.step1")
@@ -3364,8 +3410,10 @@ public final class ModelUi {
                   if (lv != null && b0 != null) {
                       for (final com.ovo.sablestopnow.sketch.Solid sd
                               : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
-                          if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
-                              continue;
+                          if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()
+                                  || sd.shape() instanceof
+                                          com.ovo.sablestopnow.sketch.Solid.Shape.Cut) {
+                              continue; // 切割体不是材料，镜像/阵列它没有意义 ✓
                           }
                           final boolean on = mirrorSources.contains(sd.id());
                           body.add(new Button(Component.literal(
@@ -3438,7 +3486,9 @@ public final class ModelUi {
                     if (lv != null && b0 != null) {
                         for (final com.ovo.sablestopnow.sketch.Solid sd
                                 : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
-                            if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
+                            if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()
+                                    || sd.shape() instanceof
+                                            com.ovo.sablestopnow.sketch.Solid.Shape.Cut) {
                                 continue;
                             }
                             final boolean on = com.ovo.sablestopnow.client.model.PatternTool

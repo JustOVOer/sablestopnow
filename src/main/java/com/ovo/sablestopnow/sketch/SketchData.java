@@ -255,8 +255,6 @@ public class SketchData extends SavedData {
             // ★ 文字图元（item 3）✓
             for (final Tag tag : entry.getList("texts", Tag.TAG_COMPOUND)) {
                 final CompoundTag nt = (CompoundTag) tag;
-                com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-text] data loaded idx={}",
-                        sketch.texts().size());
                 sketch.addText(new Sketch.TextNote(
                         nt.getDouble("u"), nt.getDouble("v"), nt.getDouble("w"), nt.getDouble("h"),
                         nt.getString("text"), nt.getInt("argb"),

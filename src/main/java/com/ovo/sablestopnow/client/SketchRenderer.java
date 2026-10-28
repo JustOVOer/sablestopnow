@@ -1828,6 +1828,11 @@ public final class SketchRenderer {
             return 0;
         }
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (System.currentTimeMillis() - lastTextDrawLog > 3000L) {
+            lastTextDrawLog = System.currentTimeMillis();
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[sketch-text] draw n={} sketch={}", texts.size(), sketch.id());
+        }
         final MultiBufferSource.BufferSource buf = mc.renderBuffers().bufferSource();
         final MultiBufferSource.BufferSource quadBuf =
                 MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
@@ -1921,6 +1926,8 @@ public final class SketchRenderer {
         }
         return drawn;
     }
+
+    private static long lastTextDrawLog = 0L;
 
     /** 3D 棒的**半宽**（格）✓ 方向在基准面内、垂直于线段。 */
     private static final double BAR_WIDTH_HALF = 0.025;

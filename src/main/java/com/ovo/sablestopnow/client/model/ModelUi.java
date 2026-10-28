@@ -3590,6 +3590,19 @@ public final class ModelUi {
               //   后续点击落到已经销毁的控件上 ⇒ 用户实测"只能选到第一个"✗
               //   复选框自己保存状态、不触发重建 ✓
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+              // ★ 创建按钮放在**列表上方** ✓（源特征多时列表很长，按钮会被挤出可视区 ⇒ 用户"看不到创建键"）
+              body.add(new Button(Component.translatable("model.mirror.confirm"), () -> {
+                  createMirrorFeature();
+                  forceRefreshLeft();
+              }).width(Widget.FILL));
+              body.add(new Button(Component.translatable("model.mirror.clear"), () -> {
+                  mirrorSources.clear();
+                  MIRROR_SRC_PROPS.forEach((k, prop) -> prop.set(false));
+                  mirrorPlaneOrigin = null;
+                  mirrorPlaneNormal = null;
+                  com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+                  forceRefreshLeft();
+              }).width(Widget.FILL));
               body.add(new Label(Component.translatable("model.mirror.pick_sources_hint"))
                       .color(0xFF8FA0D8));
               {
@@ -3677,6 +3690,28 @@ public final class ModelUi {
 
                 // ★ 源特征列表也放左栏 ✓（不依赖右栏树的点选）
                 body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+              // ★ 参数与创建按钮放在**列表上方** ✓（同上：列表会把它们挤出可视区）
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_N1);
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_S1);
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_N2);
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_S2);
+              body.add(com.ovo.sablestopnow.client.gui.lib.UiField.integer(
+                      "model.pattern.n1", CMD_PATTERN_N1, patternN1, 1, 64));
+              body.add(com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                      "model.pattern.s1", CMD_PATTERN_S1, patternS1, -32.0, 32.0, 0.25));
+              body.add(com.ovo.sablestopnow.client.gui.lib.UiField.integer(
+                      "model.pattern.n2", CMD_PATTERN_N2, patternN2, 1, 64));
+              body.add(com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                      "model.pattern.s2", CMD_PATTERN_S2, patternS2, -32.0, 32.0, 0.25));
+              body.add(new Button(Component.translatable("model.pattern.create"), () -> {
+                  PatternTool.create((int) (double) patternN1.get(), patternS1.get(),
+                          (int) (double) patternN2.get(), patternS2.get());
+                  forceRefreshLeft();
+              }).width(Widget.FILL));
+              body.add(new Button(Component.translatable("model.pattern.clear"), () -> {
+                  PatternTool.reset();
+                  forceRefreshLeft();
+              }).width(Widget.FILL));
                 body.add(new Label(Component.translatable("model.pattern.pick_sources_hint"))
                         .color(0xFF8FA0D8));
                 {

@@ -1169,6 +1169,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         final java.util.List<Csg.Polygon> out = new ArrayList<>();
         final Vector3d u = new Vector3d(axisU).normalize();
         final Vector3d v = new Vector3d(axisV).normalize();
+        // ★ UV 必须**相对**棱起点：直接用绝对坐标会得到 2e7 量级的 UV ⇒
+        //   贴图被拉到极高频率，看起来就是"每一小格单独贴图/全是碎块"（用户实测）✗
+        final Vector3d origin = tris.isEmpty() || tris.get(0).length == 0
+                ? new Vector3d()
+                : new Vector3d(tris.get(0)[0]);
         for (final Vector3d[] t : tris) {
             final Vector3d n = new Vector3d(t[1]).sub(t[0])
                     .cross(new Vector3d(t[2]).sub(t[0]));
@@ -1185,8 +1190,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             final java.util.List<Csg.Vertex> vs = new ArrayList<>(3);
             for (final Vector3d q : t) {
-                final double uu = q.dot(u);
-                final double vv = q.dot(v);
+                final double uu = new Vector3d(q).sub(origin).dot(u);
+                final double vv = new Vector3d(q).sub(origin).dot(v);
                 vs.add(new Csg.Vertex(new Csg.V3(q.x, q.y, q.z),
                         new Csg.V3(n.x, n.y, n.z), new Csg.V3(uu, vv, 0)));
             }

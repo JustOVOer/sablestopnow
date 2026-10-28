@@ -66,6 +66,21 @@ public final class PatternTool {
         });
     }
 
+    /** 进入阵列工具时**默认勾上全部材料特征** ✓（保证"创建阵列"按钮出现） */
+    public static void prefill(final UUID bodyId, final java.util.List<Solid> solids) {
+        body = bodyId;
+        SOURCES.clear();
+        if (solids == null) {
+            return;
+        }
+        for (final Solid sd : solids) {
+            if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
+                continue;
+            }
+            SOURCES.add(sd.id());
+        }
+    }
+
     /** 当前阵列作用的体 ✓（面板据此列特征；可能比 selectedModel 更可靠） */
     public static UUID bodyId() {
         return body;

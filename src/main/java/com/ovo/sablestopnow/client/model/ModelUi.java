@@ -4338,6 +4338,26 @@ public final class ModelUi {
               mirrorPlaneOrigin = null;
               mirrorPlaneNormal = null;
               com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+              // ★ 默认把该体的**全部材料特征**勾上 ⇒ "创建镜像"按钮一定出现 ✓
+              //   （之前源列表为空时按钮根本不显示，用户以为"没有创建按键"✗）
+              final net.minecraft.client.Minecraft mc0 =
+                      net.minecraft.client.Minecraft.getInstance();
+              final net.minecraft.world.level.Level lv0 = mc0 == null ? null : mc0.level;
+              final java.util.UUID b0 = ModelMode.selectedModel();
+              if (lv0 != null && b0 != null && ModelTools.MIRROR.equals(toolId)) {
+                  mirrorBody = b0;
+                  for (final com.ovo.sablestopnow.sketch.Solid sd
+                          : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv0, b0)) {
+                      if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
+                          continue;
+                      }
+                      mirrorSources.add(sd.id());
+                      mirrorSourceProp(sd.id()).set(true);
+                  }
+              }
+              if (lv0 != null && b0 != null && ModelTools.PATTERN.equals(toolId)) {
+                  PatternTool.prefill(b0, com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv0, b0));
+              }
               if (com.ovo.sablestopnow.client.SketchClient.active()) {
                   com.ovo.sablestopnow.client.SketchClient.finish();
                   com.ovo.sablestopnow.SablestopNow.LOGGER.info(

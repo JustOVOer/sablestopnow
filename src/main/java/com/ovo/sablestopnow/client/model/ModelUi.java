@@ -1982,10 +1982,32 @@ public final class ModelUi {
     /** Mirror tool: first face sets the mirror plane; a second face click with sources creates it. */
     public static boolean mirrorPickPlane(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
-        // ★ 容错：判级可能是棱/点，但只要**面是平面**就接受（用户是要"点这个面所在平面"）
+        // ★ 容错：判级可能是棱/点，但只要**面是平面**就接受
         if (hit == null || hit.face() == null || !hit.face().planar()) {
-            ModelMode.prompt("model.mirror.pick_plane");
-            return false;
+            final var mc0 = net.minecraft.client.Minecraft.getInstance();
+            final BoxPick.Hit bh = BoxPick.nearest(mc0);
+            if (bh == null || mc0.level == null) {
+                ModelMode.prompt("model.mirror.pick_plane");
+                return false;
+            }
+            final double[] loc = BoxPick.toLocal(mc0.level, bh.body(), bh.worldPoint(),
+                    bh.worldNormal());
+            if (loc == null) {
+                ModelMode.prompt("model.mirror.pick_plane");
+                return false;
+            }
+            if (mirrorPlaneOrigin != null && !mirrorSources.isEmpty()) {
+                return createMirrorFeature();
+            }
+            mirrorPlaneOrigin = new org.joml.Vector3d(loc[0], loc[1], loc[2]);
+            mirrorPlaneNormal = new org.joml.Vector3d(loc[3], loc[4], loc[5]).normalize();
+            mirrorBody = bh.body();
+            updateMirrorPreview();
+            lastLeftSignature = null;
+            refreshLeftPanel();
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[mirror] plane via BOX fallback body={}",
+                    bh.body());
+            return true;
         }
         if (mirrorPlaneOrigin != null && !mirrorSources.isEmpty()) {
             return createMirrorFeature();
@@ -2081,8 +2103,35 @@ public final class ModelUi {
     public static boolean filletPickEdge(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
         if (hit == null) {
-            ModelMode.prompt("model.fillet.pick_edge");
-            return false;
+            // ★ 兜底：盒子拾取 + 最近盒棱（保证"指哪条选哪条"不会完全失效）
+            final var mc0 = net.minecraft.client.Minecraft.getInstance();
+            final BoxPick.Hit bh = BoxPick.nearest(mc0);
+            if (bh == null || mc0.level == null) {
+                ModelMode.prompt("model.fillet.pick_edge");
+                return false;
+            }
+            final double[] loc = BoxPick.toLocal(mc0.level, bh.body(), bh.worldPoint(),
+                    bh.worldNormal());
+            if (loc == null) {
+                ModelMode.prompt("model.fillet.pick_edge");
+                return false;
+            }
+            final double[] seg = BoxPick.nearestEdgeLocal(bh.localBox(),
+                    new org.joml.Vector3d(loc[0], loc[1], loc[2]));
+            if (seg == null) {
+                ModelMode.prompt("model.fillet.pick_edge");
+                return false;
+            }
+            filletEdgeA = new org.joml.Vector3d(seg[0], seg[1], seg[2]);
+            filletEdgeB = new org.joml.Vector3d(seg[3], seg[4], seg[5]);
+            filletSourceSolid = bh.body();
+            filletSolidId = null;
+            updateFilletPreview(filletRadius.get());
+            lastLeftSignature = null;
+            refreshLeftPanel();
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[fillet] edge via BOX fallback body={} a={} b={}",
+                    bh.body(), filletEdgeA, filletEdgeB);
+            return true;
         }
         // ★ 容错：拾取可能把"棱"判成"面"（容差随距离变化）。这种情况下退一步：
         //   取这个面里**离命中点最近的那条棱** ✓（用户只要"指哪条棱倒哪条"，不关心判级细节）
@@ -2244,8 +2293,31 @@ public final class ModelUi {
     public static boolean planePickFace(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
         if (hit == null || hit.face() == null || !hit.face().planar()) {
-            ModelMode.prompt("model.plane.pick_face");
-            return false;
+            // ★ 兜底：用**盒子**射线拾取（碰撞与渲染的共同底座 ⇒ 永远能命中）
+            final var mc0 = net.minecraft.client.Minecraft.getInstance();
+            final BoxPick.Hit bh = BoxPick.nearest(mc0);
+            if (bh == null || mc0.level == null) {
+                ModelMode.prompt("model.plane.pick_face");
+                return false;
+            }
+            final double[] loc = BoxPick.toLocal(mc0.level, bh.body(), bh.worldPoint(),
+                    bh.worldNormal());
+            if (loc == null) {
+                ModelMode.prompt("model.plane.pick_face");
+                return false;
+            }
+            planeFaceOrigin = new double[] {loc[0], loc[1], loc[2]};
+            planeFaceNormal = new double[] {loc[3], loc[4], loc[5]};
+            planeSourceSolid = bh.body();
+            planeSolidId = null; // 盒子兜底没有实体 id ⇒ 用该体任意草图
+            planeSourceFace = -1;
+            updatePlanePreview(planeDistance.get());
+            lastLeftSignature = null;
+            refreshLeftPanel();
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[plane] picked via BOX fallback body={} origin={}", bh.body(),
+                    java.util.Arrays.toString(planeFaceOrigin));
+            return true;
         }
         planeFaceOrigin = new double[] {hit.localCenter().x, hit.localCenter().y,
                 hit.localCenter().z};

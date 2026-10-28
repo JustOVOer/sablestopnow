@@ -54,8 +54,26 @@ public final class PatternTool {
     /** 点棱：第一条 = 方向1；之后（已有源）再点 = 打开对话框；否则追加方向 ✓ */
     public static boolean pickEdge(final FeatureHover.Hit hit) {
         if (hit == null || hit.face() == null || hit.face().segments().isEmpty()) {
-            ModelMode.prompt("model.pattern.pick_edge");
-            return false;
+            final Minecraft mc0 = Minecraft.getInstance();
+            final BoxPick.Hit bh = BoxPick.nearest(mc0);
+            if (bh == null || mc0.level == null) {
+                ModelMode.prompt("model.pattern.pick_edge");
+                return false;
+            }
+            final double[] loc = BoxPick.toLocal(mc0.level, bh.body(), bh.worldPoint(),
+                    bh.worldNormal());
+            if (loc == null) {
+                ModelMode.prompt("model.pattern.pick_edge");
+                return false;
+            }
+            final double[] segv = BoxPick.nearestEdgeLocal(bh.localBox(),
+                    new Vector3d(loc[0], loc[1], loc[2]));
+            if (segv == null) {
+                ModelMode.prompt("model.pattern.pick_edge");
+                return false;
+            }
+            return addDirection(segv[3] - segv[0], segv[4] - segv[1], segv[5] - segv[2],
+                    bh.body());
         }
         // ★ 容错：判级可能是面/点 ⇒ 取**离命中中心最近的棱**（与圆角同一套思路）
         int edgeIdx = hit.index();
@@ -90,12 +108,19 @@ public final class PatternTool {
         final double dx = seg[3] - seg[0];
         final double dy = seg[4] - seg[1];
         final double dz = seg[5] - seg[2];
+        final UUID bodyForDir = hit.body();
+        return addDirection(dx, dy, dz, bodyForDir);
+    }
+
+    /** 追加一个阵列方向（第一条 = 方向1；已有源特征时再点 = 弹框）✓ */
+    private static boolean addDirection(final double dx, final double dy, final double dz,
+                                        final UUID bodyForDir) {
         if (Math.sqrt(dx * dx + dy * dy + dz * dz) < 1.0e-6) {
             return false;
         }
         if (DIRS.isEmpty()) {
             DIRS.add(new Solid.Shape.Dir(dx, dy, dz, 2, 1.0));
-            body = hit.body();
+            body = bodyForDir;
             preview(2, 1.0, 1, 0.0);
             return true;
         }

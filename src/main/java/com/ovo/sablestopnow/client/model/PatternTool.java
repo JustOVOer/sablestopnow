@@ -47,6 +47,22 @@ public final class PatternTool {
         return DIRS.size();
     }
 
+    /** 复选框回调：设置/取消某个源特征 ✓（不重建面板） */
+    public static void setSource(final UUID id, final boolean on, final UUID bodyId) {
+        if (id == null) {
+            return;
+        }
+        if (on) {
+            if (!SOURCES.contains(id)) {
+                SOURCES.add(id);
+            }
+        } else {
+            SOURCES.remove(id);
+        }
+        body = bodyId;
+        preview((int) (double) 2.0, 1.0, 1, 0.0);
+    }
+
     /** 某个特征是否已被选为阵列源 ✓（左栏列表勾选态） */
     public static boolean hasSource(final UUID id) {
         return id != null && SOURCES.contains(id);

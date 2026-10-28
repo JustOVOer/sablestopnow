@@ -2051,6 +2051,19 @@ public final class ModelUi {
         final double[] n = {mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z};
         final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
                 new java.util.ArrayList<>();
+        // ★ 先把**镜像面**画成一个方框（选完面立刻有可见反馈 ✓ 之前只有"选了但看不到"）
+        {
+            final com.ovo.sablestopnow.sketch.Solid.Shape.Plane tmp =
+                    new com.ovo.sablestopnow.sketch.Solid.Shape.Plane(
+                            mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z,
+                            mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z,
+                            0.0, null, -1);
+            final java.util.List<org.joml.Vector3d> cs = tmp.corners(1.2);
+            for (int i = 0; i < 4; i++) {
+                segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
+                        cs.get(i), cs.get((i + 1) % 4)));
+            }
+        }
         final var sketches = com.ovo.sablestopnow.sketch.SketchClientState.current(level);
         for (final com.ovo.sablestopnow.sketch.Solid src
                 : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, mirrorBody)) {
@@ -2345,7 +2358,9 @@ public final class ModelUi {
         }
         index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(filletSourceSolid, 0) + 1);
         final com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef ref =
-                new com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef(filletSourceSolid,
+                new com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef(
+                        filletSolidId != null ? filletSolidId
+                                : pipSolid(filletSourceSolid, filletEdgeA),
                         filletEdgeA.x, filletEdgeA.y, filletEdgeA.z,
                         filletEdgeB.x, filletEdgeB.y, filletEdgeB.z,
                         filletNormal1 == null ? 0 : filletNormal1.x,
@@ -2430,6 +2445,49 @@ public final class ModelUi {
         return bySolid != null ? bySolid : anySketchIdOfBody(body);
     }
 
+    /**
+     * 由 body + 局部点反查**实体 id** ✓（盒兜底拾取时拿不到实体 id）
+     *
+     * <p>没有它的话 `EdgeRef.solidId` 只能填 body ⇒ `placeAll` 里 `byId.get(...)` 找不到源实体
+     * ⇒ 圆角永远算不出切割体（这正是"圆角创建了但模型没变化"的真因）✗
+     */
+    private static java.util.UUID pipSolid(final java.util.UUID body,
+                                           final org.joml.Vector3dc p) {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        if (level == null || body == null || p == null) {
+            return null;
+        }
+        final com.ovo.sablestopnow.sketch.Sketch sk =
+                com.ovo.sablestopnow.sketch.SketchClientState.current(level).stream()
+                        .findFirst().orElse(null);
+        java.util.UUID best = null;
+        double bestD = Double.MAX_VALUE;
+        for (final com.ovo.sablestopnow.sketch.Solid sd
+                : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, body)) {
+            if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()
+                    || sd.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut) {
+                continue;
+            }
+            final com.ovo.sablestopnow.sketch.Sketch own = sd.resolve(
+                    com.ovo.sablestopnow.sketch.SketchClientState.current(level));
+            if (own == null) {
+                continue;
+            }
+            for (final double[] b : sd.boxes(own)) {
+                final double dx = Math.max(0, Math.max(b[0] - p.x(), p.x() - b[3]));
+                final double dy = Math.max(0, Math.max(b[1] - p.y(), p.y() - b[4]));
+                final double dz = Math.max(0, Math.max(b[2] - p.z(), p.z() - b[5]));
+                final double d = dx * dx + dy * dy + dz * dz;
+                if (d < bestD) {
+                    bestD = d;
+                    best = sd.id();
+                }
+            }
+        }
+        return best;
+    }
+
     /** 基准面工具当前拾取到的面：中心（局部）+ 单位法线 ✓ */
     private static double[] planeFaceOrigin;
     private static double[] planeFaceNormal;
@@ -2438,6 +2496,22 @@ public final class ModelUi {
     private static java.util.UUID planeSolidId;
     /** 当前在树里选中的实体（左栏据此显示"特征操作"：上移/下移/删除/贴图）✓ */
     private static java.util.UUID selectedSolidId;
+    /** 镜像源复选框的状态（按实体 id）✓ 面板重建也不丢 */
+    private static final java.util.Map<java.util.UUID,
+            com.ovo.sablestopnow.client.gui.lib.Prop<Boolean>> PATTERN_SRC_PROPS =
+            new java.util.HashMap<>();
+
+    private static final java.util.Map<java.util.UUID,
+            com.ovo.sablestopnow.client.gui.lib.Prop<Boolean>> MIRROR_SRC_PROPS =
+            new java.util.HashMap<>();
+
+    private static com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> mirrorSourceProp(
+            final java.util.UUID id) {
+        return MIRROR_SRC_PROPS.computeIfAbsent(id, k ->
+                com.ovo.sablestopnow.client.gui.lib.Prop.of(
+                        "mirror.src." + k.toString().substring(0, 8),
+                        mirrorSources.contains(k)));
+    }
     private static java.util.UUID filletSolidId;
     /** 圆角棱相邻的两个面法线（局部）✓ 由拾取时确定 */
     private static org.joml.Vector3d filletNormal1;
@@ -3289,7 +3363,10 @@ public final class ModelUi {
           //   （用户实测："应该一进入就在左侧显示完整的菜单，然后有专门的地方显示选了哪些东西，还有调整参数"）
           // ★ 选中某个特征 ⇒ 左栏给"特征操作"（上移/下移/删除/贴图）✓
           //   不依赖右栏树子行是否展开（用户实测："上移下移无反应"，多半是子行没展开/点不到）✓
-          if (ModelTools.NONE.equals(tool) && selectedSolidId != null) {
+          final boolean featureToolNow = ModelTools.PLANE.equals(tool)
+                  || ModelTools.FILLET.equals(tool) || ModelTools.MIRROR.equals(tool)
+                  || ModelTools.PATTERN.equals(tool);
+          if (!featureToolNow && selectedSolidId != null) {
               final net.minecraft.client.Minecraft mc0 =
                       net.minecraft.client.Minecraft.getInstance();
               final net.minecraft.world.level.Level lv0 = mc0 == null ? null : mc0.level;
@@ -3413,7 +3490,10 @@ public final class ModelUi {
                       : Component.translatable("model.mirror.plane_ok")).color(0xFFB9C0EE));
                 body.add(new Label(Component.translatable("model.mirror.sources",
                         mirrorSources.size())).color(0xFFFFFFFF));
-              // ★ **源特征列表**放在左栏 ✓（用户实测：右栏树点选不生效 ⇒ 不再依赖树）
+              // ★ **源特征列表**（复选框，绑定 Prop）✓
+              //   为什么不用按钮：按钮要在回调里重建面板，而"重建发生在按下/抬起之间"会让
+              //   后续点击落到已经销毁的控件上 ⇒ 用户实测"只能选到第一个"✗
+              //   复选框自己保存状态、不触发重建 ✓
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
               body.add(new Label(Component.translatable("model.mirror.pick_sources_hint"))
                       .color(0xFF8FA0D8));
@@ -3426,20 +3506,30 @@ public final class ModelUi {
                   if (lv != null && b0 != null) {
                       for (final com.ovo.sablestopnow.sketch.Solid sd
                               : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
-                          if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()
-                                  || sd.shape() instanceof
-                                          com.ovo.sablestopnow.sketch.Solid.Shape.Cut) {
-                              continue; // 切割体不是材料，镜像/阵列它没有意义 ✓
+                          if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
+                              continue; // 这些不是"材料特征"，镜像它们没有意义 ✓
                           }
-                          final boolean on = mirrorSources.contains(sd.id());
-                          body.add(new Button(Component.literal(
-                                  (on ? "\u2714 " : "") + solidShortLabel(sd)), () -> {
-                              mirrorToggleSource(sd);
-                          }).width(Widget.FILL));
+                          final com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> prop =
+                                  mirrorSourceProp(sd.id());
+                          final com.ovo.sablestopnow.client.gui.lib.Checkbox cb =
+                                  new com.ovo.sablestopnow.client.gui.lib.Checkbox(prop,
+                                          () -> Component.literal(solidShortLabel(sd)));
+                          cb.onChange = on -> {
+                              if (on) {
+                                  if (!mirrorSources.contains(sd.id())) {
+                                      mirrorSources.add(sd.id());
+                                  }
+                              } else {
+                                  mirrorSources.remove(sd.id());
+                              }
+                              mirrorBody = sd.body();
+                              updateMirrorPreview();
+                          };
+                          body.add(cb);
                       }
                   }
               }
-              // ★ 已有的**基准面特征**可以直接当镜像面 ✓（用户要求"镜像/草图都能选到基准面"）
+              // ★ 已有**基准面特征**可直接作镜像面 ✓
               {
                   final net.minecraft.client.Minecraft mc0 =
                           net.minecraft.client.Minecraft.getInstance();
@@ -3448,8 +3538,8 @@ public final class ModelUi {
                       for (final com.ovo.sablestopnow.sketch.Solid sd
                               : com.ovo.sablestopnow.sketch.SolidClientState.in(
                                       lv.dimension().location())) {
-                          if (!(sd.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane
-                                  pl)) {
+                          if (!(sd.shape()
+                                  instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane pl)) {
                               continue;
                           }
                           final double[] o = pl.offsetOrigin();
@@ -3502,52 +3592,24 @@ public final class ModelUi {
                     if (lv != null && b0 != null) {
                         for (final com.ovo.sablestopnow.sketch.Solid sd
                                 : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
-                            if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()
-                                    || sd.shape() instanceof
-                                            com.ovo.sablestopnow.sketch.Solid.Shape.Cut) {
+                            if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
                                 continue;
                             }
-                            final boolean on = com.ovo.sablestopnow.client.model.PatternTool
-                                    .hasSource(sd.id());
-                            body.add(new Button(Component.literal(
-                                    (on ? "✔ " : "") + solidShortLabel(sd)), () -> {
-                                com.ovo.sablestopnow.client.model.PatternTool.toggleSource(sd);
-                            }).width(Widget.FILL));
+                            final com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> prop =
+                                    PATTERN_SRC_PROPS.computeIfAbsent(sd.id(), k ->
+                                            com.ovo.sablestopnow.client.gui.lib.Prop.of(
+                                                    "pattern.src." + k.toString().substring(0, 8),
+                                                    com.ovo.sablestopnow.client.model.PatternTool
+                                                            .hasSource(k)));
+                            final com.ovo.sablestopnow.client.gui.lib.Checkbox cb =
+                                    new com.ovo.sablestopnow.client.gui.lib.Checkbox(prop,
+                                            () -> Component.literal(solidShortLabel(sd)));
+                            cb.onChange = on -> com.ovo.sablestopnow.client.model.PatternTool
+                                    .setSource(sd.id(), on, sd.body());
+                            body.add(cb);
                         }
                     }
                 }
-              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_N1);
-              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_S1);
-              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_N2);
-              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_S2);
-              final com.ovo.sablestopnow.client.gui.lib.UiField n1Field =
-                      com.ovo.sablestopnow.client.gui.lib.UiField.integer(
-                              "model.pattern.n1", CMD_PATTERN_N1, patternN1, 1, 64);
-              n1Field.commit(v -> {
-                  patternN1.set(v);
-                  PatternTool.preview((int) (double) patternN1.get(), (double) patternS1.get(),
-                          (int) (double) patternN2.get(), (double) patternS2.get());
-              });
-              body.add(n1Field);
-              final com.ovo.sablestopnow.client.gui.lib.UiField s1Field =
-                      com.ovo.sablestopnow.client.gui.lib.UiField.number(
-                              "model.pattern.s1", CMD_PATTERN_S1, patternS1, -32.0, 32.0, 0.25);
-              s1Field.commit(v -> {
-                  patternS1.set(v);
-                  PatternTool.preview((int) (double) patternN1.get(), (double) patternS1.get(),
-                          (int) (double) patternN2.get(), (double) patternS2.get());
-              });
-              body.add(s1Field);
-              final com.ovo.sablestopnow.client.gui.lib.UiField n2Field =
-                      com.ovo.sablestopnow.client.gui.lib.UiField.integer(
-                              "model.pattern.n2", CMD_PATTERN_N2, patternN2, 1, 64);
-              n2Field.commit(v -> patternN2.set(v));
-              body.add(n2Field);
-              final com.ovo.sablestopnow.client.gui.lib.UiField s2Field =
-                      com.ovo.sablestopnow.client.gui.lib.UiField.number(
-                              "model.pattern.s2", CMD_PATTERN_S2, patternS2, -32.0, 32.0, 0.25);
-              s2Field.commit(v -> patternS2.set(v));
-              body.add(s2Field);
               if (com.ovo.sablestopnow.client.model.PatternTool.dirCount() > 0
                       && com.ovo.sablestopnow.client.model.PatternTool.sourceCount() > 0) {
                   body.add(new Button(Component.translatable("model.pattern.create"), () -> {

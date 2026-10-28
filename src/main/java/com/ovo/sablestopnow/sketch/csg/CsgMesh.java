@@ -123,13 +123,37 @@ public final class CsgMesh {
             final Vector3d pn = p.plane == null ? null
                     : new Vector3d(p.plane.normal.x(), p.plane.normal.y(), p.plane.normal.z())
                             .normalize();
+            // ★ UV：按多边形法线的**主轴**做平面投影 ✓
+            //   CSG 生成的面没有天然 UV（原始实现给了 (0,0)）⇒ 整面只采样一个纹素
+            //   ⇒ 看起来"发黑/没有贴图"（实测：圆角面与被切掉的区域都是黑的）✗
+            final Vector3d nrmUv = pn == null
+                    ? new Vector3d(0, 1, 0)
+                    : new Vector3d(pn);
+            final double ax = Math.abs(nrmUv.x);
+            final double ay = Math.abs(nrmUv.y);
+            final double az = Math.abs(nrmUv.z);
+            final int axis = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
             for (final Csg.Vertex v : verts) {
                 final Vector3d n = pn == null
                         ? new Vector3d(v.normal().x(), v.normal().y(), v.normal().z())
                         : pn;
+                final double px = v.pos().x();
+                final double py = v.pos().y();
+                final double pz = v.pos().z();
+                final double u;
+                final double vv;
+                if (axis == 0) {
+                    u = pz;
+                    vv = py;
+                } else if (axis == 1) {
+                    u = px;
+                    vv = pz;
+                } else {
+                    u = px;
+                    vv = py;
+                }
                 vs.add(new SolidMesh.Vertex(
-                        new Vector3d(v.pos().x(), v.pos().y(), v.pos().z()),
-                        new Vector3d(n), v.uv().x(), v.uv().y()));
+                        new Vector3d(px, py, pz), new Vector3d(n), u, vv));
             }
             for (int k = 1; k + 1 < verts.size(); k++) {
                 idx.add(base);

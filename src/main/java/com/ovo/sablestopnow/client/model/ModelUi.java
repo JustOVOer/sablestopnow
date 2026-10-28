@@ -3592,7 +3592,14 @@ public final class ModelUi {
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
               // ★ 创建按钮放在**列表上方** ✓（源特征多时列表很长，按钮会被挤出可视区 ⇒ 用户"看不到创建键"）
               body.add(new Button(Component.translatable("model.mirror.confirm"), () -> {
-                  createMirrorFeature();
+                  // ★ 按钮**始终存在** ✓（以前要"选了面 + 勾了源"才出现 ⇒ 用户以为没有按钮）
+                  if (mirrorPlaneOrigin == null || mirrorPlaneNormal == null) {
+                      ModelMode.prompt("model.mirror.pick_plane");
+                  } else if (mirrorSources.isEmpty()) {
+                      ModelMode.prompt("model.mirror.no_sources");
+                  } else {
+                      createMirrorFeature();
+                  }
                   forceRefreshLeft();
               }).width(Widget.FILL));
               body.add(new Button(Component.translatable("model.mirror.clear"), () -> {

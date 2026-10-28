@@ -1060,6 +1060,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             if (boxes.isEmpty() || edges.isEmpty()) {
                 continue;
             }
+            // ★ 圆角也作用到镜像产物上 ✓
+            mesh = cutWithFillets(mesh, filletPolyByBody.get(mirror.body()));
             out.add(new Placed(mirror, boxes, edges, mesh,
                     new Vector3d(m.nx(), m.ny(), m.nz())));
         }
@@ -1118,6 +1120,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             if (boxes.isEmpty() || edges.isEmpty()) {
                 continue;
             }
+            // ★ 圆角也作用到阵列产物上 ✓
+            mesh = cutWithFillets(mesh, filletPolyByBody.get(pat.body()));
             out.add(new Placed(pat, boxes, edges, mesh, null));
         }
         return out;
@@ -1189,6 +1193,29 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             out.add(new Csg.Polygon(vs, plane));
         }
         return out;
+    }
+
+
+    /**
+     * 把圆角切割体也作用到**镜像/阵列产出的网格**上 ✓
+     *
+     * <p>为什么必须单独做 ✗✓：镜像/阵列的材料是在 {@code placeAll} 末尾**生成**的 Placed，
+     * 不经过主循环里的 CSG 减法 ⇒ 之前"镜像/阵列出来的模型上无法创建圆角"（用户实测）。
+     */
+    private static SolidMesh.Mesh cutWithFillets(final SolidMesh.Mesh mesh,
+                                                  final List<Csg.Polygon> filletPolys) {
+        if (mesh == null || mesh.isEmpty() || filletPolys == null || filletPolys.isEmpty()) {
+            return mesh;
+        }
+        final List<Csg.Polygon> base = CsgMesh.fromMesh(mesh, null);
+        if (base.isEmpty()) {
+            return mesh;
+        }
+        final List<Csg.Polygon> cut = Csg.subtract(base, filletPolys);
+        if (cut.isEmpty()) {
+            return mesh;
+        }
+        return CsgMesh.toMesh(cut);
     }
 
     /** 平移一个盒子 ✓ */

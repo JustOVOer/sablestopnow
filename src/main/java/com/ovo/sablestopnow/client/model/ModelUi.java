@@ -1222,7 +1222,6 @@ public final class ModelUi {
                                               });
                               fb.prefW = Widget.FILL;
                               feats.add(fb);
-                              FEAT_BUTTONS.add(new FeatButton(fb, sd.id()));
                           }
                           panel.add(feats);
                       }
@@ -2000,20 +1999,7 @@ public final class ModelUi {
      */
     /** 树行悬停 ⇒ 让渲染侧高亮对应特征 ✓（item 6） */
     public static void syncFeatureHover() {
-        // ★ 先按"鼠标是否落在右栏特征按钮上"判悬停 ✓（TreeView 的 hoveredKey 实测拿不到）
-        com.ovo.sablestopnow.client.gui.lib.Ui.refreshMouse(); // 保证是本帧的鼠标位置
-        final double mx = com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd();
-        final double my = com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd();
-        for (final FeatButton fb : FEAT_BUTTONS) {
-            final var w = fb.widget();
-            if (!w.visible || w.w <= 0 || w.h <= 0) {
-                continue;
-            }
-            if (mx >= w.x && mx <= w.x + w.w && my >= w.y && my <= w.y + w.h) {
-                com.ovo.sablestopnow.client.model.FeatureHighlight.set(fb.solidId());
-                return;
-            }
-        }
+        // hoveredKey 现在会在 RowWidget.update 里赋值 ⇒ 直接用它（行高/展开变化都自动正确）
         final String key = tree == null ? null : tree.hoveredKey();
         if (key == null || !key.startsWith("solid:")) {
             com.ovo.sablestopnow.client.model.FeatureHighlight.clear();

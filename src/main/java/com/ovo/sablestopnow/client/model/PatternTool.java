@@ -46,6 +46,26 @@ public final class PatternTool {
         FeaturePreview.clear();
     }
 
+    /**
+     * 从复选框 Prop **反推**源集合 ✓（不依赖 onChange 的时序）
+     */
+    public static void syncFromProps(
+            final java.util.Map<UUID,
+                    com.ovo.sablestopnow.client.gui.lib.Prop<Boolean>> props) {
+        if (props == null) {
+            return;
+        }
+        props.forEach((id, prop) -> {
+            if (Boolean.TRUE.equals(prop.get())) {
+                if (!SOURCES.contains(id)) {
+                    SOURCES.add(id);
+                }
+            } else {
+                SOURCES.remove(id);
+            }
+        });
+    }
+
     /** 当前阵列作用的体 ✓（面板据此列特征；可能比 selectedModel 更可靠） */
     public static UUID bodyId() {
         return body;

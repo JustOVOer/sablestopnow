@@ -2102,6 +2102,7 @@ public final class ModelUi {
     }
 
     private static boolean createMirrorFeature() {
+        syncMirrorSourcesFromProps();
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
         if (level == null || mirrorPlaneOrigin == null || mirrorSources.isEmpty()) {
@@ -2542,6 +2543,24 @@ public final class ModelUi {
     private static final java.util.Map<java.util.UUID,
             com.ovo.sablestopnow.client.gui.lib.Prop<Boolean>> MIRROR_SRC_PROPS =
             new java.util.HashMap<>();
+
+    /**
+     * 从复选框的 Prop **反推**镜像源集合 ✓
+     *
+     * <p>为什么不只靠 `onChange`：复选框的回调经由命令框架，时序不完全可控；
+     * 只要 Prop 变了就一定能读到 ⇒ 以 Prop 为唯一真相最稳 ✓
+     */
+    private static void syncMirrorSourcesFromProps() {
+        MIRROR_SRC_PROPS.forEach((id, prop) -> {
+            if (Boolean.TRUE.equals(prop.get())) {
+                if (!mirrorSources.contains(id)) {
+                    mirrorSources.add(id);
+                }
+            } else {
+                mirrorSources.remove(id);
+            }
+        });
+    }
 
     private static com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> mirrorSourceProp(
             final java.util.UUID id) {

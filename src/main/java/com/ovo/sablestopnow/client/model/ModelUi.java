@@ -3195,23 +3195,10 @@ public final class ModelUi {
 
         for (final com.ovo.sablestopnow.sketch.Solid solid : solids) {
             // ★ 需求：切割在树里要叫**切割** ✓（以前一律显示"拉伸"✗）
-            final Component label = solid.shape()
-                    instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Pattern
-                    ? Component.translatable("model.pattern.item", solid.index())
-                    : solid.shape()
-                    instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Mirror
-                    ? Component.translatable("model.mirror.item", solid.index())
-                    : solid.shape()
-                    instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Fillet
-                    ? Component.translatable("model.fillet.item", solid.index())
-                    : solid.shape()
-                    instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Plane
-                    ? Component.translatable("model.plane.item", solid.index())
-                    : solid.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut
-                    ? Component.translatable("model.cut.item", solid.index())
-                    : (solid.isRevolution()
-                            ? Component.translatable("model.revolve.item", solid.index())
-                            : Component.translatable("model.extrude.item", solid.index()));
+            // ★ 树里显示**永久名字**（拉伸1/切割2/圆角3…）✓
+            //   之前用 index 造型号 ⇒ 一交换/删除，后面所有行的名字都变（用户实测）✗
+            final Component label = Component.literal(
+                    com.ovo.sablestopnow.client.model.FeatureNames.of(solid, true));
             final TreeView.TreeItem row = new TreeView.TreeItem(
                     "solid:" + bodyId + ":" + solid.id()).label(label);
             row.data = solid;

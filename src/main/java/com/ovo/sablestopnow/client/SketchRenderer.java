@@ -1896,42 +1896,27 @@ public final class SketchRenderer {
         return drawn;
     }
 
-    /** 把基准面画成**半透明面片 + 描边** ✓（item 7：让它看得见、能点） */
+    private static long lastTextDrawLog = 0L;
+
+    /** 把基准面画成**描边方框** ✓（item 7；与预览共用 {@code Plane.corners} ✓） */
     private static int drawPlaneFeature(final VertexConsumer vcq, final PoseStack.Pose pose,
                                         final Vec3 cameraPos, final ClientSubLevel sub,
                                         final Solid.Shape.Plane plane) {
+        final Pose3dc rp = sub.renderPose();
         final org.joml.Vector3d n = new org.joml.Vector3d(plane.nx(), plane.ny(), plane.nz())
                 .normalize();
-        final double[] o = plane.offsetOrigin();
-        final org.joml.Vector3d origin = new org.joml.Vector3d(o[0], o[1], o[2]);
-        org.joml.Vector3d u = n.cross(new org.joml.Vector3d(0, 1, 0), new org.joml.Vector3d());
-        if (u.lengthSquared() < 1.0e-9) {
-            u = n.cross(new org.joml.Vector3d(1, 0, 0), new org.joml.Vector3d());
-        }
-        u.normalize();
-        final org.joml.Vector3d v = n.cross(u, new org.joml.Vector3d()).normalize();
-        final double half = 1.0;
-        final Pose3dc rp = sub.renderPose();
-        final float[] colour = {0.55f, 0.75f, 1.00f};
         quadUp = new Vec3(n.x, n.y, n.z).normalize();
+        final float[] colour = {0.55f, 0.75f, 1.00f};
+        final java.util.List<org.joml.Vector3d> cs = plane.corners(1.0);
         int drawn = 0;
         for (int i = 0; i < 4; i++) {
-            final org.joml.Vector3d pa = new org.joml.Vector3d(origin).fma(-half, u)
-                    .fma(-half, v);
-            final org.joml.Vector3d pb = new org.joml.Vector3d(origin).fma(half, u)
-                    .fma(-half, v);
-            final org.joml.Vector3d pc = new org.joml.Vector3d(origin).fma(half, u).fma(half, v);
-            final org.joml.Vector3d pd = new org.joml.Vector3d(origin).fma(-half, u).fma(half, v);
-            final org.joml.Vector3d[] cs = {pa, pb, pc, pd};
-            final Vec3 a = world(cameraPos, rp, cs[i]);
-            final Vec3 b = world(cameraPos, rp, cs[(i + 1) % 4]);
+            final Vec3 a = world(cameraPos, rp, cs.get(i));
+            final Vec3 b = world(cameraPos, rp, cs.get((i + 1) % 4));
             quadLine(vcq, pose, a, b, colour);
             drawn++;
         }
         return drawn;
     }
-
-    private static long lastTextDrawLog = 0L;
 
     /** 3D 棒的**半宽**（格）✓ 方向在基准面内、垂直于线段。 */
     private static final double BAR_WIDTH_HALF = 0.025;

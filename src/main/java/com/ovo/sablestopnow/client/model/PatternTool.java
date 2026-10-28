@@ -250,9 +250,17 @@ public final class PatternTool {
         // 挂到第一个源特征的真实草图上（否则树里不会显示）
         java.util.UUID sk = null;
         for (final Solid sd : SolidClientState.ofBody(level, body)) {
-            if (SOURCES.contains(sd.id())) {
+            if (SOURCES.contains(sd.id()) && sd.sketchId() != null) {
                 sk = sd.sketchId();
                 break;
+            }
+        }
+        if (sk == null) {
+            for (final Solid sd : SolidClientState.ofBody(level, body)) {
+                if (sd.sketchId() != null) {
+                    sk = sd.sketchId();
+                    break;
+                }
             }
         }
         final Solid pat = Solid.createPattern(body, sk, index, dirs, new ArrayList<>(SOURCES));

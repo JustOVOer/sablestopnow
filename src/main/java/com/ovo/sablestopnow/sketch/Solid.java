@@ -167,6 +167,29 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 nz /= len;
             }
 
+            /**
+             * 面片的四个角（局部坐标，绕行一圈）✓ 渲染与预览**共用**这一段，
+             * 保证"预览看到的就是创建出来的那个面" ✓
+             *
+             * @param half 半宽（格）
+             */
+            public java.util.List<Vector3d> corners(final double half) {
+                final Vector3d n = new Vector3d(nx, ny, nz).normalize();
+                Vector3d u = n.cross(new Vector3d(0, 1, 0), new Vector3d());
+                if (u.lengthSquared() < 1.0e-9) {
+                    u = n.cross(new Vector3d(1, 0, 0), new Vector3d());
+                }
+                u.normalize();
+                final Vector3d v = n.cross(u, new Vector3d()).normalize();
+                final double[] o = offsetOrigin();
+                final Vector3d c = new Vector3d(o[0], o[1], o[2]);
+                return java.util.List.of(
+                        new Vector3d(c).fma(-half, u).fma(-half, v),
+                        new Vector3d(c).fma(half, u).fma(-half, v),
+                        new Vector3d(c).fma(half, u).fma(half, v),
+                        new Vector3d(c).fma(-half, u).fma(half, v));
+            }
+
             /** 法线方向朝外偏 {@code distance} 之后的中心点 ✓ */
             public double[] offsetOrigin() {
                 return new double[] {ox + nx * distance, oy + ny * distance, oz + nz * distance};

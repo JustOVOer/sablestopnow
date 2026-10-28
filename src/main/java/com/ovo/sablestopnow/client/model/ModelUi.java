@@ -2100,9 +2100,15 @@ public final class ModelUi {
             index = Math.max(index, s.index() + 1);
         }
         index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(mirrorBody, 0) + 1);
+        final java.util.UUID mirrorSketchId = sketchFor(
+                mirrorSources.isEmpty() ? null : mirrorSources.get(0), mirrorBody);
+        if (mirrorSketchId == null) {
+            ModelMode.prompt("model.order.missing_sketch");
+            return false;
+        }
         final com.ovo.sablestopnow.sketch.Solid mirror =
                 com.ovo.sablestopnow.sketch.Solid.createMirror(mirrorBody,
-                        sketchIdOfSolid(mirrorSources.isEmpty() ? null : mirrorSources.get(0)), index,
+                        mirrorSketchId, index,
                         mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z,
                         mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z,
                         new java.util.ArrayList<>(mirrorSources));
@@ -2331,9 +2337,14 @@ public final class ModelUi {
                         filletNormal2 == null ? 0 : filletNormal2.x,
                         filletNormal2 == null ? 0 : filletNormal2.y,
                         filletNormal2 == null ? 0 : filletNormal2.z);
+        final java.util.UUID filletSketchId = sketchFor(filletSolidId, filletSourceSolid);
+        if (filletSketchId == null) {
+            ModelMode.prompt("model.order.missing_sketch");
+            return;
+        }
         final com.ovo.sablestopnow.sketch.Solid fillet =
                 com.ovo.sablestopnow.sketch.Solid.createFillet(filletSourceSolid,
-                        sketchIdOfSolid(filletSolidId), index, radius,
+                        filletSketchId, index, radius,
                         java.util.List.of(ref));
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(fillet);
         LOCAL_SOLID_INDEX.put(filletSourceSolid, fillet.index());
@@ -2375,6 +2386,31 @@ public final class ModelUi {
             }
         }
         return null;
+    }
+
+    /**
+     * 该体**任意实体的草图** ✓（兜底）：
+     * 新特征必须挂真实草图，否则 Solid 构造会因为 sketchId=null 直接抛 ✗
+     */
+    private static java.util.UUID anySketchIdOfBody(final java.util.UUID body) {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        if (level == null || body == null) {
+            return null;
+        }
+        for (final com.ovo.sablestopnow.sketch.Solid sd
+                : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, body)) {
+            if (sd.sketchId() != null) {
+                return sd.sketchId();
+            }
+        }
+        return null;
+    }
+
+    /** 先按实体找草图，找不到再按体兜底 ✓ */
+    private static java.util.UUID sketchFor(final java.util.UUID solidId, final java.util.UUID body) {
+        final java.util.UUID bySolid = sketchIdOfSolid(solidId);
+        return bySolid != null ? bySolid : anySketchIdOfBody(body);
     }
 
     /** 基准面工具当前拾取到的面：中心（局部）+ 单位法线 ✓ */
@@ -2435,35 +2471,28 @@ public final class ModelUi {
         return true;
     }
 
-    /** 预览：把"偏移后的平面"画成一个黄色方框 ✓ */
+    /** 预览：把"偏移后的平面"画成一个黄色方框 ✓（与渲染共用 Plane.corners ✓） */
     private static void updatePlanePreview(final double distance) {
         if (planeFaceOrigin == null || planeFaceNormal == null) {
             return;
         }
-        final org.joml.Vector3d o = new org.joml.Vector3d(planeFaceOrigin);
-        final org.joml.Vector3d n = new org.joml.Vector3d(planeFaceNormal).normalize();
-        o.fma(distance, n);
-        // 平面内两个正交方向
-        org.joml.Vector3d u = n.cross(new org.joml.Vector3d(0, 1, 0), new org.joml.Vector3d());
-        if (u.lengthSquared() < 1.0e-9) {
-            u = n.cross(new org.joml.Vector3d(1, 0, 0), new org.joml.Vector3d());
-        }
-        u.normalize();
-        final org.joml.Vector3d v = n.cross(u, new org.joml.Vector3d()).normalize();
-        final double half = 1.0;
-        final org.joml.Vector3d c0 = new org.joml.Vector3d(o).fma(-half, u).fma(-half, v);
-        final org.joml.Vector3d c1 = new org.joml.Vector3d(o).fma(half, u).fma(-half, v);
-        final org.joml.Vector3d c2 = new org.joml.Vector3d(o).fma(half, u).fma(half, v);
-        final org.joml.Vector3d c3 = new org.joml.Vector3d(o).fma(-half, u).fma(half, v);
+        final com.ovo.sablestopnow.sketch.Solid.Shape.Plane tmp =
+                new com.ovo.sablestopnow.sketch.Solid.Shape.Plane(
+                        planeFaceOrigin[0], planeFaceOrigin[1], planeFaceOrigin[2],
+                        planeFaceNormal[0], planeFaceNormal[1], planeFaceNormal[2],
+                        distance, planeSolidId, planeSourceFace);
+        final java.util.List<org.joml.Vector3d> cs = tmp.corners(1.0);
         final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
                 new java.util.ArrayList<>(4);
-        segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(c0, c1));
-        segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(c1, c2));
-        segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(c2, c3));
-        segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(c3, c0));
-        com.ovo.sablestopnow.client.model.FeaturePreview.set(planeSourceSolid, n, segs);
-        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[plane] preview segs={} dist={}",
-                segs.size(), distance);
+        for (int i = 0; i < 4; i++) {
+            segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
+                    cs.get(i), cs.get((i + 1) % 4)));
+        }
+        com.ovo.sablestopnow.client.model.FeaturePreview.set(planeSourceSolid,
+                new org.joml.Vector3d(planeFaceNormal[0], planeFaceNormal[1], planeFaceNormal[2]),
+                segs);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[plane] preview segs=4 dist={} corners={}",
+                distance, cs);
     }
 
     /** 真正创建基准面特征 ✓（与其它特征同级、受序号/依赖约束） */
@@ -2480,9 +2509,14 @@ public final class ModelUi {
             index = Math.max(index, s.index() + 1);
         }
         index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(planeSourceSolid, 0) + 1);
+        final java.util.UUID planeSketchId = sketchFor(planeSolidId, planeSourceSolid);
+        if (planeSketchId == null) {
+            ModelMode.prompt("model.order.missing_sketch");
+            return;
+        }
         final com.ovo.sablestopnow.sketch.Solid plane =
                 com.ovo.sablestopnow.sketch.Solid.createPlane(planeSourceSolid,
-                        sketchIdOfSolid(planeSolidId), index,
+                        planeSketchId, index,
                         planeFaceOrigin[0], planeFaceOrigin[1], planeFaceOrigin[2],
                         planeFaceNormal[0], planeFaceNormal[1], planeFaceNormal[2],
                         distance, planeSourceSolid, planeSourceFace);

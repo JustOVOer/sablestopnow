@@ -3662,8 +3662,32 @@ public final class ModelUi {
             body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
             final var session = com.ovo.sablestopnow.client.SketchClient.mode().session();
             if (session.stage() == com.ovo.sablestopnow.sketch.SketchSession.Stage.CHOOSING_PLANE) {
-                body.add(new Label(Component.translatable("model.prompt.sketch_pick_plane"))
-                        .color(0xFFCFD8FF));
+                  body.add(new Label(Component.translatable("model.prompt.sketch_pick_plane"))
+                          .color(0xFFCFD8FF));
+                  // ★ 左栏直接列出**已有的基准面特征** ⇒ 点一下就开草图 ✓
+                  {
+                      final net.minecraft.client.Minecraft mc0 =
+                              net.minecraft.client.Minecraft.getInstance();
+                      final net.minecraft.world.level.Level lv = mc0 == null ? null : mc0.level;
+                      if (lv != null) {
+                          for (final com.ovo.sablestopnow.sketch.Solid sd
+                                  : com.ovo.sablestopnow.sketch.SolidClientState.in(
+                                          lv.dimension().location())) {
+                              if (!(sd.shape() instanceof final
+                                      com.ovo.sablestopnow.sketch.Solid.Shape.Plane pl)) {
+                                  continue;
+                              }
+                              final double[] o = pl.offsetOrigin();
+                              body.add(new Button(Component.translatable(
+                                      "model.sketch.use_plane", sd.index()), () -> {
+                                  com.ovo.sablestopnow.client.SketchClient.choosePlaneAt(
+                                          sd.body(), new org.joml.Vector3d(o[0], o[1], o[2]),
+                                          new org.joml.Vector3d(pl.nx(), pl.ny(), pl.nz()));
+                                  forceRefreshLeft();
+                              }).width(Widget.FILL));
+                          }
+                      }
+                  }
             } else {
                 body.add(new Label(Component.translatable("model.sketch.tool.line")).color(0xFF8FA0D8));
                 // ⚠ 工具按钮必须**每次重建都重新读一遍当前工具**来设置高亮，

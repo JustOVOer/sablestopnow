@@ -33,12 +33,15 @@ public final class PatternTool {
 
     private static final List<Solid.Shape.Dir> DIRS = new ArrayList<>();
     private static final List<UUID> SOURCES = new ArrayList<>();
+    /** 每条方向对应的**那条棱**（局部端点）✓ 预览据此画出"选中的棱" */
+    private static final List<double[]> DIR_EDGES = new ArrayList<>();
     private static final Map<UUID, Integer> LOCAL_INDEX = new HashMap<>();
     private static UUID body;
 
     public static void reset() {
         DIRS.clear();
         SOURCES.clear();
+        DIR_EDGES.clear();
         body = null;
         FeaturePreview.clear();
     }
@@ -93,8 +96,8 @@ public final class PatternTool {
                 ModelMode.prompt("model.pattern.pick_edge");
                 return false;
             }
-            return addDirection(segv[3] - segv[0], segv[4] - segv[1], segv[5] - segv[2],
-                    bh.body());
+              return addDirection(segv[3] - segv[0], segv[4] - segv[1],
+                      segv[5] - segv[2], bh.body(), segv);
         }
         // ★ 容错：判级可能是面/点 ⇒ 取**离命中中心最近的棱**（与圆角同一套思路）
         int edgeIdx = hit.index();
@@ -130,14 +133,17 @@ public final class PatternTool {
         final double dy = seg[4] - seg[1];
         final double dz = seg[5] - seg[2];
         final UUID bodyForDir = hit.body();
-        return addDirection(dx, dy, dz, bodyForDir);
+        return addDirection(dx, dy, dz, bodyForDir, seg);
     }
 
     /** 追加一个阵列方向（第一条 = 方向1；已有源特征时再点 = 弹框）✓ */
     private static boolean addDirection(final double dx, final double dy, final double dz,
-                                        final UUID bodyForDir) {
+                                        final UUID bodyForDir, final double[] seg) {
         if (Math.sqrt(dx * dx + dy * dy + dz * dz) < 1.0e-6) {
             return false;
+        }
+        if (seg != null) {
+            DIR_EDGES.add(new double[] {seg[0], seg[1], seg[2], seg[3], seg[4], seg[5]});
         }
         if (DIRS.isEmpty()) {
             DIRS.add(new Solid.Shape.Dir(dx, dy, dz, 2, 1.0));

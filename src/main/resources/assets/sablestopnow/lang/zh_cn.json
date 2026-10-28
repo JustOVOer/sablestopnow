@@ -796,5 +796,6 @@
   "model.pattern.create": "创建阵列",
   "model.mirror.pick_sources_hint": "要镜像的特征（点一下加入/移出）：",
   "model.mirror.use_plane": "用基准面%1$s作镜像面",
-  "model.pattern.pick_sources_hint": "要阵列的特征（点一下加入/移出）："
+  "model.pattern.pick_sources_hint": "要阵列的特征（点一下加入/移出）：",
+  "model.sketch.use_plane": "以基准面%1$s开草图"
 }

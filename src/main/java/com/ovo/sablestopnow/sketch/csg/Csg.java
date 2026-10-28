@@ -309,6 +309,9 @@ public final class Csg {
     }
 
     public static List<Polygon> subtract(final List<Polygon> a, final List<Polygon> b) {
+        // 防御：plane == null 的多边形会让 BSP 直接 NPE（实测崩过）⇒ 一律剔除 ✓
+        a.removeIf(pp -> pp.plane == null);
+        b.removeIf(pp -> pp.plane == null);
         final Node aNode = new Node(a);
         final Node bNode = new Node(b);
         aNode.invert();

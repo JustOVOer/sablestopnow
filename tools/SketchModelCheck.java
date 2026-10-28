@@ -408,6 +408,36 @@ public final class SketchModelCheck {
                 "fillet: 预览折线非空");
     }
 
+    /**
+     * item 8（崩溃回归）：`Solid.triPolys` 产出的多边形**必须都带 plane** ✓
+     * 之前 placeAll 里直接 `new Csg.Polygon(vs, null)`，BSP 里 `plane.splitPolygon` NPE 把游戏打崩
+     */
+    private static void triPolysReal() {
+        final org.joml.Vector3d a = new org.joml.Vector3d(1, 1, 0);
+        final org.joml.Vector3d b = new org.joml.Vector3d(1, 1, 1);
+        final java.util.List<org.joml.Vector3d[]> tris =
+                com.ovo.sablestopnow.sketch.FilletCutter.prism(a, b,
+                        new org.joml.Vector3d(1, 0, 0), new org.joml.Vector3d(0, 1, 0), 0.2);
+        final var polys = com.ovo.sablestopnow.sketch.Solid.triPolys(tris);
+        check(!polys.isEmpty(), "triPolys: 非空（" + polys.size() + "）");
+        boolean allPlanes = true;
+        for (final com.ovo.sablestopnow.sketch.csg.Csg.Polygon pp : polys) {
+            if (pp.plane == null) {
+                allPlanes = false;
+                break;
+            }
+        }
+        check(allPlanes, "triPolys: 每个多边形都带 plane（BSP 不会再 NPE）");
+        // 退化三角形必须被丢掉
+        final java.util.List<org.joml.Vector3d[]> degen = new java.util.ArrayList<>();
+        degen.add(new org.joml.Vector3d[] {
+            new org.joml.Vector3d(0, 0, 0),
+            new org.joml.Vector3d(1, 0, 0),
+            new org.joml.Vector3d(2, 0, 0)});
+        check(com.ovo.sablestopnow.sketch.Solid.triPolys(degen).isEmpty(),
+                "triPolys: 退化三角形被丢弃");
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -448,6 +478,7 @@ public final class SketchModelCheck {
     }
 
     public static void main(final String[] args) throws Exception {
+        triPolysReal();
         filletGeom();
         filletCsg();
         featureOrder();

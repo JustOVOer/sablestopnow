@@ -892,17 +892,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 if (nn == null) {
                     continue;
                 }
-                for (final Vector3d[] tri : FilletCutter.prism(a, b, nn[0], nn[1], f.radius())) {
-                    final Vector3d nrm = new Vector3d(tri[1]).sub(tri[0])
-                            .cross(new Vector3d(tri[2]).sub(tri[0])).normalize();
-                    polys.add(new Csg.Polygon(List.of(
-                            new Csg.Vertex(new Csg.V3(tri[0].x, tri[0].y, tri[0].z),
-                                    new Csg.V3(nrm.x, nrm.y, nrm.z), new Csg.V3(0, 0, 0)),
-                            new Csg.Vertex(new Csg.V3(tri[1].x, tri[1].y, tri[1].z),
-                                    new Csg.V3(nrm.x, nrm.y, nrm.z), new Csg.V3(0, 0, 0)),
-                            new Csg.Vertex(new Csg.V3(tri[2].x, tri[2].y, tri[2].z),
-                                    new Csg.V3(nrm.x, nrm.y, nrm.z), new Csg.V3(0, 0, 0))), null));
-                }
+                polys.addAll(triPolys(FilletCutter.prism(a, b, nn[0], nn[1], f.radius())));
             }
             if (!polys.isEmpty()) {
                 filletPolyByBody.put(s2.body(), polys);
@@ -1127,6 +1117,36 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 continue;
             }
             out.add(new Placed(pat, boxes, edges, mesh, null));
+        }
+        return out;
+    }
+
+    /**
+     * 三角面 → CSG 多边形 ✓（**必须带 plane**：csg.js 的 BSP 直接用 polygon.plane，
+     * 传 null 会在 Node.build 里 NPE 把游戏打崩 —— 实测崩过 ✓）
+     */
+    public static java.util.List<Csg.Polygon> triPolys(final java.util.List<Vector3d[]> tris) {
+        final java.util.List<Csg.Polygon> out = new ArrayList<>();
+        for (final Vector3d[] t : tris) {
+            final Vector3d n = new Vector3d(t[1]).sub(t[0])
+                    .cross(new Vector3d(t[2]).sub(t[0]));
+            if (n.lengthSquared() < 1.0e-14) {
+                continue; // 退化三角形：没有平面，绝不能进 BSP ✓
+            }
+            n.normalize();
+            final Csg.Plane plane = Csg.Plane.fromPoints(
+                    new Csg.V3(t[0].x, t[0].y, t[0].z),
+                    new Csg.V3(t[1].x, t[1].y, t[1].z),
+                    new Csg.V3(t[2].x, t[2].y, t[2].z));
+            if (plane == null) {
+                continue;
+            }
+            final java.util.List<Csg.Vertex> vs = new ArrayList<>(3);
+            for (final Vector3d v : t) {
+                vs.add(new Csg.Vertex(new Csg.V3(v.x, v.y, v.z),
+                        new Csg.V3(n.x, n.y, n.z), new Csg.V3(0, 0, 0)));
+            }
+            out.add(new Csg.Polygon(vs, plane));
         }
         return out;
     }

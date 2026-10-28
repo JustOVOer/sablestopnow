@@ -778,5 +778,6 @@
   "model.mirror.clear": "清空选择",
   "model.pattern.step": "点 1–3 条棱定方向 → 右栏点特征加入 → 点\"设置次数/间距\"",
   "model.pattern.confirm": "设置次数 / 间距",
-  "model.pattern.clear": "清空选择"
+  "model.pattern.clear": "清空选择",
+  "gui.sablestopnow.opt.color_palette.button": "打开调色板"
 }

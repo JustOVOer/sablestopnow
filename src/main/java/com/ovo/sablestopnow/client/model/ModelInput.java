@@ -540,6 +540,12 @@ public final class ModelInput {
             // SolidWorks 也是这个顺序：指到面上高亮面，指到空白处才显示基准面。
             // item 10: pattern tool - click edges to add directions
             if (com.ovo.sablestopnow.client.model.ModelTools.PATTERN.equals(ModelMode.tool())) {
+                  com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                          "[pick] tool=pattern featureHover={} boxHover={}",
+                          com.ovo.sablestopnow.client.model.FeatureHover.get() == null
+                                  ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
+                          ModelMode.hoveredRef() == null ? "null"
+                                  : ModelMode.hoveredRef().describe());
                 final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf2 =
                         com.ovo.sablestopnow.client.model.FeatureHover.get();
                 if (pf2 != null) {
@@ -551,6 +557,12 @@ public final class ModelInput {
             }
             // item 9: mirror tool - click a face to set / confirm the mirror plane
             if (com.ovo.sablestopnow.client.model.ModelTools.MIRROR.equals(ModelMode.tool())) {
+                  com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                          "[pick] tool=mirror featureHover={} boxHover={}",
+                          com.ovo.sablestopnow.client.model.FeatureHover.get() == null
+                                  ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
+                          ModelMode.hoveredRef() == null ? "null"
+                                  : ModelMode.hoveredRef().describe());
                 final com.ovo.sablestopnow.client.model.FeatureHover.Hit mf =
                         com.ovo.sablestopnow.client.model.FeatureHover.get();
                 if (mf != null) {
@@ -562,6 +574,12 @@ public final class ModelInput {
             }
             // ★ item 8：**圆角工具**下点棱 ⇒ 记录棱并弹"半径"输入框 ✓
             if (com.ovo.sablestopnow.client.model.ModelTools.FILLET.equals(ModelMode.tool())) {
+                  com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                          "[pick] tool=fillet featureHover={} boxHover={}",
+                          com.ovo.sablestopnow.client.model.FeatureHover.get() == null
+                                  ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
+                          ModelMode.hoveredRef() == null ? "null"
+                                  : ModelMode.hoveredRef().describe());
                 final com.ovo.sablestopnow.client.model.FeatureHover.Hit hf =
                         com.ovo.sablestopnow.client.model.FeatureHover.get();
                 if (hf != null) {
@@ -573,6 +591,12 @@ public final class ModelInput {
             }
             // ★ item 7：**基准面工具**下点面 ⇒ 记录面并弹"距离"输入框 ✓
             if (com.ovo.sablestopnow.client.model.ModelTools.PLANE.equals(ModelMode.tool())) {
+                  com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                          "[pick] tool=plane featureHover={} boxHover={}",
+                          com.ovo.sablestopnow.client.model.FeatureHover.get() == null
+                                  ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
+                          ModelMode.hoveredRef() == null ? "null"
+                                  : ModelMode.hoveredRef().describe());
                 final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf =
                         com.ovo.sablestopnow.client.model.FeatureHover.get();
                 if (pf != null) {

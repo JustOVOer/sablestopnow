@@ -127,17 +127,20 @@ public final class ColorPaletteScreen extends Screen {
     @Override
     public void render(final GuiGraphics g, final int mouseX, final int mouseY, final float partial) {
         // 只铺一层暗色：不调 renderBackground ⇒ 不会把底下的设置页糊成一片 ✓
-        g.fill(0, 0, this.width, this.height, 0xF0101418);
+        g.fill(0, 0, this.width, this.height, 0xFF101418); // 不透明：否则底下的模糊会透上来
         g.drawCenteredString(this.font, this.title, this.width / 2, 18, 0xFFFFFF);
+        // ⚠ 顺序：控件先画（super.render），自定义文字/色块**最后**画 ——
+        //   否则会被本模组 GUI 库的模糊层盖住（用户截图："左侧文字和预览是糊的"）
+        super.render(g, mouseX, mouseY, partial);
         final int labelW = 78;
         for (int i = 0; i < ITEMS.size(); i++) {
             final int y = rowY(i);
-            g.drawString(this.font, ITEMS.get(i).label(), left(), y + 6, 0xE6E6E6, false);
+            g.drawString(this.font, ITEMS.get(i).label(), left(), y + 6, 0xFFFFFFFF, false);
             final int argb = 0xFF000000 | (rgb[i] & 0xFFFFFF);
             g.fill(left() + labelW, y + 1, left() + labelW + 14, y + 19, argb);
             g.renderOutline(left() + labelW, y + 1, 14, 18, 0xFF39424C);
         }
-        super.render(g, mouseX, mouseY, partial);
+        g.drawCenteredString(this.font, this.title, this.width / 2, 18, 0xFFFFFFFF);
     }
 
     @Override
@@ -146,9 +149,9 @@ public final class ColorPaletteScreen extends Screen {
             return;
         }
         // ★ 退出时**新建**一个干净的分类页：复用旧实例会让布局残留上一代控件（"多出一行退出键"）✓
-        final ModSettingsScreen home = new ModSettingsScreen(this.parent);
-        this.minecraft.setScreen(new ModSettingsCategoryScreen(home, ModConfigCategory.COLORS,
-                Math.round(this.width * 0.5f), Math.round(this.height * 0.38f), 4.0f));
+        // ★ 回**新建的**设置首页（parent 传 null）：既不会留下上一代控件，
+        //   也不会出现"ESC 退出后又弹回调色页"的循环（用户实测）✓
+        this.minecraft.setScreen(new ModSettingsScreen(null));
     }
 
     // ================= 读写 =================

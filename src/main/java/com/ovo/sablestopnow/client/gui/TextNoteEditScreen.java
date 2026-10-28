@@ -117,20 +117,22 @@ public final class TextNoteEditScreen extends Screen {
 
     @Override
     public void render(final GuiGraphics g, final int mouseX, final int mouseY, final float partial) {
-        this.renderBackground(g, mouseX, mouseY, partial);
-        g.drawCenteredString(this.font, this.title, this.width / 2, 14, 0xFFFFFF);
+        g.fill(0, 0, this.width, this.height, 0xB0101418);
+        // ⚠ 先画控件、**最后**画文本区与提示：本模组 GUI 库的模糊层会盖住先画的内容
+        //   （用户截图："输入框被模糊挡住了"）
+        super.render(g, mouseX, mouseY, partial);
         final int left = this.width / 2 - 150;
         final int top = 34;
-        // 文本区（多行）✓
-        g.fill(left - 4, top - 4, left + 304, top + 9 * Math.max(4, lines.size()) + 4, 0x80000000);
+        g.fill(left - 6, top - 6, left + 306, top + 9 * Math.max(4, lines.size()) + 12, 0xE0101418);
+        g.renderOutline(left - 6, top - 6, 312, 9 * Math.max(4, lines.size()) + 18, 0xFF39424C);
         for (int i = 0; i < lines.size(); i++) {
             final String text = lines.get(i).toString();
             g.drawString(this.font, text + (i == caretLine ? "_" : ""), left, top + i * 9,
-                    argb == 0 ? 0xFFFFFF : argb, false);
+                    argb == 0 ? 0xFFFFFFFF : argb, false);
         }
         g.drawString(this.font, Component.translatable("gui.sablestopnow.text.hint"), left,
-                top + 9 * lines.size() + 8, 0x8FA0B8, false);
-        super.render(g, mouseX, mouseY, partial);
+                top + 9 * Math.max(4, lines.size()) + 8, 0xFF8FA0B8, false);
+        g.drawCenteredString(this.font, this.title, this.width / 2, 14, 0xFFFFFFFF);
     }
 
     @Override

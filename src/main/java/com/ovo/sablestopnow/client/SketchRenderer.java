@@ -1834,8 +1834,15 @@ public final class SketchRenderer {
         final VertexConsumer vcq = quadBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
         int drawn = 0;
         // 草图平面的基向量（世界方向）—— 文字**贴着基准面**写，不再朝相机 ✓
-        final org.joml.Vector3d uW = new org.joml.Vector3d(plane.axisU()).normalize();
-        final org.joml.Vector3d vW = new org.joml.Vector3d(plane.axisV()).normalize();
+        // ★ 基向量必须经过 renderPose 变换到**渲染空间**（子结构是有旋转的）✓
+        final org.joml.Vector3d o0 = renderPose.transformPosition(new org.joml.Vector3d(0, 0, 0),
+                new org.joml.Vector3d());
+        final org.joml.Vector3d uW = renderPose.transformPosition(
+                        new org.joml.Vector3d(plane.axisU()), new org.joml.Vector3d())
+                .sub(o0).normalize();
+        final org.joml.Vector3d vW = renderPose.transformPosition(
+                        new org.joml.Vector3d(plane.axisV()), new org.joml.Vector3d())
+                .sub(o0).normalize();
         final org.joml.Vector3d nW = new org.joml.Vector3d(uW).cross(vW).normalize();
         for (final Sketch.TextNote note : texts) {
             // ① 辅助线长方形（用户要求"本质是辅助线组成的长方形"）✓
@@ -1858,10 +1865,12 @@ public final class SketchRenderer {
             final org.joml.Matrix4f m = new org.joml.Matrix4f(pose.pose())
                     .translate((float) at.x, (float) at.y, (float) at.z)
                     .mul(new org.joml.Matrix4f()
-                            // 列主序：R = uW, U = -vW, F = -nW（屏幕 y 向下）
-                            .set((float) uW.x, (float) -vW.x, (float) -nW.x, 0.0f,
-                                    (float) uW.y, (float) -vW.y, (float) -nW.y, 0.0f,
-                                    (float) uW.z, (float) -vW.z, (float) -nW.z, 0.0f,
+                            // JOML 的 set(m00,m01,m02,m03, m10,...) 里 mXY = 第 X 列第 Y 行
+                            // ⇒ 第 0 列 = uW（文字右方）、第 1 列 = -vW（屏幕 y 向下）、
+                            //    第 2 列 = -nW（朝屏幕里）✓ 以前把列写成了行 ⇒ 文字沿法线"竖"出去了 ✗
+                            .set((float) uW.x, (float) uW.y, (float) uW.z, 0.0f,
+                                    (float) -vW.x, (float) -vW.y, (float) -vW.z, 0.0f,
+                                    (float) -nW.x, (float) -nW.y, (float) -nW.z, 0.0f,
                                     0.0f, 0.0f, 0.0f, 1.0f))
                     .rotateZ((float) Math.toRadians(-note.rotationDeg()))
                     .scale(0.022f * (float) Math.max(0.25, Math.min(8.0, note.scale())));

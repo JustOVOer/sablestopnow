@@ -383,6 +383,8 @@ public final class SketchRenderer {
             final boolean editing = editingId != null && editingId.equals(sketch.id());
             final float[] color = editing ? EDITING_COLOR : IDLE_COLOR;
             drawn += drawSketch(vcq, pose, cameraPos, sub.renderPose(), sketch, color);
+              // item 3: 退出草图后文字也要常驻（之前只在 working 副本上画）
+              drawn += drawSketchTexts(pose, cameraPos, sub.renderPose(), sketch);
             if (editing && previewPoint != null) {
                 drawPreview(vcq, pose, cameraPos, sub.renderPose(), sketch);
             }

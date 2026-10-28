@@ -1994,6 +1994,9 @@ public final class SketchRenderer {
     /** 3D 棒的**半宽**（格）✓ 方向在基准面内、垂直于线段。 */
     private static final double BAR_WIDTH_HALF = 0.025;
 
+    /** 当前批次的棒宽/厚缩放 ✓（高亮描边要更粗 ⇒ 置 2.5，画完复位 1） */
+    private static double barScale = 1.0;
+
     /** 3D 棒的**半厚**（格）✓ 沿基准面法线 ⇒ 侧看也有厚度，不是一张纸。 */
     private static final double BAR_THICK_HALF = 0.01;
 
@@ -2029,8 +2032,8 @@ public final class SketchRenderer {
                 side = dir.cross(new Vec3(1, 0, 0));
             }
         }
-        side = side.normalize().scale(BAR_WIDTH_HALF);
-        final Vec3 th = n.scale(BAR_THICK_HALF);
+        side = side.normalize().scale(BAR_WIDTH_HALF * barScale);
+        final Vec3 th = n.scale(BAR_THICK_HALF * barScale);
         // 端点 a/b 各四个角（±side ±th）✓
         final Vec3 a00 = a.subtract(side).subtract(th);
         final Vec3 a01 = a.subtract(side).add(th);

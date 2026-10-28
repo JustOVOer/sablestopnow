@@ -150,20 +150,12 @@ public final class FeatureDeps {
         if (to < 0 || to >= ordered.size()) {
             return null; // 已经在头/尾 ✓
         }
-        // ★ 先把整条链**规范化成 1..N**（消除历史遗留的空号/重号）✓
-        //   否则"上移一格"会因为中间缺号而跳好几个数字（用户实测：15→13）✗
-        //   由于特征名已经是**永久名字**，规范化不会改变玩家看到的标签 ✓
-        final java.util.List<Solid> normalized = new ArrayList<>(ordered.size());
-        for (int i = 0; i < ordered.size(); i++) {
-            normalized.add(withIndex(ordered.get(i), i + 1));
-        }
-        // 在规范化后的列表里交换相邻两项 ⇒ 上移/下移永远是 ±1 ✓
-        final Solid a0 = normalized.get(at);
-        final Solid b0 = normalized.get(to);
-        normalized.set(at, withIndex(b0, at + 1));
-        normalized.set(to, withIndex(a0, to + 1));
-        ordered.clear();
-        ordered.addAll(normalized);
+        // ★ 最简单：**只交换这两项的序号** ✓（用户要求"只移动位置，别搞复杂"）
+        //   名字是永久的 ⇒ 标签不会变，玩家只会看到两行交换位置 ✓
+        final Solid a0 = ordered.get(at);
+        final Solid b0 = ordered.get(to);
+        ordered.set(at, withIndex(b0, a0.index()));
+        ordered.set(to, withIndex(a0, b0.index()));
         // 校验：违反依赖 ⇒ 撤销这次移动（返回 null，调用方保持原样）
         if (validate(ordered, existingSketchIds) != null) {
             return null;

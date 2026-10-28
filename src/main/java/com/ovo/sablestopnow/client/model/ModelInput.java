@@ -385,6 +385,81 @@ public final class ModelInput {
         }
     }
 
+    /**
+     * 四个特征的**点击分流** ✓：在草图分支之前处理，返回 true = 已消费 ✓
+     */
+    private static boolean handleFeatureToolClick() {
+        // item 10: pattern tool - click edges to add directions
+        if (com.ovo.sablestopnow.client.model.ModelTools.PATTERN.equals(ModelMode.tool())) {
+              com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                      "[pick] tool=pattern featureHover={} boxHover={}",
+                      com.ovo.sablestopnow.client.model.FeatureHover.get() == null
+                              ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
+                      ModelMode.hoveredRef() == null ? "null"
+                              : ModelMode.hoveredRef().describe());
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf2 =
+                    com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
+            if (pf2 != null) {
+                com.ovo.sablestopnow.client.model.PatternTool.pickEdge(pf2);
+            } else {
+                ModelMode.prompt("model.pattern.pick_edge");
+            }
+            return true;
+        }
+        // item 9: mirror tool - click a face to set / confirm the mirror plane
+        if (com.ovo.sablestopnow.client.model.ModelTools.MIRROR.equals(ModelMode.tool())) {
+              com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                      "[pick] tool=mirror featureHover={} boxHover={}",
+                      com.ovo.sablestopnow.client.model.FeatureHover.get() == null
+                              ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
+                      ModelMode.hoveredRef() == null ? "null"
+                              : ModelMode.hoveredRef().describe());
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit mf =
+                    com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
+            if (mf != null) {
+                com.ovo.sablestopnow.client.model.ModelUi.mirrorPickPlane(mf);
+            } else {
+                ModelMode.prompt("model.mirror.pick_plane");
+            }
+            return true;
+        }
+        // ★ item 8：**圆角工具**下点棱 ⇒ 记录棱并弹"半径"输入框 ✓
+        if (com.ovo.sablestopnow.client.model.ModelTools.FILLET.equals(ModelMode.tool())) {
+              com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                      "[pick] tool=fillet featureHover={} boxHover={}",
+                      com.ovo.sablestopnow.client.model.FeatureHover.get() == null
+                              ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
+                      ModelMode.hoveredRef() == null ? "null"
+                              : ModelMode.hoveredRef().describe());
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit hf =
+                    com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
+            if (hf != null) {
+                com.ovo.sablestopnow.client.model.ModelUi.filletPickEdge(hf);
+            } else {
+                ModelMode.prompt("model.fillet.pick_edge");
+            }
+            return true;
+        }
+        // ★ item 7：**基准面工具**下点面 ⇒ 记录面并弹"距离"输入框 ✓
+        if (com.ovo.sablestopnow.client.model.ModelTools.PLANE.equals(ModelMode.tool())) {
+              com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                      "[pick] tool=plane featureHover={} boxHover={}",
+                      com.ovo.sablestopnow.client.model.FeatureHover.get() == null
+                              ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
+                      ModelMode.hoveredRef() == null ? "null"
+                              : ModelMode.hoveredRef().describe());
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf =
+                    com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
+            if (pf != null) {
+                com.ovo.sablestopnow.client.model.ModelUi.planePickFace(pf);
+            } else {
+                ModelMode.prompt("model.plane.pick_face");
+            }
+            return true;
+        }
+        return false;
+    }
+
     /** @return true 表示吞掉这次滚轮 */
     public static boolean handleScroll(final double delta) {
         if (!ModelMode.isOn()) {
@@ -509,6 +584,11 @@ public final class ModelInput {
                         : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
                 com.ovo.sablestopnow.client.SketchClient.active(),
                 com.ovo.sablestopnow.client.SketchClient.editing());
+        // ★ 四个特征工具**优先**：它们不属于草图交互，必须在草图分支之前分流
+        //   （之前这些分支被误放进 SketchClient.active() 里 ⇒ 进工具后点击永远进不来）
+        if (handleFeatureToolClick()) {
+            return;
+        }
         // ⚠ 草图模式必须**最先**处理：草图里点的是基准面/草图平面，不是模型表面，
         // 所以不能走下面那套「先要求 hover 到某个面」的拾取。放在最前面还有一个原因 ——
         // 在草图环境里点到空处也不该顺手把视角转了或把选择清了。
@@ -549,74 +629,6 @@ public final class ModelInput {
             // 生成的，正好把结构整个包在中间；鼠标指向结构时几乎必然先命中某块板。
             // 实测症状就是"只能选到三个基准面，选不到模型上的面"。
             // SolidWorks 也是这个顺序：指到面上高亮面，指到空白处才显示基准面。
-            // item 10: pattern tool - click edges to add directions
-            if (com.ovo.sablestopnow.client.model.ModelTools.PATTERN.equals(ModelMode.tool())) {
-                  com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                          "[pick] tool=pattern featureHover={} boxHover={}",
-                          com.ovo.sablestopnow.client.model.FeatureHover.get() == null
-                                  ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
-                          ModelMode.hoveredRef() == null ? "null"
-                                  : ModelMode.hoveredRef().describe());
-                final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf2 =
-                        com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
-                if (pf2 != null) {
-                    com.ovo.sablestopnow.client.model.PatternTool.pickEdge(pf2);
-                } else {
-                    ModelMode.prompt("model.pattern.pick_edge");
-                }
-                return;
-            }
-            // item 9: mirror tool - click a face to set / confirm the mirror plane
-            if (com.ovo.sablestopnow.client.model.ModelTools.MIRROR.equals(ModelMode.tool())) {
-                  com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                          "[pick] tool=mirror featureHover={} boxHover={}",
-                          com.ovo.sablestopnow.client.model.FeatureHover.get() == null
-                                  ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
-                          ModelMode.hoveredRef() == null ? "null"
-                                  : ModelMode.hoveredRef().describe());
-                final com.ovo.sablestopnow.client.model.FeatureHover.Hit mf =
-                        com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
-                if (mf != null) {
-                    com.ovo.sablestopnow.client.model.ModelUi.mirrorPickPlane(mf);
-                } else {
-                    ModelMode.prompt("model.mirror.pick_plane");
-                }
-                return;
-            }
-            // ★ item 8：**圆角工具**下点棱 ⇒ 记录棱并弹"半径"输入框 ✓
-            if (com.ovo.sablestopnow.client.model.ModelTools.FILLET.equals(ModelMode.tool())) {
-                  com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                          "[pick] tool=fillet featureHover={} boxHover={}",
-                          com.ovo.sablestopnow.client.model.FeatureHover.get() == null
-                                  ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
-                          ModelMode.hoveredRef() == null ? "null"
-                                  : ModelMode.hoveredRef().describe());
-                final com.ovo.sablestopnow.client.model.FeatureHover.Hit hf =
-                        com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
-                if (hf != null) {
-                    com.ovo.sablestopnow.client.model.ModelUi.filletPickEdge(hf);
-                } else {
-                    ModelMode.prompt("model.fillet.pick_edge");
-                }
-                return;
-            }
-            // ★ item 7：**基准面工具**下点面 ⇒ 记录面并弹"距离"输入框 ✓
-            if (com.ovo.sablestopnow.client.model.ModelTools.PLANE.equals(ModelMode.tool())) {
-                  com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                          "[pick] tool=plane featureHover={} boxHover={}",
-                          com.ovo.sablestopnow.client.model.FeatureHover.get() == null
-                                  ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
-                          ModelMode.hoveredRef() == null ? "null"
-                                  : ModelMode.hoveredRef().describe());
-                final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf =
-                        com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
-                if (pf != null) {
-                    com.ovo.sablestopnow.client.model.ModelUi.planePickFace(pf);
-                } else {
-                    ModelMode.prompt("model.plane.pick_face");
-                }
-                return;
-            }
             // ★ 需求：**以模型的一个面作草图基准面** ✓ —— 优先级最高
             //   （模型面 > 方块面 > 基准板 ✓ 与"面优先于板"的既有纪律一致）
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit ff =

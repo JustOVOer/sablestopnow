@@ -419,11 +419,13 @@ public final class SketchRenderer {
             }
         }
         // ★ item 7：**基准面特征**画成半透明面片 + 描边 ✓
-        for (final Solid.Placed placed : solids) {
-            if (!(placed.solid().shape() instanceof final Solid.Shape.Plane plane)) {
+        // ★ 基准面特征在 placeAll 里被跳过（不是材料）⇒ 不能从 placed 里找，
+        //   必须从**全部实体**里找，否则"创建了但看不见"（用户实测）✓
+        for (final Solid planeSolid : com.ovo.sablestopnow.sketch.SolidClientState.in(level.dimension().location())) {
+            if (!(planeSolid.shape() instanceof final Solid.Shape.Plane plane)) {
                 continue;
             }
-            final ClientSubLevel psub = byId.get(placed.solid().body());
+            final ClientSubLevel psub = byId.get(planeSolid.body());
             if (psub == null) {
                 continue;
             }

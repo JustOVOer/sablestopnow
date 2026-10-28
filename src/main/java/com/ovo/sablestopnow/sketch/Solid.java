@@ -836,6 +836,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 continue;
             }
             final List<double[]> boxes2 = s2.filletBoxes(byId);
+            lastCsgDiag = "[fillet] idx=" + s2.index() + " boxes=" + boxes2.size()
+                    + (boxes2.isEmpty() ? " (棱不是轴对齐 ⇒ 第一版不支持)" : "");
             if (!boxes2.isEmpty()) {
                 localCutters.computeIfAbsent(s2.body(), k -> new ArrayList<>()).addAll(boxes2);
             }

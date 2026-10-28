@@ -1915,6 +1915,30 @@ public final class SketchRenderer {
         return drawn;
     }
 
+    /** 一个盒子的 12 条棱 ✓（用于高亮切割体） */
+    private static java.util.List<Vector3d[]> boxEdges(final double[] b) {
+        final java.util.List<Vector3d[]> out = new java.util.ArrayList<>(12);
+        for (int axis = 0; axis < 3; axis++) {
+            for (int s1 = 0; s1 < 2; s1++) {
+                for (int s2 = 0; s2 < 2; s2++) {
+                    final double[] p = new double[3];
+                    final double[] q = new double[3];
+                    p[axis] = b[axis];
+                    q[axis] = b[axis + 3];
+                    final int o1 = (axis + 1) % 3;
+                    final int o2 = (axis + 2) % 3;
+                    p[o1] = s1 == 0 ? b[o1] : b[o1 + 3];
+                    q[o1] = p[o1];
+                    p[o2] = s2 == 0 ? b[o2] : b[o2 + 3];
+                    q[o2] = p[o2];
+                    out.add(new Vector3d[] {new Vector3d(p[0], p[1], p[2]),
+                            new Vector3d(q[0], q[1], q[2])});
+                }
+            }
+        }
+        return out;
+    }
+
     private static long lastTextDrawLog = 0L;
 
     /**

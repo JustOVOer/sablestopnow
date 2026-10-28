@@ -47,6 +47,11 @@ public final class PatternTool {
         return DIRS.size();
     }
 
+    /** 某个特征是否已被选为阵列源 ✓（左栏列表勾选态） */
+    public static boolean hasSource(final UUID id) {
+        return id != null && SOURCES.contains(id);
+    }
+
     public static int sourceCount() {
         return SOURCES.size();
     }

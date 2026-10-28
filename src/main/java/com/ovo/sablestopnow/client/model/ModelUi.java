@@ -2070,6 +2070,23 @@ public final class ModelUi {
     }
 
     /** Creates the mirror feature. */
+    /** 特征在左栏列表里的短标签 ✓（例如"圆角3/拉伸1"） */
+    private static String solidShortLabel(final com.ovo.sablestopnow.sketch.Solid sd) {
+        final String kind;
+        if (sd.isPattern()) {
+            kind = "model.pattern.item";
+        } else if (sd.isMirror()) {
+            kind = "model.mirror.item";
+        } else if (sd.isFillet()) {
+            kind = "model.fillet.item";
+        } else if (sd.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut) {
+            kind = "model.cut.item";
+        } else {
+            kind = "model.extrude.item";
+        }
+        return Component.translatable(kind, sd.index()).getString();
+    }
+
     private static boolean createMirrorFeature() {
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
@@ -2128,6 +2145,19 @@ public final class ModelUi {
             filletEdgeB = new org.joml.Vector3d(seg[3], seg[4], seg[5]);
             filletSourceSolid = bh.body();
             filletSolidId = null;
+            {
+                // 盒棱沿某个轴 ⇒ 另外两个轴就是两个外向面法线（符号用"内外探测"定 ✓）
+                final org.joml.Vector3d d = new org.joml.Vector3d(filletEdgeB).sub(filletEdgeA)
+                        .normalize();
+                final org.joml.Vector3d n1 = new org.joml.Vector3d();
+                n1.setComponent(bh.axis(), 1);
+                n1.fma(-n1.dot(d), d);
+                if (n1.lengthSquared() > 1.0e-9) {
+                    n1.normalize();
+                    inferFilletNormals(d, n1,
+                            new org.joml.Vector3d(filletEdgeA).add(filletEdgeB).mul(0.5));
+                }
+            }
             updateFilletPreview(filletRadius.get());
             lastLeftSignature = null;
             refreshLeftPanel();
@@ -2175,6 +2205,14 @@ public final class ModelUi {
         filletEdgeB = new org.joml.Vector3d(seg[3], seg[4], seg[5]);
         filletSourceSolid = hit.body();
         filletSolidId = hit.solidId();
+        {
+            final org.joml.Vector3d d = new org.joml.Vector3d(filletEdgeB).sub(filletEdgeA);
+            if (d.length() > 1.0e-6) {
+                d.normalize();
+                inferFilletNormals(d, hit.localNormal(),
+                        new org.joml.Vector3d(filletEdgeA).add(filletEdgeB).mul(0.5));
+            }
+        }
         updateFilletPreview(filletRadius.get());
         lastLeftSignature = null;
         refreshLeftPanel();
@@ -2188,34 +2226,85 @@ public final class ModelUi {
         if (filletEdgeA == null || filletEdgeB == null || filletSourceSolid == null) {
             return;
         }
-        final org.joml.Vector3d dir = new org.joml.Vector3d(filletEdgeB).sub(filletEdgeA);
-        if (dir.length() < 1.0e-6) {
+        // ★ 预览用与切割体**同一套**数学（FilletCutter.outline）⇒ 预览不再骗人 ✓
+        final org.joml.Vector3d n1 = filletNormal1 == null
+                ? new org.joml.Vector3d(0, 1, 0) : filletNormal1;
+        final org.joml.Vector3d n2 = filletNormal2 == null
+                ? new org.joml.Vector3d(1, 0, 0) : filletNormal2;
+        final java.util.List<org.joml.Vector3d[]> segsRaw =
+                com.ovo.sablestopnow.sketch.FilletCutter.outline(filletEdgeA, filletEdgeB,
+                        n1, n2, radius);
+        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
+                new java.util.ArrayList<>(segsRaw.size());
+        for (final org.joml.Vector3d[] e : segsRaw) {
+            segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(e[0], e[1]));
+        }
+        com.ovo.sablestopnow.client.model.FeaturePreview.set(filletSourceSolid,
+                new org.joml.Vector3d(n1).cross(n2), segs);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[fillet] preview segs={} r={}",
+                segs.size(), radius);
+    }
+
+    /**
+     * 定出棱相邻的**两个外向面法线** ✓
+     *
+     * <p>n1 直接用命中面的法线（已知朝外 ✓）；n2 = dir × n1，再用"沿它挪一点是否落在实体内部"
+     * 来定符号（朝外的那一侧一定是空的）✓ 这一步很关键：符号错了，圆角会切到外面去 ✗
+     */
+    private static void inferFilletNormals(final org.joml.Vector3dc dir,
+                                           final org.joml.Vector3dc faceNormal,
+                                           final org.joml.Vector3dc edgePoint) {
+        final org.joml.Vector3d n1 = new org.joml.Vector3d(faceNormal);
+        n1.fma(-n1.dot(dir), dir);
+        if (n1.lengthSquared() < 1.0e-9) {
+            filletNormal1 = null;
+            filletNormal2 = null;
             return;
         }
-        dir.normalize();
-        org.joml.Vector3d cap = new org.joml.Vector3d(0, 1, 0);
-        if (Math.abs(dir.dot(cap)) > 0.99) {
-            cap.set(1, 0, 0);
+        n1.normalize();
+        final org.joml.Vector3d n2 = new org.joml.Vector3d(dir).cross(n1, new org.joml.Vector3d());
+        if (n2.lengthSquared() < 1.0e-9) {
+            filletNormal1 = null;
+            filletNormal2 = null;
+            return;
         }
-        final org.joml.Vector3d side = new org.joml.Vector3d(dir).cross(cap).normalize();
-        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
-                new java.util.ArrayList<>();
-        final int n = 8;
-        org.joml.Vector3d prev = null;
-        for (int i = 0; i <= n; i++) {
-            final double t = (double) i / n;
-            // 四分之一圆：从 cap 方向转到 side 方向
-            final double ang = Math.PI * 0.5 * t;
-            final org.joml.Vector3d p = new org.joml.Vector3d(filletEdgeA)
-                    .fma(radius, cap).fma(radius * Math.sin(ang) - radius, side)
-                    .fma(-radius * Math.cos(ang) + radius, cap);
-            if (prev != null) {
-                segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
-                        new org.joml.Vector3d(prev), new org.joml.Vector3d(p)));
+        n2.normalize();
+        // 朝外的符号：沿 ±n2 各挪 1e-2，落进实体内部的那一侧就是"里"⇒ 取反
+        final double probe = 1.0e-2 * 5.0;
+        final boolean inPlus = insideAnyBox(new org.joml.Vector3d(edgePoint).fma(probe, n2));
+        final boolean inMinus = insideAnyBox(new org.joml.Vector3d(edgePoint).fma(-probe, n2));
+        if (inPlus && !inMinus) {
+            n2.negate();
+        }
+        filletNormal1 = n1;
+        filletNormal2 = n2;
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[fillet] normals n1={} n2={} (in+={} in-={})",
+                n1, n2, inPlus, inMinus);
+    }
+
+    /** 点是否落在该体的任意盒子内部 ✓（用于判定"朝里/朝外"） */
+    private static boolean insideAnyBox(final org.joml.Vector3dc p) {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        final java.util.UUID body = filletSourceSolid;
+        if (level == null || body == null) {
+            return false;
+        }
+        for (final com.ovo.sablestopnow.sketch.Solid.Placed pl
+                : com.ovo.sablestopnow.sketch.SolidClientState.placed(level)) {
+            if (!pl.solid().body().equals(body)) {
+                continue;
             }
-            prev = p;
+            for (final double[] b : pl.boxes()) {
+                final double eps = 1.0e-4;
+                if (p.x() > b[0] - eps && p.x() < b[3] + eps
+                        && p.y() > b[1] - eps && p.y() < b[4] + eps
+                        && p.z() > b[2] - eps && p.z() < b[5] + eps) {
+                    return true;
+                }
+            }
         }
-        com.ovo.sablestopnow.client.model.FeaturePreview.set(filletSourceSolid, side, segs);
+        return false;
     }
 
     /** 真正创建圆角特征 ✓ */
@@ -2235,7 +2324,13 @@ public final class ModelUi {
         final com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef ref =
                 new com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef(filletSourceSolid,
                         filletEdgeA.x, filletEdgeA.y, filletEdgeA.z,
-                        filletEdgeB.x, filletEdgeB.y, filletEdgeB.z);
+                        filletEdgeB.x, filletEdgeB.y, filletEdgeB.z,
+                        filletNormal1 == null ? 0 : filletNormal1.x,
+                        filletNormal1 == null ? 0 : filletNormal1.y,
+                        filletNormal1 == null ? 0 : filletNormal1.z,
+                        filletNormal2 == null ? 0 : filletNormal2.x,
+                        filletNormal2 == null ? 0 : filletNormal2.y,
+                        filletNormal2 == null ? 0 : filletNormal2.z);
         final com.ovo.sablestopnow.sketch.Solid fillet =
                 com.ovo.sablestopnow.sketch.Solid.createFillet(filletSourceSolid,
                         sketchIdOfSolid(filletSolidId), index, radius,
@@ -2289,6 +2384,9 @@ public final class ModelUi {
     /** 拾取到的那条棱/那个面**属于哪个实体**（用于把新特征挂到它的真实草图上）✓ */
     private static java.util.UUID planeSolidId;
     private static java.util.UUID filletSolidId;
+    /** 圆角棱相邻的两个面法线（局部）✓ 由拾取时确定 */
+    private static org.joml.Vector3d filletNormal1;
+    private static org.joml.Vector3d filletNormal2;
     private static int planeSourceFace = -1;
 
     /** 基准面工具：点到一个模型面 ⇒ 记下来并打开"距离"输入框（带实时预览）✓ */
@@ -3217,8 +3315,58 @@ public final class ModelUi {
               body.add(new Label(mirrorPlaneOrigin == null
                       ? Component.translatable("model.mirror.step1")
                       : Component.translatable("model.mirror.plane_ok")).color(0xFFB9C0EE));
-              body.add(new Label(Component.translatable("model.mirror.sources",
-                      mirrorSources.size())).color(0xFFFFFFFF));
+                body.add(new Label(Component.translatable("model.mirror.sources",
+                        mirrorSources.size())).color(0xFFFFFFFF));
+              // ★ **源特征列表**放在左栏 ✓（用户实测：右栏树点选不生效 ⇒ 不再依赖树）
+              body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+              body.add(new Label(Component.translatable("model.mirror.pick_sources_hint"))
+                      .color(0xFF8FA0D8));
+              {
+                  final net.minecraft.client.Minecraft mc0 =
+                          net.minecraft.client.Minecraft.getInstance();
+                  final net.minecraft.world.level.Level lv = mc0 == null ? null : mc0.level;
+                  final java.util.UUID b0 = mirrorBody != null ? mirrorBody
+                          : ModelMode.selectedModel();
+                  if (lv != null && b0 != null) {
+                      for (final com.ovo.sablestopnow.sketch.Solid sd
+                              : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
+                          if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
+                              continue;
+                          }
+                          final boolean on = mirrorSources.contains(sd.id());
+                          body.add(new Button(Component.literal(
+                                  (on ? "\u2714 " : "") + solidShortLabel(sd)), () -> {
+                              mirrorToggleSource(sd);
+                          }).width(Widget.FILL));
+                      }
+                  }
+              }
+              // ★ 已有的**基准面特征**可以直接当镜像面 ✓（用户要求"镜像/草图都能选到基准面"）
+              {
+                  final net.minecraft.client.Minecraft mc0 =
+                          net.minecraft.client.Minecraft.getInstance();
+                  final net.minecraft.world.level.Level lv = mc0 == null ? null : mc0.level;
+                  if (lv != null) {
+                      for (final com.ovo.sablestopnow.sketch.Solid sd
+                              : com.ovo.sablestopnow.sketch.SolidClientState.in(
+                                      lv.dimension().location())) {
+                          if (!(sd.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane
+                                  pl)) {
+                              continue;
+                          }
+                          final double[] o = pl.offsetOrigin();
+                          body.add(new Button(Component.translatable("model.mirror.use_plane",
+                                  sd.index()), () -> {
+                              mirrorPlaneOrigin = new org.joml.Vector3d(o[0], o[1], o[2]);
+                              mirrorPlaneNormal = new org.joml.Vector3d(pl.nx(), pl.ny(), pl.nz())
+                                      .normalize();
+                              mirrorBody = sd.body();
+                              updateMirrorPreview();
+                              forceRefreshLeft();
+                          }).width(Widget.FILL));
+                      }
+                  }
+              }
               if (mirrorPlaneOrigin != null && !mirrorSources.isEmpty()) {
                   body.add(new Button(Component.translatable("model.mirror.confirm"), () -> {
                       createMirrorFeature();
@@ -3243,6 +3391,31 @@ public final class ModelUi {
                       com.ovo.sablestopnow.client.model.PatternTool.dirCount(),
                       com.ovo.sablestopnow.client.model.PatternTool.sourceCount()))
                       .color(0xFFB9C0EE));
+
+                // ★ 源特征列表也放左栏 ✓（不依赖右栏树的点选）
+                body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+                body.add(new Label(Component.translatable("model.pattern.pick_sources_hint"))
+                        .color(0xFF8FA0D8));
+                {
+                    final net.minecraft.client.Minecraft mc0 =
+                            net.minecraft.client.Minecraft.getInstance();
+                    final net.minecraft.world.level.Level lv = mc0 == null ? null : mc0.level;
+                    final java.util.UUID b0 = ModelMode.selectedModel();
+                    if (lv != null && b0 != null) {
+                        for (final com.ovo.sablestopnow.sketch.Solid sd
+                                : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
+                            if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
+                                continue;
+                            }
+                            final boolean on = com.ovo.sablestopnow.client.model.PatternTool
+                                    .hasSource(sd.id());
+                            body.add(new Button(Component.literal(
+                                    (on ? "✔ " : "") + solidShortLabel(sd)), () -> {
+                                com.ovo.sablestopnow.client.model.PatternTool.toggleSource(sd);
+                            }).width(Widget.FILL));
+                        }
+                    }
+                }
               com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_N1);
               com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_S1);
               com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_PATTERN_N2);

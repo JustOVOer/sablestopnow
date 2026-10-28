@@ -285,6 +285,129 @@ public final class SketchModelCheck {
                 n1, n2, 0.5, true).isEmpty(), "fillet: 斜棱不支持（返回空）");
     }
 
+    // ================= item 8：圆角几何（离线验证，不开客户端）=================
+
+    /** 多边形的体积（散度定理）✓ */
+    private static double volOf(final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> polys) {
+        double sum = 0.0;
+        for (final com.ovo.sablestopnow.sketch.csg.Csg.Polygon poly : polys) {
+            final var vs = poly.vertices;
+            for (int i = 1; i + 1 < vs.size(); i++) {
+                final var p0 = vs.get(0).pos();
+                final var p1 = vs.get(i).pos();
+                final var p2 = vs.get(i + 1).pos();
+                sum += p0.x() * (p1.y() * p2.z() - p1.z() * p2.y())
+                        - p0.y() * (p1.x() * p2.z() - p1.z() * p2.x())
+                        + p0.z() * (p1.x() * p2.y() - p1.y() * p2.x());
+            }
+        }
+        return sum / 6.0;
+    }
+
+    private static String fmtv(final double v) {
+        return String.format(java.util.Locale.ROOT, "%.4f", v);
+    }
+
+    /** 造一个 1×1×1 盒子的多边形组（外法线朝外 ✓） */
+    private static java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> unitBox() {
+        final double[][] c = {
+            {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0},
+            {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}};
+        final int[][] f = {
+            {0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4},
+            {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> out =
+                new java.util.ArrayList<>();
+        for (final int[] face : f) {
+            final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Vertex> vs =
+                    new java.util.ArrayList<>();
+            for (final int i : face) {
+                vs.add(new com.ovo.sablestopnow.sketch.csg.Csg.Vertex(
+                        new com.ovo.sablestopnow.sketch.csg.Csg.V3(
+                                c[i][0], c[i][1], c[i][2]),
+                        new com.ovo.sablestopnow.sketch.csg.Csg.V3(0, 0, 0),
+                        new com.ovo.sablestopnow.sketch.csg.Csg.V3(0, 0, 0)));
+            }
+            final var pl = com.ovo.sablestopnow.sketch.csg.Csg.Plane.fromPoints(
+                    vs.get(0).pos(), vs.get(1).pos(), vs.get(2).pos());
+            if (pl != null) {
+                out.add(new com.ovo.sablestopnow.sketch.csg.Csg.Polygon(vs, pl));
+            }
+        }
+        return out;
+    }
+
+    /** 把三角形顶点列表包成多边形组 ✓ */
+    private static java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> polysOf(
+            final java.util.List<org.joml.Vector3d[]> tris) {
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> out =
+                new java.util.ArrayList<>();
+        for (final org.joml.Vector3d[] t : tris) {
+            final org.joml.Vector3d n = new org.joml.Vector3d(t[1]).sub(t[0])
+                    .cross(new org.joml.Vector3d(t[2]).sub(t[0])).normalize();
+            final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Vertex> vs =
+                    java.util.List.of(
+                            new com.ovo.sablestopnow.sketch.csg.Csg.Vertex(
+                                    new com.ovo.sablestopnow.sketch.csg.Csg.V3(
+                                            t[0].x, t[0].y, t[0].z),
+                                    new com.ovo.sablestopnow.sketch.csg.Csg.V3(n.x, n.y, n.z),
+                                    new com.ovo.sablestopnow.sketch.csg.Csg.V3(0, 0, 0)),
+                            new com.ovo.sablestopnow.sketch.csg.Csg.Vertex(
+                                    new com.ovo.sablestopnow.sketch.csg.Csg.V3(
+                                            t[1].x, t[1].y, t[1].z),
+                                    new com.ovo.sablestopnow.sketch.csg.Csg.V3(n.x, n.y, n.z),
+                                    new com.ovo.sablestopnow.sketch.csg.Csg.V3(0, 0, 0)),
+                            new com.ovo.sablestopnow.sketch.csg.Csg.Vertex(
+                                    new com.ovo.sablestopnow.sketch.csg.Csg.V3(
+                                            t[2].x, t[2].y, t[2].z),
+                                    new com.ovo.sablestopnow.sketch.csg.Csg.V3(n.x, n.y, n.z),
+                                    new com.ovo.sablestopnow.sketch.csg.Csg.V3(0, 0, 0)));
+            final var pl = com.ovo.sablestopnow.sketch.csg.Csg.Plane.fromPoints(
+                    vs.get(0).pos(), vs.get(1).pos(), vs.get(2).pos());
+            if (pl != null) {
+                out.add(new com.ovo.sablestopnow.sketch.csg.Csg.Polygon(vs, pl));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * item 8：**圆角真的切掉了材料** ✓（离线）
+     *
+     * <p>1×1×1 盒子 + 沿 (1,1,z) 的圆角切割体 ⇒ CSG 减法 ⇒
+     * 断言：结果非空、体积变小、减少量 ≈ r²(1−π/4)·棱长 ✓
+     */
+    private static void filletCsg() {
+        final double r = 0.2;
+        final org.joml.Vector3d a = new org.joml.Vector3d(1, 1, 0);
+        final org.joml.Vector3d b = new org.joml.Vector3d(1, 1, 1);
+        final org.joml.Vector3d n1 = new org.joml.Vector3d(1, 0, 0);
+        final org.joml.Vector3d n2 = new org.joml.Vector3d(0, 1, 0);
+        final java.util.List<org.joml.Vector3d[]> tris =
+                com.ovo.sablestopnow.sketch.FilletCutter.prism(a, b, n1, n2, r);
+        check(!tris.isEmpty(), "fillet: 切割体三角面非空（" + tris.size() + "）");
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> box = unitBox();
+        check(box.size() == 6, "fillet: 盒子 6 个面（" + box.size() + "）");
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> cutter = polysOf(tris);
+        check(!cutter.isEmpty(), "fillet: 切割体多边形非空（" + cutter.size() + "）");
+        final double boxSigned = volOf(box);
+        final double cutterSigned = volOf(cutter);
+        final double cutterVol = Math.abs(cutterSigned);
+        final double interVol = Math.abs(volOf(
+                com.ovo.sablestopnow.sketch.csg.Csg.intersect(box, cutter)));
+        check(interVol > cutterVol * 0.5,
+                "fillet: 切割体与盒子确实相交（交 " + fmtv(interVol) + " / 体 " + fmtv(cutterVol) + "）");
+        final var result = com.ovo.sablestopnow.sketch.csg.Csg.subtract(box, cutter);
+        final double vol = Math.abs(volOf(result));
+        final double ideal = r * r * (1.0 - Math.PI / 4.0) * 1.0;
+        check(!result.isEmpty(), "fillet: 减法结果非空（" + result.size() + " 面）");
+        check(vol < 1.0 - ideal * 0.4, "fillet: 体积确实变小（" + fmtv(vol) + "）");
+        check(Math.abs((1.0 - vol) - ideal) < ideal * 0.9 + 0.01,
+                "fillet: 切掉量接近理论（实测 " + fmtv(1.0 - vol) + " / 理论 " + fmtv(ideal) + "）");
+        check(!com.ovo.sablestopnow.sketch.FilletCutter.outline(a, b, n1, n2, r).isEmpty(),
+                "fillet: 预览折线非空");
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -326,6 +449,7 @@ public final class SketchModelCheck {
 
     public static void main(final String[] args) throws Exception {
         filletGeom();
+        filletCsg();
         featureOrder();
         undoSnapshot();
         revolveEdges();

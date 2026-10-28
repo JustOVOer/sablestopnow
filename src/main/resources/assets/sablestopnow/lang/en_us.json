@@ -793,5 +793,8 @@
   "model.pattern.s1": "Dir1 spacing (signed)",
   "model.pattern.n2": "Dir2 count",
   "model.pattern.s2": "Dir2 spacing (signed)",
-  "model.pattern.create": "Create pattern"
+  "model.pattern.create": "Create pattern",
+  "model.mirror.pick_sources_hint": "Features to mirror (click to toggle):",
+  "model.mirror.use_plane": "Use plane %1$s as mirror plane",
+  "model.pattern.pick_sources_hint": "Features to pattern (click to toggle):"
 }

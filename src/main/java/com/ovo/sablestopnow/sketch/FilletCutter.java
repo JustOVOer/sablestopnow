@@ -38,59 +38,118 @@ public final class FilletCutter {
                                          final Vector3dc normal, final Vector3dc other,
                                          final double radius) {
         final List<Vector3d[]> out = new ArrayList<>();
-        if (radius <= 1.0e-6) {
+        final double[] frame = frame(a, b, normal, other, radius);
+        if (frame == null) {
             return out;
         }
         final Vector3d dir = new Vector3d(b).sub(a);
         final double len = dir.length();
-        if (len < 1.0e-6) {
-            return out;
-        }
         dir.div(len);
-        // 两个法线投影到"垂直于棱"的平面，并正交化
-        Vector3d n1 = new Vector3d(normal).fma(-new Vector3d(normal).dot(dir), dir);
-        if (n1.lengthSquared() < 1.0e-9) {
-            return out;
-        }
-        n1.normalize();
-        Vector3d n2 = new Vector3d(other).fma(-new Vector3d(other).dot(dir), dir);
-        n2.fma(-n2.dot(n1), n1);
-        if (n2.lengthSquared() < 1.0e-9) {
-            return out;
-        }
-        n2.normalize();
-        // 截面点（2D 坐标 (u,v) = (n1, n2) 方向）：棱角区 = 两个法线**反方向**的方块
-        // 材料在 -n1/-n2 侧；挖掉的是方块 [-r,0]x[-r,0] 减去以 (-r,-r) 为心、r 为半径的圆
-        final List<double[]> section = new ArrayList<>();
-        final double c = -radius; // 圆心
-        // 从 (-r, 0) 沿圆弧到 (0, -r)
-        for (int i = 0; i <= ARC_SEGMENTS; i++) {
-            final double ang = Math.PI * 0.5 * i / ARC_SEGMENTS;
-            section.add(new double[] {c + radius * Math.cos(ang), c + radius * Math.sin(ang)});
-        }
-        // 补上角点，闭合截面（角点 + 弧 = 要挖掉的区域）
-        section.add(new double[] {c, c});
-        // 沿棱扫出棱柱（两端各外扩一点，避免与面共面导致 CSG 退化）
-        final double ext = Math.max(1.0e-3, len * 0.002);
-        final Vector3d p0 = new Vector3d(a).fma(-ext, dir);
-        final Vector3d p1 = new Vector3d(b).fma(ext, dir);
-        final List<Vector3d> ringA = new ArrayList<>();
-        final List<Vector3d> ringB = new ArrayList<>();
-        for (final double[] s : section) {
-            ringA.add(new Vector3d(p0).fma(s[0], n1).fma(s[1], n2));
-            ringB.add(new Vector3d(p1).fma(s[0], n1).fma(s[1], n2));
-        }
+        final Vector3d n1 = new Vector3d(frame[3], frame[4], frame[5]);
+        final Vector3d n2 = new Vector3d(frame[6], frame[7], frame[8]);
+        final Vector3d p0 = new Vector3d(frame[0], frame[1], frame[2]);
+        final double ext = Math.max(2.0e-3, len * 0.004);
+        final Vector3d s0 = new Vector3d(p0).fma(-ext, dir);
+        final Vector3d s1 = new Vector3d(p0).fma(len + ext, dir);
+        // 截面点（(u,v) = (n1,n2) 二维坐标）：角点 (0,0) → 弧 → (0,-r)
+        final List<double[]> section = section(radius);
+        // 绕序：让 (n1 × n2) 与 dir 同向，保证外向
+        final double sgn = new Vector3d(n1).cross(n2).dot(dir) >= 0 ? 1.0 : -1.0;
         final int n = section.size();
+        final List<Vector3d> bottom = new ArrayList<>();
+        final List<Vector3d> top = new ArrayList<>();
+        for (final double[] q : section) {
+            bottom.add(new Vector3d(s0).fma(q[0], n1).fma(q[1], n2));
+            top.add(new Vector3d(s1).fma(q[0], n1).fma(q[1], n2));
+        }
         // 侧面
         for (int i = 0; i < n; i++) {
             final int j = (i + 1) % n;
-            out.add(new Vector3d[] {ringA.get(i), ringA.get(j), ringB.get(j)});
-            out.add(new Vector3d[] {ringA.get(i), ringB.get(j), ringB.get(i)});
+            if (sgn > 0) {
+                out.add(new Vector3d[] {bottom.get(i), top.get(j), bottom.get(j)});
+                out.add(new Vector3d[] {bottom.get(i), top.get(i), top.get(j)});
+            } else {
+                out.add(new Vector3d[] {bottom.get(i), bottom.get(j), top.get(j)});
+                out.add(new Vector3d[] {bottom.get(i), top.get(j), top.get(i)});
+            }
         }
-        // 两端封口（扇形三角化，截面是凸的）
+        // 两端封口（扇形；截面是凸的）
         for (int i = 1; i + 1 < n; i++) {
-            out.add(new Vector3d[] {ringA.get(0), ringA.get(i + 1), ringA.get(i)});
-            out.add(new Vector3d[] {ringB.get(0), ringB.get(i), ringB.get(i + 1)});
+            if (sgn > 0) {
+                out.add(new Vector3d[] {bottom.get(0), bottom.get(i), bottom.get(i + 1)});
+                out.add(new Vector3d[] {top.get(0), top.get(i + 1), top.get(i)});
+            } else {
+                out.add(new Vector3d[] {bottom.get(0), bottom.get(i + 1), bottom.get(i)});
+                out.add(new Vector3d[] {top.get(0), top.get(i), top.get(i + 1)});
+            }
+        }
+        return out;
+    }
+
+    /** 截面（2D，单位：格）：角点 (0,0) + 从 (-r,0) 到 (0,-r) 的圆弧 ✓ 逆时针 */
+    public static List<double[]> section(final double radius) {
+        final List<double[]> pts = new ArrayList<>();
+        pts.add(new double[] {0.0, 0.0}); // 棱角
+        for (int i = 0; i <= ARC_SEGMENTS; i++) {
+            final double ang = Math.PI * 0.5 * i / ARC_SEGMENTS;
+            pts.add(new double[] {-radius + radius * Math.cos(ang),
+                    -radius + radius * Math.sin(ang)});
+        }
+        return pts;
+    }
+
+    /**
+     * 建一组"棱坐标框架" ✓ 返回 {px,py,pz, n1x,n1y,n1z, n2x,n2y,n2z}；
+     * 失败返回 null。n1/n2 会被投影/正交化到垂直于棱的平面 ✓
+     */
+    public static double[] frame(final Vector3dc a, final Vector3dc b, final Vector3dc normal,
+                                 final Vector3dc other, final double radius) {
+        if (radius <= 1.0e-6) {
+            return null;
+        }
+        final Vector3d dir = new Vector3d(b).sub(a);
+        final double len = dir.length();
+        if (len < 1.0e-6) {
+            return null;
+        }
+        dir.div(len);
+        final Vector3d n1 = new Vector3d(normal).fma(-new Vector3d(normal).dot(dir), dir);
+        if (n1.lengthSquared() < 1.0e-9) {
+            return null;
+        }
+        n1.normalize();
+        final Vector3d n2 = new Vector3d(other).fma(-new Vector3d(other).dot(dir), dir);
+        n2.fma(-n2.dot(n1), n1);
+        if (n2.lengthSquared() < 1.0e-9) {
+            return null;
+        }
+        n2.normalize();
+        return new double[] {a.x(), a.y(), a.z(),
+                n1.x, n1.y, n1.z, n2.x, n2.y, n2.z};
+    }
+
+    /**
+     * **预览用**：圆角的两条切线与圆弧折线 ✓（与 {@link #section} 同一套数学，保证预览不骗人）
+     */
+    public static List<Vector3d[]> outline(final Vector3dc a, final Vector3dc b,
+                                           final Vector3dc normal, final Vector3dc other,
+                                           final double radius) {
+        final List<Vector3d[]> out = new ArrayList<>();
+        final double[] fr = frame(a, b, normal, other, radius);
+        if (fr == null) {
+            return out;
+        }
+        final Vector3d p0 = new Vector3d(fr[0], fr[1], fr[2]);
+        final Vector3d n1 = new Vector3d(fr[3], fr[4], fr[5]);
+        final Vector3d n2 = new Vector3d(fr[6], fr[7], fr[8]);
+        final List<double[]> sec = section(radius);
+        Vector3d prev = null;
+        for (final double[] q : sec) {
+            final Vector3d p = new Vector3d(p0).fma(q[0], n1).fma(q[1], n2);
+            if (prev != null) {
+                out.add(new Vector3d[] {new Vector3d(prev), new Vector3d(p)});
+            }
+            prev = p;
         }
         return out;
     }

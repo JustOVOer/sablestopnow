@@ -865,7 +865,26 @@ public final class SketchClient {
             return false;
         }
         SketchRenderer.setEditing(MODE.editingId());
-        alignCameraTo(toWorldNormal(hit.body(), hit.localNormal()));
+        // ★ 正视角度的法线优先从**世界三角面**算（子结构被移动/旋转后也准 ✓）
+        org.joml.Vector3d worldNormal = null;
+        if (hit.worldTris() != null && !hit.worldTris().isEmpty()) {
+            final var tri = hit.worldTris().get(0);
+            final org.joml.Vector3d a = new org.joml.Vector3d(tri[0].x, tri[0].y, tri[0].z);
+            final org.joml.Vector3d b = new org.joml.Vector3d(tri[1].x, tri[1].y, tri[1].z);
+            final org.joml.Vector3d c = new org.joml.Vector3d(tri[2].x, tri[2].y, tri[2].z);
+            final org.joml.Vector3d n = new org.joml.Vector3d(b).sub(a)
+                    .cross(new org.joml.Vector3d(c).sub(a));
+            if (n.lengthSquared() > 1.0e-12) {
+                worldNormal = n.normalize();
+                // 与"局部法线转世界"的结果对一下符号（保证朝外）
+                final org.joml.Vector3d ref = toWorldNormal(hit.body(), hit.localNormal());
+                if (worldNormal.dot(ref) < 0) {
+                    worldNormal.negate();
+                }
+            }
+        }
+        alignCameraTo(worldNormal != null ? worldNormal
+                : toWorldNormal(hit.body(), hit.localNormal()));
         // ★ 该面的直线 ⇒ 参考几何（常驻、不可移动、可被约束）✓
         final int refs = MODE.session() == null ? 0 : MODE.session().addReferenceLines(
                 hit.face().segments());

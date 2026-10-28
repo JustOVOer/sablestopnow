@@ -126,7 +126,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
 
         record EdgeRef(java.util.UUID solidId, double ax, double ay, double az,
-                       double bx, double by, double bz) {
+                       double bx, double by, double bz,
+                       double n1x, double n1y, double n1z,
+                       double n2x, double n2y, double n2z) {
+
+            /** 旧版（无面法线）：法线置零，几何侧会退回"从网格搜相邻面"✓ */
+            public EdgeRef(final java.util.UUID solidId, final double ax, final double ay,
+                           final double az, final double bx, final double by, final double bz) {
+                this(solidId, ax, ay, az, bx, by, bz, 0, 0, 0, 0, 0, 0);
+            }
         }
 
         /**
@@ -848,7 +856,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 final SolidMesh.Mesh srcMesh = src.mesh(srcSketch);
                 final Vector3d a = new Vector3d(ref.ax(), ref.ay(), ref.az());
                 final Vector3d b = new Vector3d(ref.bx(), ref.by(), ref.bz());
-                final Vector3d[] nn = FilletCutter.faceNormals(srcMesh, a, b);
+                Vector3d[] nn = null;
+                if (Math.abs(ref.n1x()) + Math.abs(ref.n1y()) + Math.abs(ref.n1z()) > 1.0e-6
+                        && Math.abs(ref.n2x()) + Math.abs(ref.n2y()) + Math.abs(ref.n2z()) > 1.0e-6) {
+                    nn = new Vector3d[] {
+                        new Vector3d(ref.n1x(), ref.n1y(), ref.n1z()),
+                        new Vector3d(ref.n2x(), ref.n2y(), ref.n2z())};
+                }
+                if (nn == null) {
+                    nn = FilletCutter.faceNormals(srcMesh, a, b);
+                }
                 if (nn == null) {
                     continue;
                 }

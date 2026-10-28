@@ -1207,7 +1207,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         if (mesh == null || mesh.isEmpty() || filletPolys == null || filletPolys.isEmpty()) {
             return mesh;
         }
-        final List<Csg.Polygon> base = CsgMesh.fromMesh(mesh, null);
+        // ★ 底也要先规范化朝向：镜像出来的网格绕序是反的（体积为负）⇒ 直接减会得到垃圾
+        final List<Csg.Polygon> base = ensureOutward(CsgMesh.fromMesh(mesh, null));
         if (base.isEmpty()) {
             return mesh;
         }

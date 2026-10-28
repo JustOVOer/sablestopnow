@@ -133,6 +133,13 @@ public final class CsgMesh {
             final double ay = Math.abs(nrmUv.y);
             final double az = Math.abs(nrmUv.z);
             final int axis = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
+            boolean uvAllZero = true;
+            for (final Csg.Vertex v : verts) {
+                if (Math.abs(v.uv().x()) > 1.0e-6 || Math.abs(v.uv().y()) > 1.0e-6) {
+                    uvAllZero = false;
+                    break;
+                }
+            }
             for (final Csg.Vertex v : verts) {
                 final Vector3d n = pn == null
                         ? new Vector3d(v.normal().x(), v.normal().y(), v.normal().z())
@@ -142,7 +149,10 @@ public final class CsgMesh {
                 final double pz = v.pos().z();
                 final double u;
                 final double vv;
-                if (axis == 0) {
+                if (!uvAllZero) {
+                    u = v.uv().x();
+                    vv = v.uv().y();
+                } else if (axis == 0) {
                     u = pz;
                     vv = py;
                 } else if (axis == 1) {

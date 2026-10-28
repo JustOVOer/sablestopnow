@@ -155,6 +155,11 @@ public final class Ui {
         return mouseY;
     }
 
+    /** 让 `mouseXd/mouseYd` 与本帧鼠标位置同步 ✓（外部做几何悬停判定时用） */
+    public static void refreshMouse() {
+        updateMouse();
+    }
+
     private static void updateMouse() {
         final Minecraft mc = Minecraft.getInstance();
         final var window = mc.getWindow();

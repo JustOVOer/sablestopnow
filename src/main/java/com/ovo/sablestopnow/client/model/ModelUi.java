@@ -1222,6 +1222,7 @@ public final class ModelUi {
                                               });
                               fb.prefW = Widget.FILL;
                               feats.add(fb);
+                              FEAT_BUTTONS.add(new FeatButton(fb, sd.id()));
                           }
                           panel.add(feats);
                       }
@@ -1999,6 +2000,20 @@ public final class ModelUi {
      */
     /** 树行悬停 ⇒ 让渲染侧高亮对应特征 ✓（item 6） */
     public static void syncFeatureHover() {
+        // ★ 先按"鼠标是否落在右栏特征按钮上"判悬停 ✓（TreeView 的 hoveredKey 实测拿不到）
+        com.ovo.sablestopnow.client.gui.lib.Ui.refreshMouse(); // 保证是本帧的鼠标位置
+        final double mx = com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd();
+        final double my = com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd();
+        for (final FeatButton fb : FEAT_BUTTONS) {
+            final var w = fb.widget();
+            if (!w.visible || w.w <= 0 || w.h <= 0) {
+                continue;
+            }
+            if (mx >= w.x && mx <= w.x + w.w && my >= w.y && my <= w.y + w.h) {
+                com.ovo.sablestopnow.client.model.FeatureHighlight.set(fb.solidId());
+                return;
+            }
+        }
         final String key = tree == null ? null : tree.hoveredKey();
         if (key == null || !key.startsWith("solid:")) {
             com.ovo.sablestopnow.client.model.FeatureHighlight.clear();
@@ -2587,6 +2602,13 @@ public final class ModelUi {
         return selectedSolidId;
     }
     /** 镜像源复选框的状态（按实体 id）✓ 面板重建也不丢 */
+    /** 右栏"特征按钮"登记表：按鼠标位置判悬停（不依赖 TreeView 的 hoveredKey）✓ */
+    private record FeatButton(com.ovo.sablestopnow.client.gui.lib.Widget widget,
+                              java.util.UUID solidId) {
+    }
+
+    private static final java.util.List<FeatButton> FEAT_BUTTONS = new java.util.ArrayList<>();
+
     private static final java.util.Map<java.util.UUID,
             com.ovo.sablestopnow.client.gui.lib.Prop<Boolean>> PATTERN_SRC_PROPS =
             new java.util.HashMap<>();

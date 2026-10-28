@@ -181,6 +181,7 @@ public final class SketchRenderer {
 
     @SubscribeEvent
     public static void onRenderLevel(final RenderLevelStageEvent event) {
+        closeFrameBuffers(); // 兜底：万一上一帧异常没关 ✓
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_ENTITIES) {
             return;
         }
@@ -251,7 +252,7 @@ public final class SketchRenderer {
         //   而每个"线"都是相机空间里展开的细长四边形（见 line(...) 的新实现）✓
         //   实体线框仍用原来的 LINES 缓冲（它们不属于"草图线条"✓ 也不该变粗 ✓）
         final MultiBufferSource.BufferSource sketchQuadBuf =
-                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 18));
+                immediate(1 << 18);
         final VertexConsumer vcq = sketchQuadBuf.getBuffer(ModRenderTypes.SKETCH_LINES_QUADS);
 
         int drawn = 0;
@@ -264,13 +265,13 @@ public final class SketchRenderer {
         // 于是上面那个 vc 在第一次写顶点时就失效了（崩在 line(...) 里）。
         // 独立的 immediate 源互不影响，且各自 endBatch 一次，边界清楚。
         final MultiBufferSource.BufferSource texBuf =
-                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+                immediate(1 << 16);
         final VertexConsumer vcTex = texBuf.getBuffer(ModRenderTypes.SOLID_TEXTURED);
         // F3 调试屏打开时，额外把**碰撞盒**描出来（无深度，免得被方块挡住）。
         // 碰撞盒是看不见的，而"手感不对"十有八九是盒子与几何不一致 —— 没有可视化只能靠猜。
         final boolean debugBoxes = mc.getDebugOverlay().showDebugScreen();
         final MultiBufferSource.BufferSource dbgBuf = debugBoxes
-                ? MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16))
+                ? immediate(1 << 16)
                 : null;
         final VertexConsumer vcDebug = dbgBuf == null
                 ? null : dbgBuf.getBuffer(ModRenderTypes.LINES_NO_DEPTH);
@@ -299,7 +300,7 @@ public final class SketchRenderer {
                         com.ovo.sablestopnow.client.RepeatTextureCache.of(look.blockId());
                 if (repeatTex != null) {
                     final MultiBufferSource.BufferSource own =
-                            MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+                            immediate(1 << 16);
                     final VertexConsumer vcRepeat = own.getBuffer(
                             ghostAlpha < 1.0f
                                     ? net.minecraft.client.renderer.RenderType.entityTranslucent(repeatTex)
@@ -348,8 +349,7 @@ public final class SketchRenderer {
                 // ★ 需求 ②：**常驻背景网格** ✓ 必须先画（在图元下面）✓
                 //   独立缓冲源：从同一个 BufferSource 取第二个 RenderType 会结束掉前一个 builder ✓
                 final MultiBufferSource.BufferSource gridBuf =
-                        MultiBufferSource.immediate(
-                                new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+                        immediate(1 << 16);
                 final VertexConsumer vcGrid = gridBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
                 drawSketchGrid(vcGrid, pose, cameraPos, wsub.renderPose(), working);
                 gridBuf.endBatch();
@@ -1059,7 +1059,7 @@ public final class SketchRenderer {
         }
         // ★ 预览线改成**和背景网格同一种呈现方式**（四边形细条 + SKETCH_GRID 类型）✓
         final MultiBufferSource.BufferSource quadBuf =
-                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+                immediate(1 << 16);
         final VertexConsumer vcq = quadBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
         final var session = SketchClient.mode().session();
         final var pending = session.pendingPoints();
@@ -1277,7 +1277,7 @@ public final class SketchRenderer {
         // 独立缓冲源：从同一个 BufferSource 取第二种 RenderType 会让前一个 builder 结束
         // （我崩过：BufferBuilder.ensureBuilding 抛 "Not building!"）
         final MultiBufferSource.BufferSource dbg =
-                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+                immediate(1 << 16);
         final VertexConsumer vc = dbg.getBuffer(ModRenderTypes.LINES_NO_DEPTH);
         // ① 原点处的单位立方体（对照组）
         boxOutline(vc, pose, cameraPos, renderPose, cx, topY, cz, 1.0, 1.0, 1.0);
@@ -1441,7 +1441,7 @@ public final class SketchRenderer {
         // 第二遍：**不做深度测试**再画一次（暗一点）⇒ 被模型挡住的那一半预览也看得见
         // （用户实测："双向拉伸/切割其中一个方向没有预览线框" —— 其实是被实体挡住了）
         final MultiBufferSource.BufferSource flatBuf =
-                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+                immediate(1 << 16);
         final VertexConsumer vflat = flatBuf.getBuffer(ModRenderTypes.SKETCH_LINES_QUADS_FLAT);
         final float[] dim = {yellow[0] * 0.55f, yellow[1] * 0.55f, yellow[2] * 0.55f};
         int drawn = 0;
@@ -1477,7 +1477,7 @@ public final class SketchRenderer {
 
         // ① 面填充（QUADS：把三角形补成退化四边形 ✓）
         final MultiBufferSource.BufferSource fillBuf =
-                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+                immediate(1 << 16);
         final VertexConsumer vf = fillBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
         for (final Vec3[] tri : fh.worldTris()) {
             final Vec3 a = rel(tri[0], cameraPos);
@@ -1492,7 +1492,7 @@ public final class SketchRenderer {
 
         // ② 边界 / 棱 / 点
         final MultiBufferSource.BufferSource lineBuf =
-                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+                immediate(1 << 16);
         final VertexConsumer vl = lineBuf.getBuffer(ModRenderTypes.SKETCH_LINES_ON_TOP);
         for (final Vec3[] seg : fh.worldSegs()) {
             lineA(vl, pose, rel(seg[0], cameraPos), rel(seg[1], cameraPos), outline, 0.9f);
@@ -1839,7 +1839,7 @@ public final class SketchRenderer {
         }
         final MultiBufferSource.BufferSource buf = mc.renderBuffers().bufferSource();
         final MultiBufferSource.BufferSource quadBuf =
-                MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(1 << 16));
+                immediate(1 << 16);
         final VertexConsumer vcq = quadBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
         int drawn = 0;
         // 草图平面的基向量（世界方向）—— 文字**贴着基准面**写，不再朝相机 ✓
@@ -1916,6 +1916,36 @@ public final class SketchRenderer {
     }
 
     private static long lastTextDrawLog = 0L;
+
+    /**
+     * 本帧创建的即时缓冲 ✓
+     *
+     * <p>⚠ `ByteBufferBuilder` 是**要 close 的**（AutoCloseable）。之前每帧 new 一个却从不 close，
+     * 内存一路涨到分配失败 —— 实测崩溃信息正是
+     * `Failed to resize buffer from 262144 bytes to 524288 bytes`（整屏黑屏）。
+     * 现在统一登记、帧末关闭 ✓
+     */
+    private static final java.util.List<com.mojang.blaze3d.vertex.ByteBufferBuilder>
+            FRAME_BUFFERS = new java.util.ArrayList<>();
+
+    /** 申请一个即时缓冲（帧末统一关闭）✓ */
+    private static MultiBufferSource.BufferSource immediate(final int size) {
+        final var bb = new com.mojang.blaze3d.vertex.ByteBufferBuilder(size);
+        FRAME_BUFFERS.add(bb);
+        return MultiBufferSource.immediate(bb);
+    }
+
+    /** 帧末释放本帧所有即时缓冲 ✓（漏关会耗尽本地内存） */
+    private static void closeFrameBuffers() {
+        for (final var bb : FRAME_BUFFERS) {
+            try {
+                bb.close();
+            } catch (final RuntimeException ignored) {
+                // 已关闭/已失效：忽略 ✓
+            }
+        }
+        FRAME_BUFFERS.clear();
+    }
 
     /** 把基准面画成**描边方框** ✓（item 7；与预览共用 {@code Plane.corners} ✓） */
     private static int drawPlaneFeature(final VertexConsumer vcq, final PoseStack.Pose pose,

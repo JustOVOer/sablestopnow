@@ -892,7 +892,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 if (nn == null) {
                     continue;
                 }
-                polys.addAll(triPolys(FilletCutter.prism(a, b, nn[0], nn[1], f.radius())));
+                final Vector3d fdir = new Vector3d(b).sub(a).normalize();
+                polys.addAll(triPolys(FilletCutter.prism(a, b, nn[0], nn[1], f.radius()),
+                        fdir, nn[0]));
             }
             if (!polys.isEmpty()) {
                 filletPolyByBody.put(s2.body(), polys);
@@ -1145,6 +1147,44 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             for (final Vector3d v : t) {
                 vs.add(new Csg.Vertex(new Csg.V3(v.x, v.y, v.z),
                         new Csg.V3(n.x, n.y, n.z), new Csg.V3(0, 0, 0)));
+            }
+            out.add(new Csg.Polygon(vs, plane));
+        }
+        return out;
+    }
+
+    /**
+     * 三角面 → CSG 多边形（**带 UV**）✓
+     *
+     * <p>圆角面片如果没有 UV（全 0），整面只会采样一个纹素 ⇒ 看着就是**全黑/没有贴图**（实测）。
+     * 这里用"沿棱方向 × 沿弧方向"的平面投影当 UV（方块量纲），贴图会顺着棱和圆弧平铺 ✓
+     */
+    public static java.util.List<Csg.Polygon> triPolys(final java.util.List<Vector3d[]> tris,
+                                                       final Vector3d axisU,
+                                                       final Vector3d axisV) {
+        final java.util.List<Csg.Polygon> out = new ArrayList<>();
+        final Vector3d u = new Vector3d(axisU).normalize();
+        final Vector3d v = new Vector3d(axisV).normalize();
+        for (final Vector3d[] t : tris) {
+            final Vector3d n = new Vector3d(t[1]).sub(t[0])
+                    .cross(new Vector3d(t[2]).sub(t[0]));
+            if (n.lengthSquared() < 1.0e-14) {
+                continue;
+            }
+            n.normalize();
+            final Csg.Plane plane = Csg.Plane.fromPoints(
+                    new Csg.V3(t[0].x, t[0].y, t[0].z),
+                    new Csg.V3(t[1].x, t[1].y, t[1].z),
+                    new Csg.V3(t[2].x, t[2].y, t[2].z));
+            if (plane == null) {
+                continue;
+            }
+            final java.util.List<Csg.Vertex> vs = new ArrayList<>(3);
+            for (final Vector3d q : t) {
+                final double uu = q.dot(u);
+                final double vv = q.dot(v);
+                vs.add(new Csg.Vertex(new Csg.V3(q.x, q.y, q.z),
+                        new Csg.V3(n.x, n.y, n.z), new Csg.V3(uu, vv, 0)));
             }
             out.add(new Csg.Polygon(vs, plane));
         }

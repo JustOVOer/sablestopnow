@@ -1301,6 +1301,18 @@ public final class ModelUi {
                 ModelForceUi.select(point.id());
                 return;
             } else if (item.data instanceof com.ovo.sablestopnow.sketch.Solid treeSolid) {
+                  // ★ 顺序调整/删除：**必须像 texture: 一样在这里判** ✓
+                  //   （之前写成外层 else-if，先被"实体"分支吃掉 ⇒ 永远轮不到 ⇒ 点了没反应）
+                  if (item.key.startsWith("feat:")) {
+                      final String[] fparts = item.key.split(":");
+                      com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                              "[tree] action key={} parts={} idx={}",
+                              item.key, fparts.length, treeSolid.index());
+                      if (fparts.length >= 4) {
+                          featureAction(fparts[1], treeSolid);
+                      }
+                      return;
+                  }
                 // 树上的「贴图…」行：打开贴图编辑面板（搜索框 + 带预览的下拉）
                 if (item.key.startsWith("texture:")) {
                     textureSolidId = treeSolid.id();
@@ -1334,13 +1346,6 @@ public final class ModelUi {
                 ModelMode.selectModel(sketch.body());
                 refreshLeftPanel();
                 return;
-              } else if (item.data instanceof com.ovo.sablestopnow.sketch.Solid actSolid
-                      && item.key.startsWith("feat:")) {
-                  final String[] parts = item.key.split(":");
-                  if (parts.length >= 4) {
-                      featureAction(parts[1], actSolid);
-                  }
-                  return;
             } else if (item.data instanceof com.ovo.sablestopnow.sketch.Solid solid) {
                 selectedSolidId = solid.id();
                   if (ModelTools.PATTERN.equals(ModelMode.tool())) {
@@ -2001,6 +2006,12 @@ public final class ModelUi {
     public static void syncFeatureHover() {
         // hoveredKey 现在会在 RowWidget.update 里赋值 ⇒ 直接用它（行高/展开变化都自动正确）
         final String key = tree == null ? null : tree.hoveredKey();
+        // 悬停诊断：只在变化时打一行（用户要求"对 hover 做日志"）
+        if (key == null ? lastHoverLogged != null
+                : !key.equals(lastHoverLogged)) {
+            lastHoverLogged = key;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[hover] key={}", key);
+        }
         if (key == null || !key.startsWith("solid:")) {
             com.ovo.sablestopnow.client.model.FeatureHighlight.clear();
             return;
@@ -2581,6 +2592,7 @@ public final class ModelUi {
     /** 当前在树里选中的实体（左栏据此显示"特征操作"：上移/下移/删除/贴图）✓ */
     private static java.util.UUID selectedSolidId;
     private static long lastFilletPreviewLog;
+    private static String lastHoverLogged;
     private static long lastPlanePreviewLog;
 
     /** 当前在树里选中的特征 id ✓（渲染侧用于"选中也高亮"） */

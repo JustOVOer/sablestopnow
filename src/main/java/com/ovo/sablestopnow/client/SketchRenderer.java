@@ -1896,6 +1896,25 @@ public final class SketchRenderer {
         return drawn;
     }
 
+    /** 高亮一个基准面特征（橙色方框）✓ */
+    private static int drawPlaneHighlight(final VertexConsumer vcq, final PoseStack.Pose pose,
+                                          final Vec3 cameraPos, final ClientSubLevel sub,
+                                          final Solid.Shape.Plane plane) {
+        final Pose3dc rp = sub.renderPose();
+        final org.joml.Vector3d n = new org.joml.Vector3d(plane.nx(), plane.ny(), plane.nz())
+                .normalize();
+        quadUp = new Vec3(n.x, n.y, n.z).normalize();
+        final float[] hot = {1.00f, 0.48f, 0.10f};
+        final java.util.List<org.joml.Vector3d> cs = plane.corners(1.2);
+        int drawn = 0;
+        for (int i = 0; i < 4; i++) {
+            quadLine(vcq, pose, world(cameraPos, rp, cs.get(i)),
+                    world(cameraPos, rp, cs.get((i + 1) % 4)), hot);
+            drawn++;
+        }
+        return drawn;
+    }
+
     private static long lastTextDrawLog = 0L;
 
     /** 把基准面画成**描边方框** ✓（item 7；与预览共用 {@code Plane.corners} ✓） */

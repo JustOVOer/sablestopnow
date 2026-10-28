@@ -2209,8 +2209,8 @@ public final class ModelUi {
                 ModelMode.prompt("model.fillet.pick_edge");
                 return false;
             }
-            // 参考点：这一帧的射线与面交点的近似（用面的命中中心）
-            final org.joml.Vector3d p = new org.joml.Vector3d(hit.localCenter());
+            // 参考点：**射线与面的实际交点**（以前用面原点 ⇒ 会选到很远的棱）
+            final org.joml.Vector3d p = new org.joml.Vector3d(hit.localHit());
             double best = Double.MAX_VALUE;
             int bestIdx = -1;
             final java.util.List<double[]> segs = hit.face().segments();
@@ -2396,6 +2396,13 @@ public final class ModelUi {
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(fillet);
         LOCAL_SOLID_INDEX.put(filletSourceSolid, fillet.index());
         com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+        // ★ 清空拾取状态：否则第二次进工具就还留着"已选棱 + 创建按钮"（用户实测）✓
+        filletEdgeA = null;
+        filletEdgeB = null;
+        filletSolidId = null;
+        filletSourceSolid = null;
+        filletNormal1 = null;
+        filletNormal2 = null;
         com.ovo.sablestopnow.SablestopNow.LOGGER.info("[fillet] created idx={} radius={}",
                 fillet.index(), radius);
         lastTreeSignature = null;
@@ -2511,6 +2518,11 @@ public final class ModelUi {
     private static java.util.UUID planeSolidId;
     /** 当前在树里选中的实体（左栏据此显示"特征操作"：上移/下移/删除/贴图）✓ */
     private static java.util.UUID selectedSolidId;
+
+    /** 当前在树里选中的特征 id ✓（渲染侧用于"选中也高亮"） */
+    public static java.util.UUID selectedSolid() {
+        return selectedSolidId;
+    }
     /** 镜像源复选框的状态（按实体 id）✓ 面板重建也不丢 */
     private static final java.util.Map<java.util.UUID,
             com.ovo.sablestopnow.client.gui.lib.Prop<Boolean>> PATTERN_SRC_PROPS =
@@ -2631,6 +2643,11 @@ public final class ModelUi {
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(plane);
         LOCAL_SOLID_INDEX.put(planeSourceSolid, plane.index());
         com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+        planeFaceOrigin = null;
+        planeFaceNormal = null;
+        planeSolidId = null;
+        planeSourceSolid = null;
+        planeSourceFace = -1;
         com.ovo.sablestopnow.SablestopNow.LOGGER.info(
                 "[plane] created idx={} dist={} face={}", plane.index(), distance, planeSourceFace);
         lastTreeSignature = null;
@@ -3603,7 +3620,10 @@ public final class ModelUi {
                     final net.minecraft.client.Minecraft mc0 =
                             net.minecraft.client.Minecraft.getInstance();
                     final net.minecraft.world.level.Level lv = mc0 == null ? null : mc0.level;
-                    final java.util.UUID b0 = ModelMode.selectedModel();
+                    final java.util.UUID b0 = com.ovo.sablestopnow.client.model.PatternTool
+                            .bodyId() != null
+                                    ? com.ovo.sablestopnow.client.model.PatternTool.bodyId()
+                                    : ModelMode.selectedModel();
                     if (lv != null && b0 != null) {
                         for (final com.ovo.sablestopnow.sketch.Solid sd
                                 : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
@@ -4242,6 +4262,19 @@ public final class ModelUi {
           //   工具分支永远轮不到 ⇒ "点棱/点面毫无反应"（用户实测）✓
           if (ModelTools.PLANE.equals(toolId) || ModelTools.FILLET.equals(toolId)
                   || ModelTools.MIRROR.equals(toolId) || ModelTools.PATTERN.equals(toolId)) {
+              // ★ 进工具即重置上次的拾取状态（用户实测："第二次进入就已经有创建按钮"）
+              planeFaceOrigin = null;
+              planeFaceNormal = null;
+              planeSolidId = null;
+              filletEdgeA = null;
+              filletEdgeB = null;
+              filletSolidId = null;
+              filletNormal1 = null;
+              filletNormal2 = null;
+              mirrorSources.clear();
+              mirrorPlaneOrigin = null;
+              mirrorPlaneNormal = null;
+              com.ovo.sablestopnow.client.model.FeaturePreview.clear();
               if (com.ovo.sablestopnow.client.SketchClient.active()) {
                   com.ovo.sablestopnow.client.SketchClient.finish();
                   com.ovo.sablestopnow.SablestopNow.LOGGER.info(

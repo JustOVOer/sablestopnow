@@ -726,7 +726,8 @@ public final class SketchClient {
         // ★ 用户要求：**从右侧栏进入草图时也要自动正视** ✓
         //   （以前只有"点模型面建草图"那条路会正视 ⇒ 从树里进去是斜着看 ✗）
         if (sketch != null && sketch.plane() != null) {
-            alignCameraTo(sketch.plane().normal());
+            // ★ 平面法线是**局部**的 ⇒ 必须按该体的渲染姿态转世界（结构移动/旋转后否则不正）
+        alignCameraTo(toWorldNormal(sketch.body(), sketch.plane().normal()));
         }
     }
 

@@ -46,6 +46,11 @@ public final class PatternTool {
         FeaturePreview.clear();
     }
 
+    /** 当前阵列作用的体 ✓（面板据此列特征；可能比 selectedModel 更可靠） */
+    public static UUID bodyId() {
+        return body;
+    }
+
     public static int dirCount() {
         return DIRS.size();
     }
@@ -103,7 +108,7 @@ public final class PatternTool {
         int edgeIdx = hit.index();
         if (hit.kind() != FeatureHover.Kind.EDGE || edgeIdx < 0
                 || edgeIdx >= hit.face().segments().size()) {
-            final org.joml.Vector3d p = new org.joml.Vector3d(hit.localCenter());
+            final org.joml.Vector3d p = new org.joml.Vector3d(hit.localHit());
             double best = Double.MAX_VALUE;
             int bestIdx = -1;
             final java.util.List<double[]> all = hit.face().segments();

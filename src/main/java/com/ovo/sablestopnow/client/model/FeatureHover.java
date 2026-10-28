@@ -55,7 +55,7 @@ public final class FeatureHover {
      * @param worldVerts  面的顶点（世界坐标）
      */
     public record Hit(UUID body, UUID solidId, Features.Face face, Kind kind, int index,
-                      Vector3d localCenter, Vector3d localNormal, Vector3d localU,
+                      Vector3d localHit, Vector3d localCenter, Vector3d localNormal, Vector3d localU,
                       List<Vec3[]> worldTris, List<Vec3[]> worldSegs, List<Vec3> worldVerts,
                       double distance) {
     }
@@ -199,7 +199,8 @@ public final class FeatureHover {
             axisU.fma(-axisU.dot(normal), normal).normalize();
         }
         return new Hit(bodyId, solidId, face, kind, kind == Kind.VERTEX ? vertIndex : edgeIndex,
-                new Vector3d(face.origin()), normal, axisU, worldTris, worldSegs, worldVerts, dist);
+                new Vector3d(localHit), new Vector3d(face.origin()), normal, axisU,
+                worldTris, worldSegs, worldVerts, dist);
     }
 
     private static Vec3 toWorld(final Pose3dc pose, final Vector3d local) {

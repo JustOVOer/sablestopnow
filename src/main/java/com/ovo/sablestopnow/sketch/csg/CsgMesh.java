@@ -117,11 +117,19 @@ public final class CsgMesh {
                 continue;
             }
             final int base = vs.size();
+            // ★ 法线取**多边形平面的法线**（而不是顶点里存的法线）：
+            //   减法会把切割体的多边形翻面，顶点法线若没跟着翻就会"从里面朝外"
+            //   ⇒ 光照算出全黑（用户实测："圆角处是黑色的没有贴图"）✗
+            final Vector3d pn = p.plane == null ? null
+                    : new Vector3d(p.plane.normal.x(), p.plane.normal.y(), p.plane.normal.z())
+                            .normalize();
             for (final Csg.Vertex v : verts) {
+                final Vector3d n = pn == null
+                        ? new Vector3d(v.normal().x(), v.normal().y(), v.normal().z())
+                        : pn;
                 vs.add(new SolidMesh.Vertex(
                         new Vector3d(v.pos().x(), v.pos().y(), v.pos().z()),
-                        new Vector3d(v.normal().x(), v.normal().y(), v.normal().z()),
-                        v.uv().x(), v.uv().y()));
+                        new Vector3d(n), v.uv().x(), v.uv().y()));
             }
             for (int k = 1; k + 1 < verts.size(); k++) {
                 idx.add(base);

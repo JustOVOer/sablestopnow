@@ -830,6 +830,45 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         for (final Solid s2 : solids) {
             byId.put(s2.id(), s2);
         }
+        final java.util.Map<UUID, List<Csg.Polygon>> filletPolyByBody = new java.util.HashMap<>();
+        for (final Solid s2 : solids) {
+            if (!(s2.shape() instanceof final Shape.Fillet f)) {
+                continue;
+            }
+            final List<Csg.Polygon> polys = new ArrayList<>();
+            for (final Shape.EdgeRef ref : f.edges()) {
+                final Solid src = byId.get(ref.solidId());
+                if (src == null) {
+                    continue;
+                }
+                final Sketch srcSketch = src.resolve(sketches);
+                if (srcSketch == null) {
+                    continue;
+                }
+                final SolidMesh.Mesh srcMesh = src.mesh(srcSketch);
+                final Vector3d a = new Vector3d(ref.ax(), ref.ay(), ref.az());
+                final Vector3d b = new Vector3d(ref.bx(), ref.by(), ref.bz());
+                final Vector3d[] nn = FilletCutter.faceNormals(srcMesh, a, b);
+                if (nn == null) {
+                    continue;
+                }
+                for (final Vector3d[] tri : FilletCutter.prism(a, b, nn[0], nn[1], f.radius())) {
+                    final Vector3d nrm = new Vector3d(tri[1]).sub(tri[0])
+                            .cross(new Vector3d(tri[2]).sub(tri[0])).normalize();
+                    polys.add(new Csg.Polygon(List.of(
+                            new Csg.Vertex(new Csg.V3(tri[0].x, tri[0].y, tri[0].z),
+                                    new Csg.V3(nrm.x, nrm.y, nrm.z), new Csg.V3(0, 0, 0)),
+                            new Csg.Vertex(new Csg.V3(tri[1].x, tri[1].y, tri[1].z),
+                                    new Csg.V3(nrm.x, nrm.y, nrm.z), new Csg.V3(0, 0, 0)),
+                            new Csg.Vertex(new Csg.V3(tri[2].x, tri[2].y, tri[2].z),
+                                    new Csg.V3(nrm.x, nrm.y, nrm.z), new Csg.V3(0, 0, 0))), null));
+                }
+            }
+            if (!polys.isEmpty()) {
+                filletPolyByBody.put(s2.body(), polys);
+                lastCsgDiag = "[fillet] prism polys=" + polys.size() + " for body " + s2.body();
+            }
+        }
         final java.util.Map<UUID, List<double[]>> localCutters = new java.util.HashMap<>();
         for (final Solid s2 : solids) {
             if (!(s2.shape() instanceof Shape.Fillet)) {
@@ -878,7 +917,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final List<CutFeat> feats = cutters.get(solid.body());
             // ★ item 8：有圆角也算"要切" ⇒ 走 CSG（否则只有圆角时渲染不变、碰撞却变了 ✗）
             final List<double[]> filletCuts0 = localCutters.getOrDefault(solid.body(), List.of());
-            final boolean cut = (feats != null && !feats.isEmpty()) || !filletCuts0.isEmpty();
+            final List<Csg.Polygon> filletPolys =
+                    filletPolyByBody.getOrDefault(solid.body(), List.of());
+            final boolean cut = (feats != null && !feats.isEmpty()) || !filletCuts0.isEmpty()
+                    || !filletPolys.isEmpty();
             final List<double[]> bodyCutters = new ArrayList<>();
             if (cut) {
                 for (final CutFeat f : feats) {
@@ -926,11 +968,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
                 lastCsgDiag = "tris target=" + targetTris + " cutter=" + cutterTris
                         + " resultPolys=" + acc.size();
-                // ★ item 8：圆角盒子也参与 CSG 减法（局部坐标 ⇒ 直接建网格 ✓）
+                // ★ item 8：圆角参与 CSG 减法 —— **通用方案**：沿棱扫出多边形棱柱（任意朝向）✓
+                //   盒子路径仍保留：给碰撞用（轴对齐时精确），渲染用棱柱 ⇒ 斜棱也能倒圆 ✓
+                if (!filletPolys.isEmpty()) {
+                    acc = Csg.subtract(acc, filletPolys);
+                }
                 if (!filletCuts.isEmpty()) {
                     final List<Csg.Polygon> fb = CsgMesh.fromMesh(
                             SolidMesh.fromBoxes(filletCuts), null);
-                    if (!fb.isEmpty()) {
+                    if (!fb.isEmpty() && filletPolys.isEmpty()) {
                         acc = Csg.subtract(acc, fb);
                     }
                 }

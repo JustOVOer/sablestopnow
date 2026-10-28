@@ -122,6 +122,7 @@ public final class PatternTool {
             DIRS.add(new Solid.Shape.Dir(dx, dy, dz, 2, 1.0));
             body = bodyForDir;
             preview(2, 1.0, 1, 0.0);
+            ModelUi.forceRefreshLeft();
             return true;
         }
         if (!SOURCES.isEmpty()) {
@@ -131,6 +132,7 @@ public final class PatternTool {
         if (DIRS.size() < 3) {
             DIRS.add(new Solid.Shape.Dir(dx, dy, dz, 1, 0.0));
         }
+        ModelUi.forceRefreshLeft();
         return true;
     }
 
@@ -145,6 +147,7 @@ public final class PatternTool {
         }
         body = solid.body();
         preview(2, 1.0, 1, 0.0);
+        ModelUi.forceRefreshLeft();
         SablestopNow.LOGGER.info("[pattern] sources={}", SOURCES.size());
     }
 

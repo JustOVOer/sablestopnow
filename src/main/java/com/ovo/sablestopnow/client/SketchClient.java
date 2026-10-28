@@ -429,6 +429,43 @@ public final class SketchClient {
         // ⚠ 诊断必须**无条件**打，而且要记下点击**之前**的阶段。
         // 之前我是"点击之后阶段仍是 CHOOSING_PLANE 才打"——于是成功的那次反而没有日志，
         // 我因此白白查了好几轮。失败的日志能定位失败，成功的日志才能确认成功。
+        // ★ 选基准面阶段：**点已有的基准面特征**也能开草图 ✓（用户要求"进入草图时能在右边栏/模型上选它"）
+        {
+            final var ss = MODE.session();
+            if (ss != null && ss.stage() == com.ovo.sablestopnow.sketch.SketchSession.Stage.CHOOSING_PLANE
+                    && mc.level != null) {
+                for (final com.ovo.sablestopnow.sketch.Solid sd
+                        : com.ovo.sablestopnow.sketch.SolidClientState.in(
+                                mc.level.dimension().location())) {
+                    if (!(sd.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane pl)) {
+                        continue;
+                    }
+                    final double[] o = pl.offsetOrigin();
+                    final org.joml.Vector3d n = new org.joml.Vector3d(pl.nx(), pl.ny(), pl.nz());
+                    final double denom = localDir.dot(new org.joml.Vector3d(n.x, n.y, n.z));
+                    if (Math.abs(denom) < 1.0e-6) {
+                        continue;
+                    }
+                    final double t = new org.joml.Vector3d(o[0], o[1], o[2])
+                            .sub(localFrom).dot(n) / denom;
+                    if (t <= 0.0) {
+                        continue;
+                    }
+                    final org.joml.Vector3d hitP = new org.joml.Vector3d(localFrom).fma(t, localDir);
+                    // 命中点必须落在该面片附近（半宽 1.0 + 一点余量）
+                    final org.joml.Vector3d rel = new org.joml.Vector3d(hitP)
+                            .sub(new org.joml.Vector3d(o[0], o[1], o[2]));
+                    if (Math.abs(rel.x) > 1.4 || Math.abs(rel.y) > 1.4 || Math.abs(rel.z) > 1.4) {
+                        continue;
+                    }
+                    if (choosePlaneAt(sd.body(), new org.joml.Vector3d(hitP), n)) {
+                        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                                "[sketch-plane] picked datum plane feature idx={}", sd.index());
+                        return true;
+                    }
+                }
+            }
+        }
         final var stageBefore = MODE.stage();
         // ★ 需求 ⑦：点击落在**草图原点（基准点）**附近 ⇒ 本次落点吸到原点 ✓
         //   ⚠ 这个锚点（stageBefore）在 click() 里**唯一** ✓ —— 上一版我用
@@ -728,6 +765,28 @@ public final class SketchClient {
      *
      * <p>从 {@link #chooseFace} 抽出来，供"以模型面为基准面"复用 ✓
      */
+    /**
+     * 把**局部**法线转成**世界**法线 ✓（子结构被旋转/移动过时必须转，否则"自动正视"不正 ✓
+     * —— 用户实测："物理结构移动时进入草图自动正视并没有完全正视"）
+     */
+    public static org.joml.Vector3d toWorldNormal(final java.util.UUID body,
+                                                  final org.joml.Vector3dc local) {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final org.joml.Vector3d fallback = new org.joml.Vector3d(local).normalize();
+        if (mc == null || mc.level == null || body == null) {
+            return fallback;
+        }
+        final var sub = com.ovo.sablestopnow.client.model.BoxPick.sub(mc.level, body);
+        if (sub == null || sub.renderPose() == null) {
+            return fallback;
+        }
+        final var pose = sub.renderPose();
+        final org.joml.Vector3d o0 = pose.transformPosition(new org.joml.Vector3d(0, 0, 0),
+                new org.joml.Vector3d());
+        return pose.transformPosition(new org.joml.Vector3d(local), new org.joml.Vector3d())
+                .sub(o0).normalize();
+    }
+
     public static void alignCameraTo(final org.joml.Vector3dc normal) {
         // ★ **进入草稿自动正视该面** ✓（用户要求 ✓ / SolidWorks 的"正视于"✓）
         //   视线方向 = 面法线的反向（从外面正对看进去 ✓）⇒ 反解 yaw/pitch ✓
@@ -770,6 +829,17 @@ public final class SketchClient {
     /**
      * 用**一个已有的基准面特征**作草图基准面 ✓（item 7：右栏点选基准面即可用它开草图）。
      */
+    public static boolean choosePlaneAt(final java.util.UUID body,
+                                        final org.joml.Vector3dc origin,
+                                        final org.joml.Vector3dc normal) {
+        if (!MODE.chooseFace(new org.joml.Vector3d(origin), new org.joml.Vector3d(normal))) {
+            return false;
+        }
+        SketchRenderer.setEditing(MODE.editingId());
+        alignCameraTo(toWorldNormal(body, normal));
+        return true;
+    }
+
     public static boolean choosePlaneAt(final org.joml.Vector3dc origin,
                                         final org.joml.Vector3dc normal) {
         if (origin == null || normal == null) {
@@ -795,7 +865,7 @@ public final class SketchClient {
             return false;
         }
         SketchRenderer.setEditing(MODE.editingId());
-        alignCameraTo(hit.localNormal());
+        alignCameraTo(toWorldNormal(hit.body(), hit.localNormal()));
         // ★ 该面的直线 ⇒ 参考几何（常驻、不可移动、可被约束）✓
         final int refs = MODE.session() == null ? 0 : MODE.session().addReferenceLines(
                 hit.face().segments());

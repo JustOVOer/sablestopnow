@@ -1312,6 +1312,7 @@ public final class ModelUi {
                   if (solid.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane pl) {
                       final double[] o = pl.offsetOrigin();
                       if (com.ovo.sablestopnow.client.SketchClient.choosePlaneAt(
+                              solid.body(),
                               new org.joml.Vector3d(o[0], o[1], o[2]),
                               new org.joml.Vector3d(pl.nx(), pl.ny(), pl.nz()))) {
                           ModelMode.setTool(ModelTools.SKETCH);
@@ -2016,6 +2017,7 @@ public final class ModelUi {
         mirrorPlaneNormal = new org.joml.Vector3d(hit.localNormal()).normalize();
         mirrorBody = hit.body();
         updateMirrorPreview();
+        forceRefreshLeft();
         return true;
     }
 
@@ -2030,7 +2032,7 @@ public final class ModelUi {
         }
         mirrorBody = solid.body();
         updateMirrorPreview();
-        refreshLeftPanel();
+        forceRefreshLeft();
     }
 
     /** Preview: mirrored wireframe of the selected sources, in preview yellow. */
@@ -2638,6 +2640,10 @@ public final class ModelUi {
             if (remembered != null) {
                 item.expanded = remembered;
             }
+            // ★ 重建时把展开动画**直接吸附到目标值** ✓
+            //   否则新 TreeItem 的 open 动画从 1.0 重新出发 ⇒ 每次重建都"抽一下"
+            //   （用户实测："点击结构/创建特征时右侧树状图抽搐一次"）✓
+            item.open.snap(item.expanded ? 1.0 : 0.0);
             applyRememberedExpansion(item.children);
         }
     }
@@ -3082,6 +3088,16 @@ public final class ModelUi {
     }
 
     /** 按当前功能与选择重建左栏内容。 */
+    /**
+     * **强制**重建左栏 ✓：`refreshLeftPanel()` 有"签名没变就早退"的优化，
+     * 而特征工具拾取后只改了私有状态（选中了哪条棱/哪个面、选了几个源），签名不会变 ⇒
+     * 面板不刷新 ⇒ 看起来"点了没反应"（镜像/阵列实测就是这样）✗
+     */
+    public static void forceRefreshLeft() {
+        lastLeftSignature = null;
+        refreshLeftPanel();
+    }
+
     public static void refreshLeftPanel() {
         final Container body = leftBody;
         if (body == null) {

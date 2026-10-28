@@ -1982,8 +1982,8 @@ public final class ModelUi {
     /** Mirror tool: first face sets the mirror plane; a second face click with sources creates it. */
     public static boolean mirrorPickPlane(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
-        if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE
-                || !hit.face().planar()) {
+        // ★ 容错：判级可能是棱/点，但只要**面是平面**就接受（用户是要"点这个面所在平面"）
+        if (hit == null || hit.face() == null || !hit.face().planar()) {
             ModelMode.prompt("model.mirror.pick_plane");
             return false;
         }
@@ -2243,8 +2243,7 @@ public final class ModelUi {
     /** 基准面工具：点到一个模型面 ⇒ 记下来并打开"距离"输入框（带实时预览）✓ */
     public static boolean planePickFace(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
-        if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE
-                || !hit.face().planar()) {
+        if (hit == null || hit.face() == null || !hit.face().planar()) {
             ModelMode.prompt("model.plane.pick_face");
             return false;
         }
@@ -2291,6 +2290,8 @@ public final class ModelUi {
         segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(c2, c3));
         segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(c3, c0));
         com.ovo.sablestopnow.client.model.FeaturePreview.set(planeSourceSolid, n, segs);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[plane] preview segs={} dist={}",
+                segs.size(), distance);
     }
 
     /** 真正创建基准面特征 ✓（与其它特征同级、受序号/依赖约束） */

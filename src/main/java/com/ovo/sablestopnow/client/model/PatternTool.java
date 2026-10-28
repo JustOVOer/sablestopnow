@@ -53,12 +53,40 @@ public final class PatternTool {
 
     /** 点棱：第一条 = 方向1；之后（已有源）再点 = 打开对话框；否则追加方向 ✓ */
     public static boolean pickEdge(final FeatureHover.Hit hit) {
-        if (hit == null || hit.kind() != FeatureHover.Kind.EDGE
-                || hit.index() < 0 || hit.index() >= hit.face().segments().size()) {
+        if (hit == null || hit.face() == null || hit.face().segments().isEmpty()) {
             ModelMode.prompt("model.pattern.pick_edge");
             return false;
         }
-        final double[] seg = hit.face().segments().get(hit.index());
+        // ★ 容错：判级可能是面/点 ⇒ 取**离命中中心最近的棱**（与圆角同一套思路）
+        int edgeIdx = hit.index();
+        if (hit.kind() != FeatureHover.Kind.EDGE || edgeIdx < 0
+                || edgeIdx >= hit.face().segments().size()) {
+            final org.joml.Vector3d p = new org.joml.Vector3d(hit.localCenter());
+            double best = Double.MAX_VALUE;
+            int bestIdx = -1;
+            final java.util.List<double[]> all = hit.face().segments();
+            for (int i = 0; i < all.size(); i++) {
+                final double[] sg = all.get(i);
+                final org.joml.Vector3d a = new org.joml.Vector3d(sg[0], sg[1], sg[2]);
+                final org.joml.Vector3d ab = new org.joml.Vector3d(sg[3], sg[4], sg[5]).sub(a);
+                final double len2 = ab.lengthSquared();
+                double tt = len2 < 1.0e-12 ? 0.0 : new org.joml.Vector3d(p).sub(a).dot(ab) / len2;
+                tt = Math.max(0.0, Math.min(1.0, tt));
+                final double d = new org.joml.Vector3d(a).fma(tt, ab).distance(p);
+                if (d < best) {
+                    best = d;
+                    bestIdx = i;
+                }
+            }
+            edgeIdx = bestIdx;
+            SablestopNow.LOGGER.info("[pattern] hover {} -> nearest edge idx={} dist={}",
+                    hit.kind(), edgeIdx, best);
+        }
+        if (edgeIdx < 0 || edgeIdx >= hit.face().segments().size()) {
+            ModelMode.prompt("model.pattern.pick_edge");
+            return false;
+        }
+        final double[] seg = hit.face().segments().get(edgeIdx);
         final double dx = seg[3] - seg[0];
         final double dy = seg[4] - seg[1];
         final double dz = seg[5] - seg[2];

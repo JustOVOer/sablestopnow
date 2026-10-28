@@ -142,7 +142,11 @@ public final class ModelInput {
                 == GLFW.GLFW_PRESS;
         if (down && !sketchRightDown) {
             sketchRightDown = true;
-            if (com.ovo.sablestopnow.client.SketchClient.active()) {
+            final String toolNow = ModelMode.tool();
+        final boolean featureTool = ModelTools.PLANE.equals(toolNow)
+                || ModelTools.FILLET.equals(toolNow) || ModelTools.MIRROR.equals(toolNow)
+                || ModelTools.PATTERN.equals(toolNow);
+        if (!featureTool && com.ovo.sablestopnow.client.SketchClient.active()) {
 
                 com.ovo.sablestopnow.client.SketchClient.rightClick();
             }
@@ -498,17 +502,17 @@ public final class ModelInput {
     }
 
     private static void onLeftPress(final Minecraft mc) {
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[mouse] leftPress tool={} hover={} sketchActive={} editing={}",
+                ModelMode.tool(),
+                com.ovo.sablestopnow.client.model.FeatureHover.get() == null ? "null"
+                        : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
+                com.ovo.sablestopnow.client.SketchClient.active(),
+                com.ovo.sablestopnow.client.SketchClient.editing());
         // ⚠ 草图模式必须**最先**处理：草图里点的是基准面/草图平面，不是模型表面，
         // 所以不能走下面那套「先要求 hover 到某个面」的拾取。放在最前面还有一个原因 ——
         // 在草图环境里点到空处也不该顺手把视角转了或把选择清了。
         if (com.ovo.sablestopnow.client.SketchClient.active()) {
-        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                "[mouse] leftPress tool={} featureHover={} sketch={}",
-                ModelMode.tool(),
-                com.ovo.sablestopnow.client.model.FeatureHover.get() == null ? "null"
-                        : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
-                com.ovo.sablestopnow.client.SketchClient.mode().session() == null ? "none"
-                        : com.ovo.sablestopnow.client.SketchClient.mode().session().stage());
             // ★ 双击**已放置尺寸** ⇒ 改值浮层 ✓（SolidWorks：双击尺寸数字弹框改值 ⇒ 几何实时驱动 ✓）
             if (tryDimensionEdit(mc)) {
                 return;

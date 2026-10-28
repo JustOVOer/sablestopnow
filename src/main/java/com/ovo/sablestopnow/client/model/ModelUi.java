@@ -3748,6 +3748,19 @@ public final class ModelUi {
             // 进入配合流程 = 打开创建页：草稿复位到默认类型
             MateEditUi.beginCreate(null);
         }
+          // ★ 关键：进这四个特征工具前先退出草图模式，否则 onLeftPress 会先走"草图分支"
+          //   工具分支永远轮不到 ⇒ "点棱/点面毫无反应"（用户实测）✓
+          if (ModelTools.PLANE.equals(toolId) || ModelTools.FILLET.equals(toolId)
+                  || ModelTools.MIRROR.equals(toolId) || ModelTools.PATTERN.equals(toolId)) {
+              if (com.ovo.sablestopnow.client.SketchClient.active()) {
+                  com.ovo.sablestopnow.client.SketchClient.finish();
+                  com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                          "[tool] exited sketch mode before entering {}", toolId);
+              }
+          }
+          // ★ 同时清掉贴图编辑：它会让左栏永远停在贴图页（工具面板就看不见了）
+          textureSolidId = null;
+          textureBlockQuery.set("");
         ModelMode.setTool(toolId);
         ModelMode.clearPicks();
         chosenType = null;

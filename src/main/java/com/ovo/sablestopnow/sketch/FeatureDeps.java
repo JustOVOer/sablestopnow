@@ -25,6 +25,10 @@ import java.util.UUID;
  */
 public final class FeatureDeps {
 
+    /** 上一次被拒绝的原因 ✓（给客户端日志/提示用；null = 没有） */
+    public static String lastRejectReason;
+
+
     private FeatureDeps() {
     }
 
@@ -150,6 +154,20 @@ public final class FeatureDeps {
         if (to < 0 || to >= ordered.size()) {
             return null; // 已经在头/尾 ✓
         }
+        // ★ 数据里若已有重复/空号，先**治好**再交换（否则交换后仍然重复 ⇒ 每次都被判"违反依赖"）
+        final java.util.Set<Integer> seenIdx = new java.util.HashSet<>();
+        boolean needsFix = false;
+        for (final Solid cur : ordered) {
+            if (!seenIdx.add(cur.index())) {
+                needsFix = true;
+                break;
+            }
+        }
+        if (needsFix) {
+            for (int i = 0; i < ordered.size(); i++) {
+                ordered.set(i, withIndex(ordered.get(i), i + 1));
+            }
+        }
         // ★ 最简单：**只交换这两项的序号** ✓（用户要求"只移动位置，别搞复杂"）
         //   名字是永久的 ⇒ 标签不会变，玩家只会看到两行交换位置 ✓
         final Solid a0 = ordered.get(at);
@@ -157,9 +175,12 @@ public final class FeatureDeps {
         ordered.set(at, withIndex(b0, a0.index()));
         ordered.set(to, withIndex(a0, b0.index()));
         // 校验：违反依赖 ⇒ 撤销这次移动（返回 null，调用方保持原样）
-        if (validate(ordered, existingSketchIds) != null) {
+        final String why = validate(ordered, existingSketchIds);
+        if (why != null) {
+            lastRejectReason = why;
             return null;
         }
+        lastRejectReason = null;
         return ordered;
     }
 

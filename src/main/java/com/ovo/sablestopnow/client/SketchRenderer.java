@@ -1898,9 +1898,18 @@ public final class SketchRenderer {
                     .scale(0.022f * (float) Math.max(0.25, Math.min(8.0, note.scale())));
             final String[] lines = (note.text() == null ? "" : note.text()).split("\n", -1);
             final int colour = (note.argb() & 0xFFFFFF) | 0xFF000000;
-            for (int i = 0; i < lines.length; i++) {
-                mc.font.drawInBatch(lines[i], 0, i * 9, colour, false, m, buf,
-                        net.minecraft.client.gui.Font.DisplayMode.SEE_THROUGH, 0, 0xF000F0);
+            // ★ bug ⑤（用户方案）：在草图平面**两侧极近处各画一遍**，用**有深度测试**的通道 ✓
+            //   草图贴在模型表面时必有一份在外侧 ⇒ 一定可见；另一份被正常遮挡 ⇒ 透视正确 ✓
+            final float eps = 0.012f;
+            for (final int side : new int[] {-1, 1}) {
+                final org.joml.Matrix4f m2 = new org.joml.Matrix4f(m)
+                        .translate((float) (side * eps * nW.x),
+                                (float) (side * eps * nW.y),
+                                (float) (side * eps * nW.z));
+                for (int li = 0; li < lines.length; li++) {
+                    mc.font.drawInBatch(lines[li], 0, li * 9, colour, false, m2, buf,
+                            net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 0xF000F0);
+                }
             }
             drawn++;
         }

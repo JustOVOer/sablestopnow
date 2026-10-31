@@ -182,6 +182,7 @@ public final class SketchRenderer {
     @SubscribeEvent
     public static void onRenderLevel(final RenderLevelStageEvent event) {
         closeFrameBuffers(); // 兜底：万一上一帧异常没关 ✓
+        pendingTexts.clear();
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_ENTITIES) {
             return;
         }
@@ -354,7 +355,8 @@ public final class SketchRenderer {
                 drawSketchGrid(vcGrid, pose, cameraPos, wsub.renderPose(), working);
                 gridBuf.endBatch();
                 drawn += drawSketch(vcq, pose, cameraPos, wsub.renderPose(), working, EDITING_COLOR);
-                drawn += drawSketchTexts(pose, cameraPos, wsub.renderPose(), working);
+                // ★ bug ⑤：文字改到**最后**画（见方法尾部 pendingTexts），避免被后画的内容盖住
+                pendingTexts.add(new Object[] {working, wsub.renderPose(), pose, cameraPos});
                 drawn += drawDimensions3D(vcq, pose, cameraPos, wsub.renderPose(), working);
                 // 旋转轴的高亮画在草图之后：它是"参考"，被图元压住就白画了
                 drawn += drawRevolveAxis(vcq, pose, cameraPos, wsub.renderPose(), working);
@@ -477,6 +479,17 @@ public final class SketchRenderer {
             // 否则这批线要等下一批同类绘制才出得来。
             buffers.endBatch(sketchLineType);
             sketchQuadBuf.endBatch();
+            // ★ 文字**最后**画 ✓（它用 SEE_THROUGH 无深度测试，但仍会被"后画的内容"覆盖，
+            //   所以必须放在所有 3D 内容之后 —— bug ⑤ 的根因）
+            for (final Object[] t : pendingTexts) {
+                final com.ovo.sablestopnow.sketch.Sketch sk = (com.ovo.sablestopnow.sketch.Sketch) t[0];
+                final dev.ryanhcode.sable.companion.math.Pose3dc rp =
+                        (dev.ryanhcode.sable.companion.math.Pose3dc) t[1];
+                final PoseStack.Pose ps = (PoseStack.Pose) t[2];
+                final Vec3 cp = (Vec3) t[3];
+                drawn += drawSketchTexts(ps, cp, rp, sk);
+            }
+            pendingTexts.clear();
             // ★ 诊断：确认细条真的写进缓冲并被 flush（"还是 1px" 时用来判断是哪一环断了）
             final String qdiag = "quads=" + quadsWritten;
             if (!qdiag.equals(lastQuadDiag)) {
@@ -1940,6 +1953,9 @@ public final class SketchRenderer {
     }
 
     private static long lastTextDrawLog = 0L;
+
+    /** 本帧待画的文字（收集后统一在最后画）✓ */
+    private static final java.util.List<Object[]> pendingTexts = new java.util.ArrayList<>();
 
     /**
      * 本帧创建的即时缓冲 ✓

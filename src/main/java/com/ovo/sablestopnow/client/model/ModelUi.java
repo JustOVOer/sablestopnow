@@ -1901,6 +1901,27 @@ public final class ModelUi {
      * <p>⚠ 输入框回车 = 只更新**预览**（参数对象本来就只在"确认"时才提交 ✓）
      */
     public static void tickFeaturePreview() {
+        // ★★ bug ② 的根因就在这里（读代码确认，不是猜）：
+        //   `tickFeaturePreview` **每帧**都会执行；当工具不是"拉伸"时，它会
+        //   `FeaturePreview.clear()` 然后 return ⇒ 圆角/镜像/阵列的预览
+        //   只在设置它的那一帧可见，下一帧就被清掉 ⇒ "瞬间出现然后消失"✓
+        //   （之前我加过"这四个工具每帧重建预览"的分支，但后来被后续整块替换冲掉了）
+        final String toolNow = ModelMode.tool();
+        if (ModelTools.PLANE.equals(toolNow) || ModelTools.FILLET.equals(toolNow)
+                || ModelTools.MIRROR.equals(toolNow) || ModelTools.PATTERN.equals(toolNow)) {
+            // 每帧**重建**：无论谁清掉都能立刻恢复 ✓
+            if (ModelTools.FILLET.equals(toolNow)) {
+                updateFilletPreview(filletRadius.get());
+            } else if (ModelTools.PLANE.equals(toolNow)) {
+                updatePlanePreview(planeDistance.get());
+            } else if (ModelTools.MIRROR.equals(toolNow)) {
+                updateMirrorPreview();
+            } else {
+                PatternTool.preview((int) (double) patternN1.get(), patternS1.get(),
+                        (int) (double) patternN2.get(), patternS2.get());
+            }
+            return;
+        }
         final boolean modeling = ModelTools.EXTRUDE.equals(ModelMode.tool());
         final com.ovo.sablestopnow.sketch.Sketch source = modeling ? currentExtrudeSource() : null;
         if (!modeling || source == null) {

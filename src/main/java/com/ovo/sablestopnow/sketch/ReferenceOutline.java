@@ -41,6 +41,12 @@ public final class ReferenceOutline {
     /** 太短没有参考价值 ✓ */
     private static final double MIN_LEN = 0.10;
 
+    /** 相对容差：允许的弓高随弦长放宽（长直边的浮点噪声更大）✓ */
+    private static final double REL_TOL = 1.0e-4;
+
+    /** 判"可见弯折"的阈值（弧度）；小于它的转角视为噪声 ✓ */
+    private static final double BEND_EPS = 2.0e-4;
+
     /** 上限（双保险）✓ */
     private static final int MAX_RUNS = 24;
 
@@ -177,8 +183,16 @@ public final class ReferenceOutline {
             if (len < MIN_LEN) {
                 continue;
             }
-            if (maxDeviation(pu, pv, a, b) > STRAIGHT_TOL) {
-                continue; // 弧/相切过渡 ⇒ 丢弃 ✓
+            final double dev = maxDeviation(pu, pv, a, b);
+            final double chord = Math.hypot(pu[b] - pu[a], pv[b] - pv[a]);
+            if (dev > Math.max(STRAIGHT_TOL, REL_TOL * chord)) {
+                continue; // 明显弓高 ⇒ 弧 ✓
+            }
+            // ★ 关键补充（用户实测：**曲率很小**的曲线仍会漏过绝对阈值）：
+            //   真直线的弯折方向是**噪声**（有正有负），曲线是**单调**弯折。
+            //   只要区间内有 ≥2 个"同一方向的可见弯折" ⇒ 判为曲线，丢弃 ✓
+            if (hasMonotoneBend(pu, pv, a, b)) {
+                continue;
             }
             out.add(new double[] {pu[a], pv[a], pu[b], pv[b]});
             if (out.size() >= MAX_RUNS) {
@@ -207,6 +221,37 @@ public final class ReferenceOutline {
             dp(pu, pv, a, bestIdx, tol, keep);
             dp(pu, pv, bestIdx, b, tol, keep);
         }
+    }
+
+    /**
+     * 区间内是否存在**单调弯折**（曲线的特征）✓
+     *
+     * <p>逐点算叉积符号：真直线的叉积在浮点噪声里正负随机；
+     * 曲线（哪怕是半径很大的缓曲线）叉积**同号且连续出现**。
+     * 出现 ≥2 次同号可见弯折即判定为曲线。
+     */
+    private static boolean hasMonotoneBend(final double[] pu, final double[] pv,
+                                           final int a, final int b) {
+        int positive = 0;
+        int negative = 0;
+        for (int i = a + 1; i < b; i++) {
+            final double ax = pu[i] - pu[i - 1];
+            final double ay = pv[i] - pv[i - 1];
+            final double bx = pu[i + 1] - pu[i];
+            final double by = pv[i + 1] - pv[i];
+            final double la = Math.hypot(ax, ay);
+            final double lb = Math.hypot(bx, by);
+            if (la < 1.0e-9 || lb < 1.0e-9) {
+                continue;
+            }
+            final double sin = (ax * by - ay * bx) / (la * lb);
+            if (sin > BEND_EPS) {
+                positive++;
+            } else if (sin < -BEND_EPS) {
+                negative++;
+            }
+        }
+        return positive >= 2 || negative >= 2;
     }
 
     private static double maxDeviation(final double[] pu, final double[] pv,

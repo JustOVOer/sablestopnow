@@ -236,7 +236,7 @@ if (-not (Test-Path $solverSrc) -or -not (Test-Path $harnessSrc)) {
         # reads like a wrong argument type, not like a missing file. That trap bit us more than
         # six times; hence the single list.
         $pureSketch = @(
-            'SketchPlane.java', 'Sketch.java', 'SketchSession.java', 'SketchDatumPlanes.java',
+            'SketchPlane.java', 'Sketch.java', 'SketchSession.java', 'SketchDatumPlanes.java', 'ReferenceOutline.java',
             'SketchMode.java', 'SketchProfiles.java', 'Extrude.java', 'Revolve.java',
             'Solid.java', 'SolidMesh.java', 'SolidUv.java', 'SolidAppearance.java',
             'SolidCollision.java', 'SketchDof.java', 'SketchMeasure.java',

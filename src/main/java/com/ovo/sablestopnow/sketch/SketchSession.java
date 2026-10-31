@@ -548,13 +548,29 @@ public final class SketchSession {
         return "undo=" + this.undoStack.size() + " redo=" + this.redoStack.size();
     }
 
+    /**
+     * 把模型面导入成**参考线**，但**只重建直线** ✓（bug 11）
+     *
+     * <h2>为什么不能"一段一条线"</h2>
+     * `hit.face().segments()` 是**网格边**：曲面在网格里被离散成大量短线段，
+     * 一段一条线会导入几十上百条 + 每条 4 个 FIXED 约束 ⇒ 求解/渲染都爆 ⇒ 卡顿（用户实测）。
+     *
+     * <h2>做法</h2>
+     * 1. 端点配对成链（容差 1e-3）
+     * 2. 在**转角 > 2°** 处断开 ⇒ 曲线片段自然被切成很多短段
+     * 3. 只保留"共线且够长"的段，并**合并成一条线**（首→尾）
+     * 4. 上限 64 条，防止极端情况再爆
+     *
+     * @return 实际新增的参考线数量
+     */
     public int addReferenceLines(final java.util.List<double[]> localSegs) {
         if (this.working == null || localSegs == null || localSegs.isEmpty()) {
             return 0;
         }
         final var plane = this.working.plane();
         final org.joml.Vector3d out = new org.joml.Vector3d();
-        int added = 0;
+        // ① 投影到草图平面，得到 2D 段
+        final java.util.List<double[]> segs2 = new java.util.ArrayList<>(localSegs.size());
         for (final double[] s : localSegs) {
             if (s == null || s.length < 6) {
                 continue;
@@ -565,20 +581,120 @@ public final class SketchSession {
             plane.toPlane(new org.joml.Vector3d(s[3], s[4], s[5]), out);
             final double u2 = out.x;
             final double v2 = out.y;
-            if (Math.hypot(u2 - u1, v2 - v1) < 2.0e-2) {
-                continue; // 太短，没意义 ✓
+            if (Math.hypot(u2 - u1, v2 - v1) < 1.0e-3) {
+                continue;
             }
-            final Sketch.Entity line = this.working.addLine(u1, v1, u2, v2);
+            segs2.add(new double[] {u1, v1, u2, v2});
+        }
+        // ② 贪心连成折线（端点相近即相连）
+        final boolean[] used = new boolean[segs2.size()];
+        final java.util.List<double[]> straight = new java.util.ArrayList<>();
+        final double eps = 1.0e-3;
+        for (int seed = 0; seed < segs2.size(); seed++) {
+            if (used[seed]) {
+                continue;
+            }
+            used[seed] = true;
+            final java.util.ArrayDeque<double[]> chain = new java.util.ArrayDeque<>();
+            chain.add(segs2.get(seed));
+            boolean grew = true;
+            while (grew) {
+                grew = false;
+                for (int k = 0; k < segs2.size(); k++) {
+                    if (used[k]) {
+                        continue;
+                    }
+                    final double[] c = segs2.get(k);
+                    for (final double[] g : chain) {
+                        if (near(g[2], g[3], c[0], c[1], eps)) {
+                            chain.addLast(new double[] {c[0], c[1], c[2], c[3]});
+                            used[k] = true;
+                            grew = true;
+                            break;
+                        }
+                        if (near(g[0], g[1], c[2], c[3], eps)) {
+                            chain.addFirst(new double[] {c[0], c[1], c[2], c[3]});
+                            used[k] = true;
+                            grew = true;
+                            break;
+                        }
+                        if (near(g[2], g[3], c[2], c[3], eps)) {
+                            chain.addLast(new double[] {c[2], c[3], c[0], c[1]});
+                            used[k] = true;
+                            grew = true;
+                            break;
+                        }
+                        if (near(g[0], g[1], c[0], c[1], eps)) {
+                            chain.addFirst(new double[] {c[2], c[3], c[0], c[1]});
+                            used[k] = true;
+                            grew = true;
+                            break;
+                        }
+                    }
+                    if (grew && chain.size() > 512) {
+                        break;
+                    }
+                }
+            }
+            // ③ 在转角 > 2° 处断开，只保留"整段共线"的 run
+            final java.util.List<double[]> pts = new java.util.ArrayList<>();
+            final double[] firstSeg = chain.peekFirst();
+            pts.add(new double[] {firstSeg[0], firstSeg[1]});
+            for (final double[] g : chain) {
+                pts.add(new double[] {g[2], g[3]});
+            }
+            double runStartX = pts.get(0)[0];
+            double runStartY = pts.get(0)[1];
+            double runPrevX = runStartX;
+            double runPrevY = runStartY;
+            for (int i = 1; i < pts.size(); i++) {
+                final double cx = pts.get(i)[0];
+                final double cy = pts.get(i)[1];
+                final double ax = runPrevX - runStartX;
+                final double ay = runPrevY - runStartY;
+                final double bx = cx - runPrevX;
+                final double by = cy - runPrevY;
+                final double la = Math.hypot(ax, ay);
+                final double lb = Math.hypot(bx, by);
+                final boolean turn = la > 1.0e-6 && lb > 1.0e-6
+                        && Math.abs(ax * by - ay * bx) / (la * lb)
+                                > Math.sin(Math.toRadians(2.0));
+                if (turn) {
+                    if (Math.hypot(runPrevX - runStartX, runPrevY - runStartY) >= 0.02) {
+                        straight.add(new double[] {runStartX, runStartY, runPrevX, runPrevY});
+                    }
+                    runStartX = runPrevX;
+                    runStartY = runPrevY;
+                }
+                runPrevX = cx;
+                runPrevY = cy;
+            }
+            if (Math.hypot(runPrevX - runStartX, runPrevY - runStartY) >= 0.02) {
+                straight.add(new double[] {runStartX, runStartY, runPrevX, runPrevY});
+            }
+        }
+        // ④ 落成参考线
+        int added = 0;
+        for (final double[] r : straight) {
+            if (added >= 64) {
+                break;
+            }
+            final Sketch.Entity line = this.working.addLine(r[0], r[1], r[2], r[3]);
             this.working.setReference(line, true);
-            this.working.setConstruction(line, true); // 不进轮廓 ✓
+            this.working.setConstruction(line, true);
             final int[] v = line.vars();
-            this.working.addConstraint(SketchSolver.FIXED, u1, v[0]);
-            this.working.addConstraint(SketchSolver.FIXED, v1, v[1]);
-            this.working.addConstraint(SketchSolver.FIXED, u2, v[2]);
-            this.working.addConstraint(SketchSolver.FIXED, v2, v[3]);
+            this.working.addConstraint(SketchSolver.FIXED, r[0], v[0]);
+            this.working.addConstraint(SketchSolver.FIXED, r[1], v[1]);
+            this.working.addConstraint(SketchSolver.FIXED, r[2], v[2]);
+            this.working.addConstraint(SketchSolver.FIXED, r[3], v[3]);
             added++;
         }
         return added;
+    }
+
+    private static boolean near(final double ax, final double ay,
+                                final double bx, final double by, final double eps) {
+        return Math.abs(ax - bx) <= eps && Math.abs(ay - by) <= eps;
     }
 
     private void markConstructionIfDrawing() {

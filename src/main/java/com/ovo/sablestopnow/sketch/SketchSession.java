@@ -569,7 +569,6 @@ public final class SketchSession {
         }
         final var plane = this.working.plane();
         final org.joml.Vector3d out = new org.joml.Vector3d();
-        // ① 投影到草图平面，得到 2D 段
         final java.util.List<double[]> segs2 = new java.util.ArrayList<>(localSegs.size());
         for (final double[] s : localSegs) {
             if (s == null || s.length < 6) {
@@ -586,99 +585,11 @@ public final class SketchSession {
             }
             segs2.add(new double[] {u1, v1, u2, v2});
         }
-        // ② 贪心连成折线（端点相近即相连）
-        final boolean[] used = new boolean[segs2.size()];
-        final java.util.List<double[]> straight = new java.util.ArrayList<>();
-        final double eps = 1.0e-3;
-        for (int seed = 0; seed < segs2.size(); seed++) {
-            if (used[seed]) {
-                continue;
-            }
-            used[seed] = true;
-            final java.util.ArrayDeque<double[]> chain = new java.util.ArrayDeque<>();
-            chain.add(segs2.get(seed));
-            boolean grew = true;
-            while (grew) {
-                grew = false;
-                for (int k = 0; k < segs2.size(); k++) {
-                    if (used[k]) {
-                        continue;
-                    }
-                    final double[] c = segs2.get(k);
-                    for (final double[] g : chain) {
-                        if (near(g[2], g[3], c[0], c[1], eps)) {
-                            chain.addLast(new double[] {c[0], c[1], c[2], c[3]});
-                            used[k] = true;
-                            grew = true;
-                            break;
-                        }
-                        if (near(g[0], g[1], c[2], c[3], eps)) {
-                            chain.addFirst(new double[] {c[0], c[1], c[2], c[3]});
-                            used[k] = true;
-                            grew = true;
-                            break;
-                        }
-                        if (near(g[2], g[3], c[2], c[3], eps)) {
-                            chain.addLast(new double[] {c[2], c[3], c[0], c[1]});
-                            used[k] = true;
-                            grew = true;
-                            break;
-                        }
-                        if (near(g[0], g[1], c[0], c[1], eps)) {
-                            chain.addFirst(new double[] {c[2], c[3], c[0], c[1]});
-                            used[k] = true;
-                            grew = true;
-                            break;
-                        }
-                    }
-                    if (grew && chain.size() > 512) {
-                        break;
-                    }
-                }
-            }
-            // ③ 在转角 > 2° 处断开，只保留"整段共线"的 run
-            final java.util.List<double[]> pts = new java.util.ArrayList<>();
-            final double[] firstSeg = chain.peekFirst();
-            pts.add(new double[] {firstSeg[0], firstSeg[1]});
-            for (final double[] g : chain) {
-                pts.add(new double[] {g[2], g[3]});
-            }
-            double runStartX = pts.get(0)[0];
-            double runStartY = pts.get(0)[1];
-            double runPrevX = runStartX;
-            double runPrevY = runStartY;
-            for (int i = 1; i < pts.size(); i++) {
-                final double cx = pts.get(i)[0];
-                final double cy = pts.get(i)[1];
-                final double ax = runPrevX - runStartX;
-                final double ay = runPrevY - runStartY;
-                final double bx = cx - runPrevX;
-                final double by = cy - runPrevY;
-                final double la = Math.hypot(ax, ay);
-                final double lb = Math.hypot(bx, by);
-                final boolean turn = la > 1.0e-6 && lb > 1.0e-6
-                        && Math.abs(ax * by - ay * bx) / (la * lb)
-                                > Math.sin(Math.toRadians(2.0));
-                if (turn) {
-                    if (Math.hypot(runPrevX - runStartX, runPrevY - runStartY) >= 0.02) {
-                        straight.add(new double[] {runStartX, runStartY, runPrevX, runPrevY});
-                    }
-                    runStartX = runPrevX;
-                    runStartY = runPrevY;
-                }
-                runPrevX = cx;
-                runPrevY = cy;
-            }
-            if (Math.hypot(runPrevX - runStartX, runPrevY - runStartY) >= 0.02) {
-                straight.add(new double[] {runStartX, runStartY, runPrevX, runPrevY});
-            }
-        }
-        // ④ 落成参考线
+        // ★ 只取"点到弦的距离 ≈ 0"的真直线；弧（含与直线相切的过渡）按偏离判定整体丢弃 ✓
+        //   不用转角阈值 —— 我们的离散精度下相邻段的转角可能远小于任何合理阈值（用户指出）✗
+        final java.util.List<double[]> straight = ReferenceOutline.straightRuns(segs2);
         int added = 0;
         for (final double[] r : straight) {
-            if (added >= 64) {
-                break;
-            }
             final Sketch.Entity line = this.working.addLine(r[0], r[1], r[2], r[3]);
             this.working.setReference(line, true);
             this.working.setConstruction(line, true);
@@ -690,11 +601,6 @@ public final class SketchSession {
             added++;
         }
         return added;
-    }
-
-    private static boolean near(final double ax, final double ay,
-                                final double bx, final double by, final double eps) {
-        return Math.abs(ax - bx) <= eps && Math.abs(ay - by) <= eps;
     }
 
     private void markConstructionIfDrawing() {

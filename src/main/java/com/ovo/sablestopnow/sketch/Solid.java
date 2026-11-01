@@ -1191,6 +1191,21 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
             }
         }
+        // ★ 渲染清单诊断（贴图/高亮类问题唯一工具）✓
+        final StringBuilder dump = new StringBuilder("placed=[" + out.size());
+        for (final Placed pl : out) {
+            final SolidMesh.Mesh dm = pl.mesh();
+            dump.append(" | ").append(pl.solid().index())
+                    .append(":t").append(dm == null ? 0 : dm.indices().length / 3)
+                    .append(":tex").append(pl.solid().appearance().hasTexture() ? 1 : 0)
+                    .append(":b").append(pl.boxes().size())
+                    .append(":e").append(pl.edges().size())
+                    .append(":").append(pl.solid().shape().getClass().getSimpleName());
+            if (fallbackIds.contains(pl.solid().id())) {
+                dump.append(":FB");
+            }
+        }
+        lastCsgDiag = dump.append(']').toString();
         return out;
     }
 

@@ -477,6 +477,76 @@ public final class SketchModelCheck {
         }
     }
 
+    /**
+     * bug ⑨/⑩ 回归：`Solid.ensureOutward` 的有向体积判定必须正确 ✓
+     *
+     * <p>如果它把**本来朝外**的切割体判成朝内并翻转，`Csg.subtract` 会得到"补集"式垃圾：
+     * 表现正是——模型贴图消失、被削掉的那块反而像本体（用户实测）。
+     */
+    private static void ensureOutwardSign() {
+        // 外向立方体（0..1），每个面按右手定则朝外 ✓
+        final double[][] cube = {
+            // +X
+            {1, 0, 0, 1, 1, 0, 1, 1, 1}, {1, 0, 0, 1, 1, 1, 1, 0, 1},
+            // -X
+            {0, 0, 0, 0, 1, 1, 0, 1, 0}, {0, 0, 0, 0, 0, 1, 0, 1, 1},
+            // +Y
+            {0, 1, 0, 0, 1, 1, 1, 1, 1}, {0, 1, 0, 1, 1, 1, 1, 1, 0},
+            // -Y
+            {0, 0, 0, 1, 0, 0, 1, 0, 1}, {0, 0, 0, 1, 0, 1, 0, 0, 1},
+            // +Z
+            {0, 0, 1, 1, 0, 1, 1, 1, 1}, {0, 0, 1, 1, 1, 1, 0, 1, 1},
+            // -Z
+            {0, 0, 0, 0, 1, 0, 1, 1, 0}, {0, 0, 0, 1, 1, 0, 1, 0, 0},
+        };
+        final java.util.List<org.joml.Vector3d[]> tris = new java.util.ArrayList<>();
+        for (final double[] t : cube) {
+            tris.add(new org.joml.Vector3d[] {
+                new org.joml.Vector3d(t[0], t[1], t[2]),
+                new org.joml.Vector3d(t[3], t[4], t[5]),
+                new org.joml.Vector3d(t[6], t[7], t[8])});
+        }
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> polys =
+                com.ovo.sablestopnow.sketch.Solid.triPolys(tris);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> out =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(polys);
+        check(out.size() == polys.size(), "ensureOutward: 多边形数量不变（" + out.size() + "）");
+
+        // ① 正确朝外的立方体：翻转后法线方向**不应该变**
+        boolean sameNormal = true;
+        for (int i = 0; i < polys.size(); i++) {
+            final com.ovo.sablestopnow.sketch.csg.Csg.V3 n0 = polys.get(i).plane.normal;
+            final com.ovo.sablestopnow.sketch.csg.Csg.V3 n1 = out.get(i).plane.normal;
+            if (n0.x() * n1.x() + n0.y() * n1.y() + n0.z() * n1.z() < 0.5) {
+                sameNormal = false;
+            }
+        }
+        check(sameNormal, "ensureOutward: **不该翻转本来就朝外的实体**（否则 subtract 会得到垃圾）");
+
+        // ② 反向立方体：翻转后每个面的法线取反 ⇒ 体积为正
+        final java.util.List<org.joml.Vector3d[]> rev = new java.util.ArrayList<>();
+        for (final org.joml.Vector3d[] t : tris) {
+            rev.add(new org.joml.Vector3d[] {t[0], t[2], t[1]});
+        }
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> revPolys =
+                com.ovo.sablestopnow.sketch.Solid.triPolys(rev);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> revOut =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(revPolys);
+        double vol = 0.0;
+        for (final com.ovo.sablestopnow.sketch.csg.Csg.Polygon p : revOut) {
+            final var vs = p.vertices;
+            for (int i = 1; i + 1 < vs.size(); i++) {
+                final var a = vs.get(0).pos();
+                final var b = vs.get(i).pos();
+                final var c = vs.get(i + 1).pos();
+                vol += a.x() * (b.y() * c.z() - b.z() * c.y())
+                        - a.y() * (b.x() * c.z() - b.z() * c.x())
+                        + a.z() * (b.x() * c.y() - b.y() * c.x());
+            }
+        }
+        check(vol > 0.0, "ensureOutward: 反向实体翻转后**有向体积为正**（实际 " + vol + "）");
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -518,6 +588,7 @@ public final class SketchModelCheck {
 
     public static void main(final String[] args) throws Exception {
         referenceOutlineStraightOnly();
+        ensureOutwardSign();
         triPolysReal();
         filletGeom();
         filletCsg();

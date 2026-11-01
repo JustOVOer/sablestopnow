@@ -871,6 +871,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             byId.put(s2.id(), s2);
         }
         final java.util.Map<UUID, List<Csg.Polygon>> filletPolyByBody = new java.util.HashMap<>();
+        // ★ 原始棱数据（a,b,n1,n2,r）：几何验证式求值用 ✓
+        final java.util.Map<UUID, List<double[]>> filletEdgeByBody =
+                new java.util.HashMap<>();
 
         final java.util.function.BiFunction<Solid, Sketch, Eval> baseEvalOf = (srcS, sk) -> {
             if (srcS == null || sk == null) {
@@ -981,6 +984,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 // ★ 按**被引用的实体**归集：圆角只作用于它指向的那个实体 ✓
                 //   （圆角是"拉伸之后的后处理"，不能溢出到镜像/阵列产物上）
                 // ★ 与**切割**完全一致：按 body 作用（不再按单个实体区分对待）✓
+                filletEdgeByBody.computeIfAbsent(s2.body(), k2 -> new ArrayList<>())
+                        .add(new double[] {a.x, a.y, a.z, b.x, b.y, b.z,
+                            nn[0].x, nn[0].y, nn[0].z, nn[1].x, nn[1].y, nn[1].z,
+                            f.radius()});
                 polysBySrc.computeIfAbsent(s2.body(), k -> new ArrayList<>())
                         .addAll(triPolys(prismTris, fdir, nn[0]));
             }
@@ -1106,33 +1113,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         + " resultPolys=" + acc.size();
                 // ★ item 8：圆角参与 CSG 减法 —— **通用方案**：沿棱扫出多边形棱柱（任意朝向）✓
                 //   盒子路径仍保留：给碰撞用（轴对齐时精确），渲染用棱柱 ⇒ 斜棱也能倒圆 ✓
-                if (!filletPolys.isEmpty()) {
-                    final int beforeN = acc.size();
-                    final double volBefore = polysVolume(acc);
-                    acc = subtractLocal(acc, ensureOutward(filletPolys));
-                    double volAfter = polysVolume(acc);
-                    if (volAfter < 0.0) {
-                        final List<Csg.Polygon> flipped = new ArrayList<>(acc.size());
-                        for (final Csg.Polygon pg : acc) {
-                            flipped.add(pg.flipped());
-                        }
-                        acc = flipped;
-                        volAfter = polysVolume(acc);
-                    }
-                    if (!java.util.Objects.equals(lastCsgDiag,
-                            "fillet idx=" + solid.index() + " polyIn=" + beforeN
-                                    + " polyOut=" + acc.size()
-                                    + " target=" + targetTris)) {
-                        // ⚠ 本包被**离线单独编译** ⇒ 不能引用 LOGGER（引用会导致 harness 编译失败）
-                        //   只把诊断字符串放进去，由客户端读取并打日志 ✓
-                        lastCsgDiag = "fillet idx=" + solid.index() + " polyIn=" + beforeN
-                                + " polyOut=" + acc.size() + " target=" + targetTris
-                                + " volBefore=" + String.format(java.util.Locale.ROOT, "%.4f",
-                                        volBefore)
-                                + " volAfter=" + String.format(java.util.Locale.ROOT, "%.4f",
-                                        volAfter);
-                        lastFilletDiag = lastCsgDiag;
-                    }
+                // ★ 几何验证式圆角求值（凸棱减料 / 凹棱补料，四象限择优）✓
+                final List<double[]> filletEdgeData =
+                        filletEdgeByBody.getOrDefault(solid.body(), List.of());
+                if (!filletEdgeData.isEmpty()) {
+                    acc = applyFillets(acc, filletEdgeData, solid.index(), "solid");
                 }
                 if (!filletCuts.isEmpty()) {
                     final List<Csg.Polygon> fb = CsgMesh.fromMesh(
@@ -1421,6 +1406,118 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      * 把两个操作数平移到 A 的第一个顶点附近再算，结束后平移回去 ⇒ 数值上等于
      * 我们离线验证过（在原点）的那种情况 ✓
      */
+
+    /** 局部原点下做**交集**（与 subtractLocal 同一套数值处理）✓ */
+    private static List<Csg.Polygon> intersectLocal(final List<Csg.Polygon> base,
+                                                    final List<Csg.Polygon> other) {
+        if (base.isEmpty() || other.isEmpty()) {
+            return List.of();
+        }
+        final Csg.V3 first = base.get(0).vertices.get(0).pos();
+        final List<Csg.Polygon> a = shiftedPolys(base, -first.x(), -first.y(), -first.z());
+        final List<Csg.Polygon> b = shiftedPolys(other, -first.x(), -first.y(), -first.z());
+        final List<Csg.Polygon> res = Csg.intersect(a, b);
+        return shiftedPolys(res, first.x(), first.y(), first.z());
+    }
+
+    /** 局部原点下做**并集**（凹棱补料）✓ */
+    private static List<Csg.Polygon> unionLocal(final List<Csg.Polygon> base,
+                                                final List<Csg.Polygon> other) {
+        if (base.isEmpty()) {
+            return other;
+        }
+        if (other.isEmpty()) {
+            return base;
+        }
+        final Csg.V3 first = base.get(0).vertices.get(0).pos();
+        final List<Csg.Polygon> a = shiftedPolys(base, -first.x(), -first.y(), -first.z());
+        final List<Csg.Polygon> b = shiftedPolys(other, -first.x(), -first.y(), -first.z());
+        final List<Csg.Polygon> res = Csg.union(a, b);
+        return shiftedPolys(res, first.x(), first.y(), first.z());
+    }
+
+    /**
+     * 把一批圆角棱**应用到材料上** ✓（凸棱减料 / 凹棱补料，靠几何验证选择）
+     *
+     * <p>每条棱对**四个象限**各建一次楔块，然后：
+     * <ul>
+     *   <li>{@code in = 楔块 ∩ 材料}：体积 ≈ 理论值 ⇒ **凸棱** ⇒ 材料 − 楔块</li>
+     *   <li>{@code out = 楔块 − 材料}：体积 ≈ 理论值 ⇒ **凹棱** ⇒ 材料 ∪ 楔块</li>
+     * </ul>
+     * 两者都不像 ⇒ **跳过**（宁可不倒角，也绝不产出垃圾几何）✓
+     *
+     * <p>这样就不再依赖"两个法线必须都朝外"这种不可靠的前提（实测会出现一内一外，
+     * 导致预览圆成"补角"、本体被毁）。
+     */
+    private static List<Csg.Polygon> applyFillets(final List<Csg.Polygon> acc,
+                                                  final List<double[]> edges,
+                                                  final int index, final String source) {
+        List<Csg.Polygon> out = acc;
+        for (final double[] e : edges) {
+            final Vector3d a = new Vector3d(e[0], e[1], e[2]);
+            final Vector3d b = new Vector3d(e[3], e[4], e[5]);
+            final Vector3d n1 = new Vector3d(e[6], e[7], e[8]);
+            final Vector3d n2 = new Vector3d(e[9], e[10], e[11]);
+            final double r = e[12];
+            final double len = a.distance(b);
+            if (r <= 1.0e-6 || len < 1.0e-6) {
+                continue;
+            }
+            final double theory = (r * r - Math.PI * r * r / 4.0) * len;
+            List<Csg.Polygon> bestWedge = null;
+            boolean bestAdd = false;
+            double bestScore = Double.MAX_VALUE;
+            double bestIn = 0.0;
+            double bestOut = 0.0;
+            final Vector3d dir = new Vector3d(b).sub(a).normalize();
+            for (int s1 = -1; s1 <= 1; s1 += 2) {
+                for (int s2 = -1; s2 <= 1; s2 += 2) {
+                    final Vector3d m1 = new Vector3d(n1).mul(s1);
+                    final Vector3d m2 = new Vector3d(n2).mul(s2);
+                    final List<Vector3d[]> tris = FilletCutter.prism(a, b, m1, m2, r);
+                    if (tris == null || tris.isEmpty()) {
+                        continue;
+                    }
+                    final List<Csg.Polygon> wedge =
+                            ensureOutward(triPolys(tris, dir, m1));
+                    if (wedge.isEmpty()) {
+                        continue;
+                    }
+                    final double wedgeVol = Math.abs(polysVolume(wedge));
+                    final double inVol = Math.abs(polysVolume(intersectLocal(out, wedge)));
+                    final double outVol = Math.abs(wedgeVol - inVol);
+                    // 凸棱：楔块落在材料内
+                    if (Math.abs(inVol - theory) < bestScore) {
+                        bestScore = Math.abs(inVol - theory);
+                        bestWedge = wedge;
+                        bestAdd = false;
+                        bestIn = inVol;
+                        bestOut = outVol;
+                    }
+                    // 凹棱：楔块落在材料外（需要补料）
+                    if (Math.abs(outVol - theory) < bestScore) {
+                        bestScore = Math.abs(outVol - theory);
+                        bestWedge = wedge;
+                        bestAdd = true;
+                        bestIn = inVol;
+                        bestOut = outVol;
+                    }
+                }
+            }
+            if (bestWedge == null || bestScore > Math.max(1.0e-3, theory * 0.5)) {
+                lastFilletDiag = "skip idx=" + index + " reason=no-matching-wedge"
+                        + " edge=" + source;
+                continue;
+            }
+            out = bestAdd ? unionLocal(out, bestWedge) : subtractLocal(out, bestWedge);
+            lastFilletDiag = "fillet idx=" + index + " mode=" + (bestAdd ? "add" : "sub")
+                    + " inVol=" + String.format(java.util.Locale.ROOT, "%.5f", bestIn)
+                    + " outVol=" + String.format(java.util.Locale.ROOT, "%.5f", bestOut)
+                    + " theory=" + String.format(java.util.Locale.ROOT, "%.5f", theory);
+        }
+        return out;
+    }
+
     /** 一组多边形的**有向体积**（诊断用）✓ */
     public static double polysVolume(final List<Csg.Polygon> polys) {
         double sum = 0.0;

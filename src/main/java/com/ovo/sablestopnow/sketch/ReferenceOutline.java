@@ -44,8 +44,14 @@ public final class ReferenceOutline {
     /** 相对容差：允许的弓高随弦长放宽（长直边的浮点噪声更大）✓ */
     private static final double REL_TOL = 1.0e-4;
 
-    /** 判"可见弯折"的阈值（弧度）；小于它的转角视为噪声 ✓ */
-    private static final double BEND_EPS = 2.0e-4;
+    /**
+     * 判"可见弯折"的阈值（正弦值）✓
+     *
+     * <p>真实直线上的相邻段是完全共线的：`Features.mergeCollinear` 已经把它们合并成
+     * **一条**（区间内根本没有中间点），即便有残留，sin 也只在 1e-9 量级。
+     * 所以阈值可以取得很小 —— 这样**哪怕弧上只剩 1 次弯折**也会被识别出来 ✓
+     */
+    private static final double BEND_EPS = 1.0e-5;
 
     /** 上限（双保险）✓ */
     private static final int MAX_RUNS = 24;
@@ -251,7 +257,10 @@ public final class ReferenceOutline {
                 negative++;
             }
         }
-        return positive >= 2 || negative >= 2;
+        // ★ 只要出现**一次**可见弯折就判为曲线 ✓
+        //   （之前要求 ≥2 次 ⇒ 只剩 1 个中间点的短弧会被当成"直线"漏出去，
+        //     正是"沿曲线一排短线"的来源，用户实测）
+        return positive >= 1 || negative >= 1;
     }
 
     private static double maxDeviation(final double[] pu, final double[] pv,

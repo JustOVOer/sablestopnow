@@ -1049,7 +1049,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             // ★ item 8：有圆角也算"要切" ⇒ 走 CSG（否则只有圆角时渲染不变、碰撞却变了 ✗）
             final List<double[]> filletCuts0 = localCutters.getOrDefault(solid.body(), List.of());
             final List<Csg.Polygon> filletPolys =
-                    filletPolyByBody.getOrDefault(solid.id(), List.of());
+                    filletPolyByBody.getOrDefault(solid.body(), List.of());
             final boolean cut = (feats != null && !feats.isEmpty()) || !filletCuts0.isEmpty()
                     || !filletPolys.isEmpty();
             final List<double[]> bodyCutters = new ArrayList<>();

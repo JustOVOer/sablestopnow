@@ -567,37 +567,30 @@ public final class SketchSession {
         if (this.working == null || localSegs == null || localSegs.isEmpty()) {
             return 0;
         }
+        // ★ 只挑**真实直边**：曲线（弧/样条）的离散短段整段丢弃 ✓
+        //   判据见 ReferenceOutline —— 不用转角阈值、不依赖连链，靠"两端转角 + 长度一致性"
+        final java.util.List<double[]> straight = ReferenceOutline.straightEdges(localSegs);
         final var plane = this.working.plane();
         final org.joml.Vector3d out = new org.joml.Vector3d();
-        final java.util.List<double[]> segs2 = new java.util.ArrayList<>(localSegs.size());
-        for (final double[] s : localSegs) {
-            if (s == null || s.length < 6) {
-                continue;
-            }
-            plane.toPlane(new org.joml.Vector3d(s[0], s[1], s[2]), out);
+        int added = 0;
+        for (final double[] r : straight) {
+            plane.toPlane(new org.joml.Vector3d(r[0], r[1], r[2]), out);
             final double u1 = out.x;
             final double v1 = out.y;
-            plane.toPlane(new org.joml.Vector3d(s[3], s[4], s[5]), out);
+            plane.toPlane(new org.joml.Vector3d(r[3], r[4], r[5]), out);
             final double u2 = out.x;
             final double v2 = out.y;
             if (Math.hypot(u2 - u1, v2 - v1) < 1.0e-3) {
                 continue;
             }
-            segs2.add(new double[] {u1, v1, u2, v2});
-        }
-        // ★ 只取"点到弦的距离 ≈ 0"的真直线；弧（含与直线相切的过渡）按偏离判定整体丢弃 ✓
-        //   不用转角阈值 —— 我们的离散精度下相邻段的转角可能远小于任何合理阈值（用户指出）✗
-        final java.util.List<double[]> straight = ReferenceOutline.straightRuns(segs2);
-        int added = 0;
-        for (final double[] r : straight) {
-            final Sketch.Entity line = this.working.addLine(r[0], r[1], r[2], r[3]);
+            final Sketch.Entity line = this.working.addLine(u1, v1, u2, v2);
             this.working.setReference(line, true);
             this.working.setConstruction(line, true);
             final int[] v = line.vars();
-            this.working.addConstraint(SketchSolver.FIXED, r[0], v[0]);
-            this.working.addConstraint(SketchSolver.FIXED, r[1], v[1]);
-            this.working.addConstraint(SketchSolver.FIXED, r[2], v[2]);
-            this.working.addConstraint(SketchSolver.FIXED, r[3], v[3]);
+            this.working.addConstraint(SketchSolver.FIXED, u1, v[0]);
+            this.working.addConstraint(SketchSolver.FIXED, v1, v[1]);
+            this.working.addConstraint(SketchSolver.FIXED, u2, v[2]);
+            this.working.addConstraint(SketchSolver.FIXED, v2, v[3]);
             added++;
         }
         return added;

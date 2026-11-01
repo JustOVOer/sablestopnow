@@ -4,23 +4,25 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 从**网格边**里重建"真正的直线"参考线 ✓（bug 11 的系统性修法）。
+ * 从**网格边界边**里挑出"真正的直线"，丢掉曲线（弧/样条）的离散段 ✓（bug 11 的最终方案）。
  *
- * <h2>为什么不能用"转角阈值"切分</h2>
- * 网格精度下一条弧的相邻段转角可能远小于 1°，且**直线与弧相切**处转角为 0 ⇒ 切不开 ✗
- *
- * <h2>为什么不能"端点四舍五入配对"</h2>
- * 端点坐标落在吸附网格边界两侧时（如 +0.0005 与 -0.0005）会被分到不同格子 ⇒ 链被切断，
- * 每段自成一链 ⇒ 每段都"恰好是直线" ⇒ 又变回"每段一条线"✗（实测 refs+=64 撞上限）
- *
- * <h2>真正可靠的判据</h2>
+ * <h2>问题本质</h2>
+ * `Features` 给出的边界边已经做过共线合并 ⇒ 列表里的每一段只有两种身份：
  * <ol>
- *   <li>端点用**距离容差**配对（1e-3 内视为同一点，按实际距离而不是舍入格子）</li>
- *   <li>连成链后做 Douglas–Peucker（tol 1e-3）</li>
- *   <li>逐个简化段回查原始点：到弦的**最大垂直距离 ≤ 5e-5** 才算直线 ✓
- *       （真实直线的偏差在浮点噪声量级；任何弧的弓高都远大于 5e-5）</li>
- *   <li>弧段（含相切过渡）整段丢弃；长度 ≥0.1；最多 24 条</li>
+ *   <li>**真正的直边**：一整条（内部没有顶点），两端是"角"（转角很大）</li>
+ *   <li>**曲线的离散步**：一串长度相近的短段（实测 0.100~0.126），相邻段之间转角**很小**</li>
  * </ol>
+ *
+ * <h2>判据（不依赖"转角阈值"切分，也不依赖把整圈连成一条链）</h2>
+ * 对每一段，看它**两端**各自的转角（与该端最共线邻居的夹角正弦）：
+ * <ul>
+ *   <li>两端都是"小转角"（1e-5 ~ 0.5）⇒ 处在曲线**内部** ⇒ 丢弃</li>
+ *   <li>否则先保留，再做**长度一致性生长**：若它一端的小转角邻居已被判为曲线，
+ *       且两者**长度接近**（±35%）⇒ 同一条曲线的离散步 ⇒ 丢弃。
+ *       这能吃掉"曲线两端"那两段，而**长直边**因长度差异不会被误吃 ✓</li>
+ * </ul>
+ *
+ * <p>连"直线与弧相切"也安全：相切处转角≈0，但直边长度与弧步长明显不同 ⇒ 不被吃掉 ✓
  *
  * <p>纯计算、无游戏依赖（本包被离线编译 ✓）。
  */
@@ -32,29 +34,19 @@ public final class ReferenceOutline {
     /** 端点视为同一点的容差（格）✓ */
     private static final double JOIN_TOL = 2.0e-3;
 
-    /** Douglas–Peucker 初始容差 ✓ */
-    private static final double DP_TOL = 1.0e-3;
+    /** 视为"可见转角"的最小正弦值（真实共线只有 1e-9 量级）✓ */
+    private static final double TURN_MIN = 1.0e-5;
 
-    /** 判"直线"的最大允许偏离（格）：真实直线只有浮点噪声，弧的弓高远大于此 ✓ */
-    private static final double STRAIGHT_TOL = 5.0e-5;
+    /** 超过它就当"角"而不是"曲线步"（同一曲线的相邻步远小于它）✓ */
+    private static final double TURN_MAX = 0.5;
 
-    /** 太短没有参考价值 ✓ */
-    private static final double MIN_LEN = 0.10;
+    /** 曲线步之间的长度相似度 ✓ */
+    private static final double LEN_RATIO = 0.35;
 
-    /** 相对容差：允许的弓高随弦长放宽（长直边的浮点噪声更大）✓ */
-    private static final double REL_TOL = 1.0e-4;
+    /** 最短保留长度 ✓ */
+    private static final double MIN_LEN = 0.05;
 
-    /**
-     * 判"可见弯折"的阈值（正弦值）✓
-     *
-     * <p>真实直线上的相邻段是完全共线的：`Features.mergeCollinear` 已经把它们合并成
-     * **一条**（区间内根本没有中间点），即便有残留，sin 也只在 1e-9 量级。
-     * 所以阈值可以取得很小 —— 这样**哪怕弧上只剩 1 次弯折**也会被识别出来 ✓
-     */
-    private static final double BEND_EPS = 1.0e-5;
-
-    /** 上限（双保险）✓ */
-    private static final int MAX_RUNS = 24;
+    private static final int MAX_RUNS = 64;
 
     // ---- 诊断（供客户端日志）----
     public static int lastSegments;
@@ -62,225 +54,154 @@ public final class ReferenceOutline {
     public static int lastKept;
 
     /**
-     * @param segs 2D 线段，每项 {@code {u1, v1, u2, v2}}
-     * @return 只含真实直线的线段（首尾即直线端点）
+     * @param segs 线段，每项 {@code {x1,y1,z1,x2,y2,z2}}（3D，与 {@code Features} 一致）
+     * @return 仅包含真实直边的线段（同样的 3D 形式）
      */
-    public static List<double[]> straightRuns(final List<double[]> segs) {
+    public static List<double[]> straightEdges(final List<double[]> segs) {
         final List<double[]> out = new ArrayList<>();
         lastSegments = segs == null ? 0 : segs.size();
-        lastChains = 0;
         lastKept = 0;
+        lastChains = 0;
         if (segs == null || segs.isEmpty()) {
             return out;
         }
         final int n = segs.size();
-        final boolean[] used = new boolean[n];
-        for (int seed = 0; seed < n; seed++) {
-            if (used[seed]) {
+        final double[] len = new double[n];
+        for (int i = 0; i < n; i++) {
+            final double[] s = segs.get(i);
+            len[i] = (s == null || s.length < 6) ? 0.0
+                    : Math.sqrt(sq(s[3] - s[0]) + sq(s[4] - s[1]) + sq(s[5] - s[2]));
+        }
+        // 端点邻接（2*i / 2*i+1 表示第 i 段的两端）
+        final List<List<Integer>> atEnd = new ArrayList<>(n * 2);
+        for (int i = 0; i < n * 2; i++) {
+            atEnd.add(new ArrayList<>());
+        }
+        for (int i = 0; i < n; i++) {
+            if (len[i] <= 0.0) {
                 continue;
             }
-            final double[] s0 = segs.get(seed);
-            if (s0 == null || s0.length < 4) {
-                used[seed] = true;
+            for (int j = i + 1; j < n; j++) {
+                if (len[j] <= 0.0) {
+                    continue;
+                }
+                for (int a = 0; a < 2; a++) {
+                    for (int b = 0; b < 2; b++) {
+                        if (close(segs.get(i), a, segs.get(j), b)) {
+                            atEnd.get(2 * i + a).add(2 * j + b);
+                            atEnd.get(2 * j + b).add(2 * i + a);
+                        }
+                    }
+                }
+            }
+        }
+        // 每段两端的最小转角
+        final double[] turnAt = new double[n * 2];
+        java.util.Arrays.fill(turnAt, Double.NaN);
+        for (int i = 0; i < n; i++) {
+            for (int a = 0; a < 2; a++) {
+                double best = Double.NaN;
+                for (final int other : atEnd.get(2 * i + a)) {
+                    final double sin = Math.abs(sinBetween(segs.get(i), a,
+                            segs.get(other / 2), other % 2));
+                    if (Double.isNaN(best) || sin < best) {
+                        best = sin;
+                    }
+                }
+                turnAt[2 * i + a] = best;
+            }
+        }
+        // 曲线内部：两端都是小转角
+        final boolean[] curve = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            if (len[i] <= 0.0) {
                 continue;
             }
-            used[seed] = true;
-            final List<double[]> pts = new ArrayList<>();
-            pts.add(new double[] {s0[0], s0[1]});
-            pts.add(new double[] {s0[2], s0[3]});
-            boolean extended = true;
-            while (extended) {
-                extended = false;
-                // 先接尾部，再接头部（每轮都从头扫描，n 很小，够快）
-                for (int k = 0; k < n && !extended; k++) {
-                    if (used[k]) {
-                        continue;
-                    }
-                    final double[] s = segs.get(k);
-                    if (s == null || s.length < 4) {
-                        used[k] = true;
-                        continue;
-                    }
-                    final double[] tail = pts.get(pts.size() - 1);
-                    if (same(tail[0], tail[1], s[0], s[1])) {
-                        pts.add(new double[] {s[2], s[3]});
-                        used[k] = true;
-                        extended = true;
-                    } else if (same(tail[0], tail[1], s[2], s[3])) {
-                        pts.add(new double[] {s[0], s[1]});
-                        used[k] = true;
-                        extended = true;
-                    }
+            curve[i] = visibleSmall(turnAt[2 * i]) && visibleSmall(turnAt[2 * i + 1]);
+        }
+        // 生长：与已判曲线的邻居"长度接近"且小转角相连 ⇒ 同一条曲线
+        boolean grew = true;
+        while (grew) {
+            grew = false;
+            for (int i = 0; i < n; i++) {
+                if (curve[i] || len[i] <= 0.0) {
+                    continue;
                 }
-                for (int k = 0; k < n && !extended; k++) {
-                    if (used[k]) {
+                for (int a = 0; a < 2; a++) {
+                    if (!visibleSmall(turnAt[2 * i + a])) {
                         continue;
                     }
-                    final double[] s = segs.get(k);
-                    if (s == null || s.length < 4) {
-                        used[k] = true;
-                        continue;
+                    for (final int other : atEnd.get(2 * i + a)) {
+                        final int j = other / 2;
+                        if (!curve[j] || len[j] <= 0.0) {
+                            continue;
+                        }
+                        final double ratio = len[i] / len[j];
+                        if (ratio > 1.0 - LEN_RATIO && ratio < 1.0 + LEN_RATIO) {
+                            curve[i] = true;
+                            grew = true;
+                            break;
+                        }
                     }
-                    final double[] head = pts.get(0);
-                    if (same(head[0], head[1], s[0], s[1])) {
-                        pts.add(0, new double[] {s[2], s[3]});
-                        used[k] = true;
-                        extended = true;
-                    } else if (same(head[0], head[1], s[2], s[3])) {
-                        pts.add(0, new double[] {s[0], s[1]});
-                        used[k] = true;
-                        extended = true;
+                    if (curve[i]) {
+                        break;
                     }
-                }
-                if (pts.size() > 16384) {
-                    break;
                 }
             }
-            lastChains++;
-            final int m = pts.size();
-            final double[] pu = new double[m];
-            final double[] pv = new double[m];
-            for (int i = 0; i < m; i++) {
-                pu[i] = pts.get(i)[0];
-                pv[i] = pts.get(i)[1];
+        }
+        for (int i = 0; i < n; i++) {
+            if (curve[i] || len[i] < MIN_LEN) {
+                continue;
             }
-            collectStraight(pu, pv, out);
+            final double[] s = segs.get(i);
+            out.add(new double[] {s[0], s[1], s[2], s[3], s[4], s[5]});
             if (out.size() >= MAX_RUNS) {
                 break;
             }
         }
+        lastChains = out.size();
         lastKept = out.size();
-        return out.size() > MAX_RUNS ? new ArrayList<>(out.subList(0, MAX_RUNS)) : out;
+        return out;
     }
 
-    private static boolean same(final double ax, final double ay,
-                                final double bx, final double by) {
-        return Math.abs(ax - bx) <= JOIN_TOL && Math.abs(ay - by) <= JOIN_TOL;
+    private static boolean visibleSmall(final double sin) {
+        return !Double.isNaN(sin) && sin > TURN_MIN && sin < TURN_MAX;
     }
 
-    private static void collectStraight(final double[] pu, final double[] pv,
-                                        final List<double[]> out) {
-        final int n = pu.length;
-        if (n < 2) {
-            return;
-        }
-        final List<Integer> keep = new ArrayList<>();
-        keep.add(0);
-        dp(pu, pv, 0, n - 1, DP_TOL, keep);
-        keep.add(n - 1);
-        keep.sort(Integer::compareTo);
-        for (int i = 0; i + 1 < keep.size(); i++) {
-            final int a = keep.get(i);
-            int b = keep.get(i + 1);
-            if (b <= a) {
-                continue;
-            }
-            // 允许把相邻的共线简化段再合并（否则真实长直边被切碎）
-            while (i + 2 < keep.size()) {
-                final int c = keep.get(i + 2);
-                if (maxDeviation(pu, pv, a, c) <= STRAIGHT_TOL) {
-                    b = c;
-                    keep.remove(i + 1);
-                } else {
-                    break;
-                }
-            }
-            final double len = Math.hypot(pu[b] - pu[a], pv[b] - pv[a]);
-            if (len < MIN_LEN) {
-                continue;
-            }
-            final double dev = maxDeviation(pu, pv, a, b);
-            final double chord = Math.hypot(pu[b] - pu[a], pv[b] - pv[a]);
-            if (dev > Math.max(STRAIGHT_TOL, REL_TOL * chord)) {
-                continue; // 明显弓高 ⇒ 弧 ✓
-            }
-            // ★ 关键补充（用户实测：**曲率很小**的曲线仍会漏过绝对阈值）：
-            //   真直线的弯折方向是**噪声**（有正有负），曲线是**单调**弯折。
-            //   只要区间内有 ≥2 个"同一方向的可见弯折" ⇒ 判为曲线，丢弃 ✓
-            if (hasMonotoneBend(pu, pv, a, b)) {
-                continue;
-            }
-            out.add(new double[] {pu[a], pv[a], pu[b], pv[b]});
-            if (out.size() >= MAX_RUNS) {
-                return;
-            }
-        }
+    private static boolean close(final double[] a, final int endA,
+                                 final double[] b, final int endB) {
+        final int ia = endA == 0 ? 0 : 3;
+        final int ib = endB == 0 ? 0 : 3;
+        return Math.abs(a[ia] - b[ib]) <= JOIN_TOL
+                && Math.abs(a[ia + 1] - b[ib + 1]) <= JOIN_TOL
+                && Math.abs(a[ia + 2] - b[ib + 2]) <= JOIN_TOL;
     }
 
-    private static void dp(final double[] pu, final double[] pv,
-                           final int a, final int b, final double tol,
-                           final List<Integer> keep) {
-        if (b <= a + 1) {
-            return;
-        }
-        double best = -1.0;
-        int bestIdx = -1;
-        for (int i = a + 1; i < b; i++) {
-            final double d = dist(pu[i], pv[i], pu[a], pv[a], pu[b], pv[b]);
-            if (d > best) {
-                best = d;
-                bestIdx = i;
-            }
-        }
-        if (best > tol && bestIdx > 0) {
-            keep.add(bestIdx);
-            dp(pu, pv, a, bestIdx, tol, keep);
-            dp(pu, pv, bestIdx, b, tol, keep);
-        }
+    /** 段 s 在端点 a 处的**向外**方向 ✓ */
+    private static double[] dir(final double[] s, final int a) {
+        final int from = a == 0 ? 0 : 3;
+        final int to = a == 0 ? 3 : 0;
+        return new double[] {s[to] - s[from], s[to + 1] - s[from + 1], s[to + 2] - s[from + 2]};
     }
 
-    /**
-     * 区间内是否存在**单调弯折**（曲线的特征）✓
-     *
-     * <p>逐点算叉积符号：真直线的叉积在浮点噪声里正负随机；
-     * 曲线（哪怕是半径很大的缓曲线）叉积**同号且连续出现**。
-     * 出现 ≥2 次同号可见弯折即判定为曲线。
-     */
-    private static boolean hasMonotoneBend(final double[] pu, final double[] pv,
-                                           final int a, final int b) {
-        int positive = 0;
-        int negative = 0;
-        for (int i = a + 1; i < b; i++) {
-            final double ax = pu[i] - pu[i - 1];
-            final double ay = pv[i] - pv[i - 1];
-            final double bx = pu[i + 1] - pu[i];
-            final double by = pv[i + 1] - pv[i];
-            final double la = Math.hypot(ax, ay);
-            final double lb = Math.hypot(bx, by);
-            if (la < 1.0e-9 || lb < 1.0e-9) {
-                continue;
-            }
-            final double sin = (ax * by - ay * bx) / (la * lb);
-            if (sin > BEND_EPS) {
-                positive++;
-            } else if (sin < -BEND_EPS) {
-                negative++;
-            }
+    /** 两段在公共端点处的方向夹角正弦绝对值 ✓ */
+    private static double sinBetween(final double[] a, final int endA,
+                                     final double[] b, final int endB) {
+        final double[] da = dir(a, endA);
+        final double[] db = dir(b, endB);
+        final double[] cr = {da[1] * db[2] - da[2] * db[1],
+                da[2] * db[0] - da[0] * db[2],
+                da[0] * db[1] - da[1] * db[0]};
+        final double la = Math.sqrt(sq(da[0]) + sq(da[1]) + sq(da[2]));
+        final double lb = Math.sqrt(sq(db[0]) + sq(db[1]) + sq(db[2]));
+        final double lc = Math.sqrt(sq(cr[0]) + sq(cr[1]) + sq(cr[2]));
+        if (la < 1.0e-9 || lb < 1.0e-9) {
+            return 0.0;
         }
-        // ★ 只要出现**一次**可见弯折就判为曲线 ✓
-        //   （之前要求 ≥2 次 ⇒ 只剩 1 个中间点的短弧会被当成"直线"漏出去，
-        //     正是"沿曲线一排短线"的来源，用户实测）
-        return positive >= 1 || negative >= 1;
+        return lc / (la * lb);
     }
 
-    private static double maxDeviation(final double[] pu, final double[] pv,
-                                       final int a, final int b) {
-        double max = 0.0;
-        for (int i = a + 1; i < b; i++) {
-            max = Math.max(max, dist(pu[i], pv[i], pu[a], pv[a], pu[b], pv[b]));
-        }
-        return max;
-    }
-
-    private static double dist(final double px, final double py,
-                               final double ax, final double ay,
-                               final double bx, final double by) {
-        final double dx = bx - ax;
-        final double dy = by - ay;
-        final double len2 = dx * dx + dy * dy;
-        if (len2 < 1.0e-18) {
-            return Math.hypot(px - ax, py - ay);
-        }
-        return Math.abs((px - ax) * dy - (py - ay) * dx) / Math.sqrt(len2);
+    private static double sq(final double v) {
+        return v * v;
     }
 }

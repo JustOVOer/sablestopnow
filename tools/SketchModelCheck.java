@@ -438,6 +438,45 @@ public final class SketchModelCheck {
                 "triPolys: 退化三角形被丢弃");
     }
 
+    /**
+     * bug 11 回归：从"网格边界边"里只挑真实直边（丢掉曲线的离散短段）✓
+     *
+     * <p>构造一个**圆角矩形**的边界：4 条长 2.0 的直边 + 每角 10 段、每段约 0.11 的弧
+     * （正是用户实测的长度区间 0.100~0.126）⇒ 期望只返回 **4** 条。
+     */
+    private static void referenceOutlineStraightOnly() {
+        final java.util.List<double[]> segs = new java.util.ArrayList<>();
+        // 直边（矩形 2x2，z=0 平面）
+        segs.add(new double[] {0.0, 0.0, 0.0, 2.0, 0.0, 0.0});
+        segs.add(new double[] {2.0, 0.0, 0.0, 2.0, 2.0, 0.0});
+        segs.add(new double[] {2.0, 2.0, 0.0, 0.0, 2.0, 0.0});
+        segs.add(new double[] {0.0, 2.0, 0.0, 0.0, 0.0, 0.0});
+        // 每角 10 段弧（半径 1.75、步角 0.037 ⇒ 弦长约 0.11 ✓）
+        for (int corner = 0; corner < 4; corner++) {
+            final double cx = corner == 0 || corner == 3 ? 0.0 : 2.0;
+            final double cy = corner < 2 ? 0.0 : 2.0;
+            final double a0 = Math.PI * 0.5 * corner;
+            for (int k = 0; k < 10; k++) {
+                final double th0 = a0 + k * 0.037;
+                final double th1 = a0 + (k + 1) * 0.037;
+                segs.add(new double[] {
+                        cx + 1.75 * Math.cos(th0), cy + 1.75 * Math.sin(th0), 0.0,
+                        cx + 1.75 * Math.cos(th1), cy + 1.75 * Math.sin(th1), 0.0});
+            }
+        }
+        final java.util.List<double[]> kept =
+                com.ovo.sablestopnow.sketch.ReferenceOutline.straightEdges(segs);
+        check(segs.size() == 44, "reference-outline: 输入 44 段（4 直 + 40 弧），实际 " + segs.size());
+        check(kept.size() == 4, "reference-outline: **只保留 4 条直边**（实际 "
+                + kept.size() + "，segs=" + segs.size() + "）");
+        for (final double[] k : kept) {
+            final double len = Math.sqrt(Math.pow(k[3] - k[0], 2)
+                    + Math.pow(k[4] - k[1], 2) + Math.pow(k[5] - k[2], 2));
+            check(Math.abs(len - 2.0) < 1.0e-6,
+                    "reference-outline: 保留下来的都是长 2.0 的直边（实际 " + len + "）");
+        }
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -478,6 +517,7 @@ public final class SketchModelCheck {
     }
 
     public static void main(final String[] args) throws Exception {
+        referenceOutlineStraightOnly();
         triPolysReal();
         filletGeom();
         filletCsg();

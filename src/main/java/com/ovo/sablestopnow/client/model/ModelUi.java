@@ -2576,6 +2576,7 @@ public final class ModelUi {
     private static java.util.UUID selectedSolidId;
     private static long lastFilletPreviewLog;
     private static String lastHoverLogged;
+    private static String lastTreeItemsSig;
     private static long lastPlanePreviewLog;
 
     /** 当前在树里选中的特征 id ✓（渲染侧用于"选中也高亮"） */
@@ -3207,6 +3208,21 @@ public final class ModelUi {
                 new java.util.ArrayList<>(currentSolidsOf(bodyId));
         solids.sort(java.util.Comparator.comparingInt(
                 com.ovo.sablestopnow.sketch.Solid::index));
+        // ★ 诊断：右栏到底收到了哪些实体（"新建的拉伸没进列表"靠这行定位）
+        {
+            final StringBuilder sb = new StringBuilder();
+            for (final com.ovo.sablestopnow.sketch.Solid sd : solids) {
+                sb.append(sd.index()).append(':')
+                        .append(sd.id().toString().substring(0, 6)).append(' ');
+            }
+            final String sig2 = bodyId + "|" + sb;
+            if (!sig2.equals(lastTreeItemsSig)) {
+                lastTreeItemsSig = sig2;
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info("[tree-items] body={} n={} {}",
+                        bodyId == null ? "?" : bodyId.toString().substring(0, 8),
+                        solids.size(), sb.toString().trim());
+            }
+        }
         final java.util.List<com.ovo.sablestopnow.sketch.Sketch> sketches =
                 currentSketchesOf(bodyId);
         // 草图表：id → 草图，用来把"被吸收的草图 id"还原成可点开的行

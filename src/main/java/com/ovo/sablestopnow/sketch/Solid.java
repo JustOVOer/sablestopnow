@@ -933,6 +933,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             if (solid.shape() instanceof Shape.Fillet) {
                 continue; // 圆角特征本身不产生材料（它的作用是"挖盒子"）✓
             }
+            // ★★ bug ⑩ 的真凶：**镜像/阵列特征自己也会被主循环处理**，
+            //  它的 mesh() 是空的（材料由反射/平移得出）⇒ 走到 CSG 的"盒子回退"，
+            //  结果产生一块**没有贴图、却可被拾取的碎片几何**（日志实测
+            //  `31:t162:tex0:b0:e37:Mirror:FB`）⇒ 玩家看到的是"本体点不到、只剩被挖掉那块"✗
+            //  它们自己的产物由后面的 mirror / pattern 段输出 ⇒ 主循环必须跳过 ✓
+            if (solid.shape() instanceof Shape.Mirror
+                    || solid.shape() instanceof Shape.Pattern) {
+                continue;
+            }
             final Sketch sketch = solid.resolve(sketches);
             final List<Vector3d[]> edges = solid.edges(sketch);
             if (edges.isEmpty()) {

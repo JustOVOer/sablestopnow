@@ -3208,6 +3208,18 @@ public final class ModelUi {
                 new java.util.ArrayList<>(currentSolidsOf(bodyId));
         solids.sort(java.util.Comparator.comparingInt(
                 com.ovo.sablestopnow.sketch.Solid::index));
+        // ★ 拓扑引用：客户端用**同一份确定性逻辑**重建（与服务端 id 一致）✓
+        {
+            com.ovo.sablestopnow.sketch.TopoStore.clear();
+            com.ovo.sablestopnow.sketch.TopoRebuild.collect(
+                    currentSolidsOf(bodyId),
+                    ref -> com.ovo.sablestopnow.sketch.TopoStore.ensureEdge(
+                            ref.bodyId(), ref.contributors(),
+                            new double[] {ref.geom()[0], ref.geom()[1], ref.geom()[2]},
+                            new double[] {ref.geom()[3], ref.geom()[4], ref.geom()[5]},
+                            new double[] {ref.geom()[6], ref.geom()[7], ref.geom()[8]},
+                            new double[] {ref.geom()[9], ref.geom()[10], ref.geom()[11]}));
+        }
         // ★ 诊断：右栏到底收到了哪些实体（"新建的拉伸没进列表"靠这行定位）
         {
             final StringBuilder sb = new StringBuilder();

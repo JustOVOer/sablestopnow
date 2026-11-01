@@ -90,40 +90,19 @@ public final class SolidNetworking {
             }
             data.put(solid);
             // ★ 拓扑引用：**圆角 → 棱** 的依赖链在服务端落盘 ✓
-            //   引用是"可确定性重建"的派生数据：同几何 + 同来源 ⇒ 同一个 id
-            //   ⇒ 不需要额外的网络包，服务端用实体自带的坐标重建即可
-            if (solid.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Fillet f) {
-                try {
-                    final com.ovo.sablestopnow.sketch.TopoData topo =
-                            com.ovo.sablestopnow.sketch.TopoData.get(level);
-                    final java.util.List<java.util.UUID> contributors = new java.util.ArrayList<>();
-                    for (final com.ovo.sablestopnow.sketch.Solid other : data.all().values()) {
-                        if (other.body().equals(solid.body())
-                                && other.shape()
-                                        instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut) {
-                            contributors.add(other.id());
-                        }
-                    }
-                    final java.util.List<java.util.UUID> edgeIds = new java.util.ArrayList<>();
-                    for (final com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef ref : f.edges()) {
-                        if (ref.solidId() != null && !contributors.contains(ref.solidId())) {
-                            contributors.add(ref.solidId()); // 棱所属的材料/切割特征 ✓
-                        }
-                        final double[] geom = {ref.ax(), ref.ay(), ref.az(),
-                            ref.bx(), ref.by(), ref.bz(),
-                            ref.n1x(), ref.n1y(), ref.n1z(),
-                            ref.n2x(), ref.n2y(), ref.n2z()};
-                        final com.ovo.sablestopnow.sketch.TopoRef edge =
-                                com.ovo.sablestopnow.sketch.TopoRefs.ensure(
-                                        topo.refs().values(), topo::put,
-                                        com.ovo.sablestopnow.sketch.TopoRef.Kind.EDGE,
-                                        solid.body(), contributors, geom);
-                        edgeIds.add(edge.id());
-                    }
-                    topo.bindFillet(solid.id(), edgeIds);
-                } catch (final RuntimeException ignored) {
-                    // 拓扑引用失败不能影响实体保存本身 ✓
+            //   逻辑集中在 TopoRebuild（客户端会用同一份逻辑重建，保证 id 一致）
+            try {
+                final com.ovo.sablestopnow.sketch.TopoData topo =
+                        com.ovo.sablestopnow.sketch.TopoData.get(level);
+                final java.util.Map<java.util.UUID, java.util.List<java.util.UUID>> binds =
+                        com.ovo.sablestopnow.sketch.TopoRebuild.collect(
+                                data.all().values(), topo::put);
+                for (final java.util.Map.Entry<java.util.UUID,
+                        java.util.List<java.util.UUID>> en : binds.entrySet()) {
+                    topo.bindFillet(en.getKey(), en.getValue());
                 }
+            } catch (final RuntimeException ignored) {
+                // 拓扑引用失败不能影响实体保存本身 ✓
             }
             broadcast(level);
             // ⚠ 存档变了必须**重建碰撞**，否则物理还停在旧形状上 ——

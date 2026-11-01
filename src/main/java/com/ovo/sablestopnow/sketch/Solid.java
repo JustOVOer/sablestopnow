@@ -831,6 +831,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         return SolidMesh.fromBoxes(local);
     }
 
+    /** 一个实体**评估后**的几何（已扣本体切割、已倒圆角）✓ */
+    private record Eval(List<double[]> boxes, List<Vector3d[]> edges, SolidMesh.Mesh mesh) {
+    }
+
     private record CutFeat(SketchPlane plane, Sketch sketch, Extrude.Params params,
                            List<double[]> boxes) {
     }
@@ -858,6 +862,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
         // ★ item 8：**圆角**要挖掉的盒子（局部坐标，直接可用 ✓ 不需要平面换算）
         final java.util.Map<UUID, Solid> byId = new java.util.HashMap<>();
+        final java.util.Map<UUID, Eval> evalById = new java.util.HashMap<>();
         for (final Solid s2 : solids) {
             byId.put(s2.id(), s2);
         }
@@ -1021,6 +1026,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                 }
             }
+            // ★ bug ⑨：缓存**评估后**的几何（已扣切割、已倒圆角），供镜像/阵列复用 ✓
+            evalById.put(solid.id(), new Eval(boxes, drawnEdges, mesh));
             out.add(new Placed(solid, boxes, drawnEdges, mesh, normal));
         }
         // ★ item 9：**镜像特征**的产物（反射源特征的盒子/线框/网格）
@@ -1031,39 +1038,53 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             final double[] o = {m.ox(), m.oy(), m.oz()};
             final double[] n = {m.nx(), m.ny(), m.nz()};
-            final List<double[]> boxes = new ArrayList<>();
-            final List<Vector3d[]> edges = new ArrayList<>();
-            SolidMesh.Mesh mesh = null;
+            // ★ bug ⑨ 系统性修法：
+            //   ① 每个源取**评估后**的几何（已扣切割、已倒圆角）
+            //   ② **切割源不再跳过**：切割盒反射后从镜像材料里减掉（洞跟着反射走）
+            //   ③ 每个源**单独输出**一份 Placed，用**源自己的外观** ⇒ 贴图不串号 ✓
+            final List<double[]> cutBoxes = new ArrayList<>();
             for (final UUID sid : m.sources()) {
                 final Solid src = byId.get(sid);
                 if (src == null || src.shape instanceof Shape.Plane
-                        || src.shape instanceof Shape.Fillet || src.shape instanceof Shape.Mirror
-                        || src.shape instanceof Shape.Cut) {
+                        || src.shape instanceof Shape.Fillet
+                        || src.shape instanceof Shape.Mirror) {
                     continue;
                 }
                 final Sketch srcSketch = src.resolve(sketches);
-                if (srcSketch == null) {
+                if (src.shape() instanceof Shape.Cut cut0 && srcSketch != null) {
+                    for (final double[] b : Extrude.boxesOf(srcSketch, cut0.params())) {
+                        cutBoxes.add(reflectBox(b, o, n));
+                    }
                     continue;
                 }
-                for (final double[] b : src.boxes(srcSketch)) {
+                final Eval e = evalById.get(sid);
+                if (e == null) {
+                    continue;
+                }
+                final List<double[]> boxes = new ArrayList<>(e.boxes().size());
+                for (final double[] b : e.boxes()) {
                     boxes.add(reflectBox(b, o, n));
                 }
-                for (final Vector3d[] e : src.edges(srcSketch)) {
-                    edges.add(new Vector3d[] {reflectPoint(e[0], o, n), reflectPoint(e[1], o, n)});
+                final List<Vector3d[]> edges = new ArrayList<>(e.edges().size());
+                for (final Vector3d[] ed : e.edges()) {
+                    edges.add(new Vector3d[] {reflectPoint(ed[0], o, n),
+                            reflectPoint(ed[1], o, n)});
                 }
-                final SolidMesh.Mesh sm = src.mesh(srcSketch);
-                if (sm != null && !sm.isEmpty()) {
-                    mesh = mesh == null ? reflectMesh(sm, o, n) : concatMesh(mesh,
-                            reflectMesh(sm, o, n));
+                SolidMesh.Mesh mesh = e.mesh() == null ? null : reflectMesh(e.mesh(), o, n);
+                if (!cutBoxes.isEmpty()) {
+                    mesh = subtractBoxesMesh(mesh, cutBoxes);
                 }
+                final List<double[]> finalBoxes = cutBoxes.isEmpty() ? boxes
+                        : subtractBoxes(boxes, cutBoxes);
+                if (finalBoxes.isEmpty() || edges.isEmpty()) {
+                    continue;
+                }
+                // 视图实体：id/index 用镜像特征（选中/名字一致），形状与外观用**源的**
+                final Solid view = new Solid(mirror.id(), mirror.body(), src.sketchId(),
+                        mirror.index(), src.shape(), src.appearance());
+                out.add(new Placed(view, finalBoxes, edges, mesh,
+                        new Vector3d(m.nx(), m.ny(), m.nz())));
             }
-            if (boxes.isEmpty() || edges.isEmpty()) {
-                continue;
-            }
-            // ★ 圆角也作用到镜像产物上 ✓
-            mesh = cutWithFillets(mesh, filletPolyByBody.get(mirror.body()));
-            out.add(new Placed(mirror, boxes, edges, mesh,
-                    new Vector3d(m.nx(), m.ny(), m.nz())));
         }
         // item 10: **阵列**产物（N×M 个副本，归在"阵列N"一行）
         for (final Solid pat : solids) {
@@ -1084,45 +1105,67 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 offsets.clear();
                 offsets.addAll(next);
             }
-            final List<double[]> boxes = new ArrayList<>();
-            final List<Vector3d[]> edges = new ArrayList<>();
-            SolidMesh.Mesh mesh = null;
+            // ★ bug ⑨：阵列同样取**评估后**的几何 + 每个源单独输出（用源自己的外观）✓
+            final List<double[]> cutOffsets = new ArrayList<>();
+            final List<double[]> cutRaw = new ArrayList<>();
             for (final UUID sid : pt.sources()) {
                 final Solid src = byId.get(sid);
-                if (src == null || src.shape instanceof Shape.Plane
-                        || src.shape instanceof Shape.Fillet || src.shape instanceof Shape.Mirror
-                        || src.shape instanceof Shape.Pattern || src.shape instanceof Shape.Cut) {
+                if (src == null || !(src.shape() instanceof Shape.Cut cut0)) {
                     continue;
                 }
                 final Sketch srcSketch = src.resolve(sketches);
                 if (srcSketch == null) {
                     continue;
                 }
+                for (final double[] b : Extrude.boxesOf(srcSketch, cut0.params())) {
+                    cutRaw.add(b);
+                }
+            }
+            for (final UUID sid : pt.sources()) {
+                final Solid src = byId.get(sid);
+                if (src == null || src.shape instanceof Shape.Plane
+                        || src.shape instanceof Shape.Fillet
+                        || src.shape instanceof Shape.Mirror
+                        || src.shape instanceof Shape.Pattern
+                        || src.shape instanceof Shape.Cut) {
+                    continue;
+                }
+                final Eval e = evalById.get(sid);
+                if (e == null) {
+                    continue;
+                }
                 for (final double[] off : offsets) {
                     if (Math.abs(off[0]) + Math.abs(off[1]) + Math.abs(off[2]) < 1.0e-9) {
                         continue; // 原位置由源特征自己画 ✓
                     }
-                    for (final double[] b : src.boxes(srcSketch)) {
+                    final List<double[]> cutHere = new ArrayList<>();
+                    for (final double[] b : cutRaw) {
+                        cutHere.add(translateBox(b, off));
+                    }
+                    final List<double[]> boxes = new ArrayList<>(e.boxes().size());
+                    for (final double[] b : e.boxes()) {
                         boxes.add(translateBox(b, off));
                     }
-                    for (final Vector3d[] e : src.edges(srcSketch)) {
+                    final List<Vector3d[]> edges = new ArrayList<>(e.edges().size());
+                    for (final Vector3d[] ed : e.edges()) {
                         edges.add(new Vector3d[] {
-                            new Vector3d(e[0]).add(off[0], off[1], off[2]),
-                            new Vector3d(e[1]).add(off[0], off[1], off[2])});
+                            new Vector3d(ed[0]).add(off[0], off[1], off[2]),
+                            new Vector3d(ed[1]).add(off[0], off[1], off[2])});
                     }
-                    final SolidMesh.Mesh sm = src.mesh(srcSketch);
-                    if (sm != null && !sm.isEmpty()) {
-                        mesh = mesh == null ? translateMesh(sm, off)
-                                : concatMesh(mesh, translateMesh(sm, off));
+                    SolidMesh.Mesh mesh = e.mesh() == null ? null : translateMesh(e.mesh(), off);
+                    if (!cutHere.isEmpty()) {
+                        mesh = subtractBoxesMesh(mesh, cutHere);
                     }
+                    final List<double[]> finalBoxes = cutHere.isEmpty() ? boxes
+                            : subtractBoxes(boxes, cutHere);
+                    if (finalBoxes.isEmpty() || edges.isEmpty()) {
+                        continue;
+                    }
+                    final Solid view = new Solid(pat.id(), pat.body(), src.sketchId(),
+                            pat.index(), src.shape(), src.appearance());
+                    out.add(new Placed(view, finalBoxes, edges, mesh, null));
                 }
             }
-            if (boxes.isEmpty() || edges.isEmpty()) {
-                continue;
-            }
-            // ★ 圆角也作用到阵列产物上 ✓
-            mesh = cutWithFillets(mesh, filletPolyByBody.get(pat.body()));
-            out.add(new Placed(pat, boxes, edges, mesh, null));
         }
         return out;
     }
@@ -1207,6 +1250,25 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      * <p>为什么必须单独做 ✗✓：镜像/阵列的材料是在 {@code placeAll} 末尾**生成**的 Placed，
      * 不经过主循环里的 CSG 减法 ⇒ 之前"镜像/阵列出来的模型上无法创建圆角"（用户实测）。
      */
+    /** 网格减去一批盒子（碰撞/渲染共用）✓ */
+    private static SolidMesh.Mesh subtractBoxesMesh(final SolidMesh.Mesh mesh,
+                                                    final List<double[]> cutterBoxes) {
+        if (mesh == null || mesh.isEmpty() || cutterBoxes == null || cutterBoxes.isEmpty()) {
+            return mesh;
+        }
+        final SolidMesh.Mesh cutter = SolidMesh.fromBoxes(cutterBoxes);
+        if (cutter == null || cutter.isEmpty()) {
+            return mesh;
+        }
+        final List<Csg.Polygon> base = ensureOutward(CsgMesh.fromMesh(mesh, null));
+        final List<Csg.Polygon> cut = ensureOutward(CsgMesh.fromMesh(cutter, null));
+        if (base.isEmpty() || cut.isEmpty()) {
+            return mesh;
+        }
+        final List<Csg.Polygon> res = Csg.subtract(base, cut);
+        return res.isEmpty() ? mesh : CsgMesh.toMesh(res);
+    }
+
     private static SolidMesh.Mesh cutWithFillets(final SolidMesh.Mesh mesh,
                                                   final List<Csg.Polygon> filletPolys) {
         if (mesh == null || mesh.isEmpty() || filletPolys == null || filletPolys.isEmpty()) {

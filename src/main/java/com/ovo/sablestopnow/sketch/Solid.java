@@ -1008,7 +1008,17 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 // ★ item 8：圆角参与 CSG 减法 —— **通用方案**：沿棱扫出多边形棱柱（任意朝向）✓
                 //   盒子路径仍保留：给碰撞用（轴对齐时精确），渲染用棱柱 ⇒ 斜棱也能倒圆 ✓
                 if (!filletPolys.isEmpty()) {
+                    final int beforeN = acc.size();
                     acc = Csg.subtract(acc, ensureOutward(filletPolys));
+                    if (!java.util.Objects.equals(lastCsgDiag,
+                            "fillet idx=" + solid.index() + " polyIn=" + beforeN
+                                    + " polyOut=" + acc.size()
+                                    + " target=" + targetTris)) {
+                        lastCsgDiag = "fillet idx=" + solid.index() + " polyIn=" + beforeN
+                                + " polyOut=" + acc.size() + " target=" + targetTris;
+                        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[solid-csg] {}",
+                                lastCsgDiag);
+                    }
                 }
                 if (!filletCuts.isEmpty()) {
                     final List<Csg.Polygon> fb = CsgMesh.fromMesh(
@@ -1071,6 +1081,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                             reflectPoint(ed[1], o, n)});
                 }
                 SolidMesh.Mesh mesh = e.mesh() == null ? null : reflectMesh(e.mesh(), o, n);
+                // ★ 圆角也作用到镜像产物上（回归修复：上一版改写时漏了这一步）✓
+                mesh = cutWithFillets(mesh, filletPolyByBody.get(mirror.body()));
                 if (!cutBoxes.isEmpty()) {
                     mesh = subtractBoxesMesh(mesh, cutBoxes);
                 }
@@ -1153,6 +1165,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                             new Vector3d(ed[1]).add(off[0], off[1], off[2])});
                     }
                     SolidMesh.Mesh mesh = e.mesh() == null ? null : translateMesh(e.mesh(), off);
+                    // ★ 圆角也作用到阵列产物上（回归修复）✓
+                    mesh = cutWithFillets(mesh, filletPolyByBody.get(pat.body()));
                     if (!cutHere.isEmpty()) {
                         mesh = subtractBoxesMesh(mesh, cutHere);
                     }

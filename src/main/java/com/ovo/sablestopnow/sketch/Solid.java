@@ -965,9 +965,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 boolean inside = false;
                 final List<double[]> rawOfSrc = src.boxes(srcSketch);
                 for (final double[] box : rawOfSrc) {
-                    if (cx >= box[0] - 0.05 && cx <= box[3] + 0.05
-                            && cy >= box[1] - 0.05 && cy <= box[4] + 0.05
-                            && cz >= box[2] - 0.05 && cz <= box[5] + 0.05) {
+                    // 余量 = 半径 + 0.1：圆角棱柱重心本来就贴在 AABB 边界上 ✓
+                    final double mg = f.radius() + 0.1;
+                    if (cx >= box[0] - mg && cx <= box[3] + mg
+                            && cy >= box[1] - mg && cy <= box[4] + mg
+                            && cz >= box[2] - mg && cz <= box[5] + mg) {
                         inside = true;
                         break;
                     }
@@ -1320,7 +1322,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 dump.append(":FB");
             }
         }
-        lastCsgDiag = dump.append(']').toString();
+        dump.append(']');
+        if (!lastFilletDiag.isEmpty()) {
+            dump.append(' ').append(lastFilletDiag);
+        }
+        lastCsgDiag = dump.toString();
         return out;
     }
 

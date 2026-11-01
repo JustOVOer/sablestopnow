@@ -806,6 +806,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     /** 上一次切割 CSG 的诊断（客户端打日志用 ✓；本包被离线编译 ⇒ 不能直接用 LOGGER ✓）。 */
     public static String lastCsgDiag = "none";
 
+    /** 最近一次圆角 CSG 的诊断（不含 idx 以外信息，供 dump 拼装）✓ */
+    private static String lastFilletDiag = "";
+
     /**
      * 把**平面坐标**里的盒子（{@code {u0,v0,d0,u3,v3,d3}}）换成**局部坐标**的封闭网格 ✓。
      *
@@ -863,6 +866,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         // ★ item 8：**圆角**要挖掉的盒子（局部坐标，直接可用 ✓ 不需要平面换算）
         final java.util.Map<UUID, Solid> byId = new java.util.HashMap<>();
         final java.util.Map<UUID, Eval> evalById = new java.util.HashMap<>();
+        final java.util.Set<UUID> fallbackIds = new java.util.HashSet<>();
         for (final Solid s2 : solids) {
             byId.put(s2.id(), s2);
         }
@@ -985,6 +989,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 //   （实测"圆角后贴图消失"就是这样）✗
                 final boolean fallbackMesh = targetMesh == null || targetMesh.isEmpty();
                 if (fallbackMesh) {
+                    fallbackIds.add(solid.id());
                     targetMesh = boxesInLocal(sketch, rawBoxes);
                 }
                 List<Csg.Polygon> acc = CsgMesh.fromMesh(targetMesh, null);
@@ -1022,6 +1027,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         //   只把诊断字符串放进去，由客户端读取并打日志 ✓
                         lastCsgDiag = "fillet idx=" + solid.index() + " polyIn=" + beforeN
                                 + " polyOut=" + acc.size() + " target=" + targetTris;
+                        lastFilletDiag = lastCsgDiag;
                     }
                 }
                 if (!filletCuts.isEmpty()) {

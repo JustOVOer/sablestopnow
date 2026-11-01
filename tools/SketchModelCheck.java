@@ -547,6 +547,58 @@ public final class SketchModelCheck {
         check(vol > 0.0, "ensureOutward: 反向实体翻转后**有向体积为正**（实际 " + vol + "）");
     }
 
+    /**
+     * bug ⑩ 根因验证：`SolidMesh.fromBoxes`（盒子回退网格）的**绕序/朝向**是朝外还是朝里？
+     *
+     * <p>如果它是**朝里**的，那么 `Csg.subtract(回退盒子, 圆角棱柱)` 得到的是"补集"式结果：
+     * 表现正是用户实测的——**被削掉的那块反而像本体**、整个模型贴图消失 ✓
+     */
+    private static void boxMeshWinding() {
+        final java.util.List<double[]> boxes = java.util.List.of(
+                new double[] {0, 0, 0, 1, 1, 1});
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh mesh =
+                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(boxes);
+        check(mesh != null && !mesh.isEmpty(), "box-winding: fromBoxes 非空");
+        final var verts = mesh.vertices();
+        final int[] idx = mesh.indices();
+        double vol = 0.0;
+        for (int i = 0; i + 2 < idx.length; i += 3) {
+            final var a = verts.get(idx[i]).position();
+            final var b = verts.get(idx[i + 1]).position();
+            final var c = verts.get(idx[i + 2]).position();
+            vol += a.x * (b.y * c.z - b.z * c.y)
+                    - a.y * (b.x * c.z - b.z * c.x)
+                    + a.z * (b.x * c.y - b.y * c.x);
+        }
+        // 单位立方体：|有向体积| = 6（未除以 6 的三重积和）
+        pathlib_Diag("box-winding volume=" + String.format(java.util.Locale.ROOT, "%.4f", vol));
+        check(Math.abs(Math.abs(vol) - 6.0) < 0.05,
+                "box-winding: fromBoxes 覆盖单位立方体（|有向体积| 应≈6，实际 " + vol + "）");
+        check(vol > 0.0,
+                "box-winding: fromBoxes 的绕序必须**朝外**（有向体积为正），实际 " + vol);
+    }
+
+    private static void pathlib_Diag(final String message) {
+        System.out.println("DIAG " + message);
+    }
+
+  private static double signedVolume(
+            final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> polys) {
+        double sum = 0.0;
+        for (final com.ovo.sablestopnow.sketch.csg.Csg.Polygon p : polys) {
+            final var vs = p.vertices;
+            for (int i = 1; i + 1 < vs.size(); i++) {
+                final var a = vs.get(0).pos();
+                final var b = vs.get(i).pos();
+                final var c = vs.get(i + 1).pos();
+                sum += a.x() * (b.y() * c.z() - b.z() * c.y())
+                        - a.y() * (b.x() * c.z() - b.z() * c.x())
+                        + a.z() * (b.x() * c.y() - b.y() * c.x());
+            }
+        }
+        return sum / 6.0;
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -589,6 +641,7 @@ public final class SketchModelCheck {
     public static void main(final String[] args) throws Exception {
         referenceOutlineStraightOnly();
         ensureOutwardSign();
+        boxMeshWinding();
         triPolysReal();
         filletGeom();
         filletCsg();

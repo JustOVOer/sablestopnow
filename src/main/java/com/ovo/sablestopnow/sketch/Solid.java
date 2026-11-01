@@ -1018,7 +1018,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 //   盒子路径仍保留：给碰撞用（轴对齐时精确），渲染用棱柱 ⇒ 斜棱也能倒圆 ✓
                 if (!filletPolys.isEmpty()) {
                     final int beforeN = acc.size();
-                    acc = Csg.subtract(acc, ensureOutward(filletPolys));
+                    acc = subtractLocal(acc, ensureOutward(filletPolys));
                     if (!java.util.Objects.equals(lastCsgDiag,
                             "fillet idx=" + solid.index() + " polyIn=" + beforeN
                                     + " polyOut=" + acc.size()
@@ -1289,6 +1289,53 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      * <p>为什么必须单独做 ✗✓：镜像/阵列的材料是在 {@code placeAll} 末尾**生成**的 Placed，
      * 不经过主循环里的 CSG 减法 ⇒ 之前"镜像/阵列出来的模型上无法创建圆角"（用户实测）。
      */
+
+    /**
+     * **在局部原点附近做差集** ✓（bug ⑩ 的修法）
+     *
+     * <h2>为什么必须这样</h2>
+     * 玩家的模型在 2.0e7 附近，而 csg.js 的 BSP 用**绝对坐标**做平面分类
+     * （{@code EPSILON = 1e-5}）。坐标越大，浮点舍入相对越大 ⇒ 分类不稳定 ⇒
+     * 差集可能退化成"补集/碎片"：**原来的点线面都点不到，只剩被挖掉的那块**（实测）。
+     * 把两个操作数平移到 A 的第一个顶点附近再算，结束后平移回去 ⇒ 数值上等于
+     * 我们离线验证过（在原点）的那种情况 ✓
+     */
+    private static List<Csg.Polygon> subtractLocal(final List<Csg.Polygon> base,
+                                                   final List<Csg.Polygon> cutter) {
+        if (base.isEmpty() || cutter.isEmpty()) {
+            return base;
+        }
+        final Csg.V3 first = base.get(0).vertices.get(0).pos();
+        final double ox = first.x();
+        final double oy = first.y();
+        final double oz = first.z();
+        final List<Csg.Polygon> a = shiftedPolys(base, -ox, -oy, -oz);
+        final List<Csg.Polygon> b = shiftedPolys(cutter, -ox, -oy, -oz);
+        final List<Csg.Polygon> res = Csg.subtract(a, b);
+        return shiftedPolys(res, ox, oy, oz);
+    }
+
+    /** 平移一组多边形（连同平面常数）✓ */
+    private static List<Csg.Polygon> shiftedPolys(final List<Csg.Polygon> polys,
+                                                  final double dx, final double dy,
+                                                  final double dz) {
+        final List<Csg.Polygon> out = new ArrayList<>(polys.size());
+        for (final Csg.Polygon p : polys) {
+            final List<Csg.Vertex> vs = new ArrayList<>(p.vertices.size());
+            for (final Csg.Vertex v : p.vertices) {
+                vs.add(new Csg.Vertex(
+                        new Csg.V3(v.pos().x() + dx, v.pos().y() + dy, v.pos().z() + dz),
+                        v.normal(), v.uv()));
+            }
+            final Csg.Plane pl = p.plane;
+            // 字段而不是 getter：Csg.Plane 是普通类（normal/w 是 public final 字段）✓
+            final double w = pl.w + (pl.normal.x() * dx + pl.normal.y() * dy
+                    + pl.normal.z() * dz);
+            out.add(new Csg.Polygon(vs, new Csg.Plane(pl.normal, w)));
+        }
+        return out;
+    }
+
     /** 网格减去一批盒子（碰撞/渲染共用）✓ */
     private static SolidMesh.Mesh subtractBoxesMesh(final SolidMesh.Mesh mesh,
                                                     final List<double[]> cutterBoxes) {
@@ -1304,7 +1351,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         if (base.isEmpty() || cut.isEmpty()) {
             return mesh;
         }
-        final List<Csg.Polygon> res = Csg.subtract(base, cut);
+        final List<Csg.Polygon> res = subtractLocal(base, cut);
         return res.isEmpty() ? mesh : CsgMesh.toMesh(res);
     }
 
@@ -1318,7 +1365,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         if (base.isEmpty()) {
             return mesh;
         }
-        final List<Csg.Polygon> cut = Csg.subtract(base, ensureOutward(filletPolys));
+        final List<Csg.Polygon> cut = subtractLocal(base, ensureOutward(filletPolys));
         if (cut.isEmpty()) {
             return mesh;
         }

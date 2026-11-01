@@ -1027,7 +1027,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 //   盒子路径仍保留：给碰撞用（轴对齐时精确），渲染用棱柱 ⇒ 斜棱也能倒圆 ✓
                 if (!filletPolys.isEmpty()) {
                     final int beforeN = acc.size();
+                    final double volBefore = polysVolume(acc);
                     acc = subtractLocal(acc, ensureOutward(filletPolys));
+                    final double volAfter = polysVolume(acc);
                     if (!java.util.Objects.equals(lastCsgDiag,
                             "fillet idx=" + solid.index() + " polyIn=" + beforeN
                                     + " polyOut=" + acc.size()
@@ -1035,7 +1037,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         // ⚠ 本包被**离线单独编译** ⇒ 不能引用 LOGGER（引用会导致 harness 编译失败）
                         //   只把诊断字符串放进去，由客户端读取并打日志 ✓
                         lastCsgDiag = "fillet idx=" + solid.index() + " polyIn=" + beforeN
-                                + " polyOut=" + acc.size() + " target=" + targetTris;
+                                + " polyOut=" + acc.size() + " target=" + targetTris
+                                + " volBefore=" + String.format(java.util.Locale.ROOT, "%.4f",
+                                        volBefore)
+                                + " volAfter=" + String.format(java.util.Locale.ROOT, "%.4f",
+                                        volAfter);
                         lastFilletDiag = lastCsgDiag;
                     }
                 }
@@ -1309,6 +1315,23 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      * 把两个操作数平移到 A 的第一个顶点附近再算，结束后平移回去 ⇒ 数值上等于
      * 我们离线验证过（在原点）的那种情况 ✓
      */
+    /** 一组多边形的**有向体积**（诊断用）✓ */
+    public static double polysVolume(final List<Csg.Polygon> polys) {
+        double sum = 0.0;
+        for (final Csg.Polygon p : polys) {
+            final List<Csg.Vertex> vs = p.vertices;
+            for (int i = 1; i + 1 < vs.size(); i++) {
+                final Csg.V3 a = vs.get(0).pos();
+                final Csg.V3 b = vs.get(i).pos();
+                final Csg.V3 c = vs.get(i + 1).pos();
+                sum += a.x() * (b.y() * c.z() - b.z() * c.y())
+                        - a.y() * (b.x() * c.z() - b.z() * c.x())
+                        + a.z() * (b.x() * c.y() - b.y() * c.x());
+            }
+        }
+        return sum / 6.0;
+    }
+
     private static List<Csg.Polygon> subtractLocal(final List<Csg.Polygon> base,
                                                    final List<Csg.Polygon> cutter) {
         if (base.isEmpty() || cutter.isEmpty()) {

@@ -599,6 +599,107 @@ public final class SketchModelCheck {
         return sum / 6.0;
     }
 
+    /**
+     * bug ⑩ 的核心验证：圆角棱柱**是不是一个封闭、朝外的实体**，以及
+     * `盒子 − 棱柱` 是否真的只挖掉一个小角。
+     *
+     * <p>用户实测："本该削去的部分被填满并单独上贴图"（= 布尔方向反了），
+     * 以及"第二个圆角后本体消失、只剩削去那块"。这两个现象都指向**棱柱网格本身不合法**
+     * 或**绕序反了**。这里把两个可能一次性验掉：
+     * <ol>
+     *   <li>封闭性：每条边必须被恰好 2 个三角形共享（否则 BSP 会给出垃圾）</li>
+     *   <li>有向体积：必须是正的（朝外）；且与理论值 (r² − πr²/4)·len 一致</li>
+     *   <li>差集体积：盒子 − 棱柱 ≈ 盒体积 − 棱柱体积</li>
+     * </ol>
+     */
+    private static void filletPrismSolid() {
+        final double r = 0.25;
+        final double len = 1.0;
+        final org.joml.Vector3d a = new org.joml.Vector3d(2.0, 0.0, 0.0);
+        final org.joml.Vector3d b = new org.joml.Vector3d(2.0, len, 0.0);
+        // 立方体 +X 面与 -Z 面共享这条竖棱，两个面法线都**朝外**
+        final java.util.List<org.joml.Vector3d[]> prism =
+                com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                        a, b,
+                        new org.joml.Vector3d(1, 0, 0),
+                        new org.joml.Vector3d(0, 0, -1),
+                        r);
+        check(prism != null && !prism.isEmpty(), "fillet-prism: prism 非空");
+        pathlib_Diag("fillet-prism tris=" + prism.size());
+
+        // ① 封闭性
+        final java.util.Map<String, Integer> edgeCount = new java.util.HashMap<>();
+        for (final org.joml.Vector3d[] t : prism) {
+            for (int k = 0; k < 3; k++) {
+                final org.joml.Vector3d p = t[k];
+                final org.joml.Vector3d q = t[(k + 1) % 3];
+                final String e1 = key(p) + "|" + key(q);
+                final String e2 = key(q) + "|" + key(p);
+                if (edgeCount.containsKey(e2)) {
+                    edgeCount.merge(e2, 1, Integer::sum);
+                } else {
+                    edgeCount.merge(e1, 1, Integer::sum);
+                }
+            }
+        }
+        int bad = 0;
+        for (final int c : edgeCount.values()) {
+            if (c != 2) {
+                bad++;
+            }
+        }
+        pathlib_Diag("fillet-prism edges=" + edgeCount.size() + " nonManifold=" + bad);
+        check(bad == 0, "fillet-prism: **必须是封闭流形**（非流形边 " + bad + " 条）");
+
+        // ② 有向体积（原点 = 盒子角）
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> poly =
+                com.ovo.sablestopnow.sketch.Solid.triPolys(prism);
+        final double prismVol = volume(poly);
+        final double theory = (r * r - Math.PI * r * r / 4.0) * len;
+        pathlib_Diag("fillet-prism vol=" + prismVol + " theory=" + theory);
+        check(prismVol > 0.0, "fillet-prism: 有向体积必须为正（朝外），实际 " + prismVol);
+        check(Math.abs(prismVol - theory) < Math.max(1.0e-4, theory * 0.15),
+                "fillet-prism: 体积应与理论值一致（" + prismVol + " vs " + theory + "）");
+
+        // ③ 盒子 − 棱柱
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh boxMesh =
+                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(
+                        java.util.List.of(new double[] {0, 0, 0, 2, 1, 2}));
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> base =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(boxMesh, null));
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> res =
+                com.ovo.sablestopnow.sketch.csg.Csg.subtract(base,
+                        com.ovo.sablestopnow.sketch.Solid.ensureOutward(poly));
+        final double resVol = volume(res);
+        final double expect = 4.0 - Math.abs(prismVol);
+        pathlib_Diag("fillet-prism subtract vol=" + resVol + " expect=" + expect);
+        check(Math.abs(resVol - expect) < Math.max(2.0e-3, expect * 0.02),
+                "fillet-prism: 盒子−棱柱 应≈盒体积−棱柱体积（" + resVol + " vs " + expect + "）");
+    }
+
+    private static String key(final org.joml.Vector3d p) {
+        return Math.round(p.x * 1e6) + "," + Math.round(p.y * 1e6) + ","
+                + Math.round(p.z * 1e6);
+    }
+
+    private static double volume(
+            final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> polys) {
+        double sum = 0.0;
+        for (final com.ovo.sablestopnow.sketch.csg.Csg.Polygon p : polys) {
+            final var vs = p.vertices;
+            for (int i = 1; i + 1 < vs.size(); i++) {
+                final var p0 = vs.get(0).pos();
+                final var p1 = vs.get(i).pos();
+                final var p2 = vs.get(i + 1).pos();
+                sum += p0.x() * (p1.y() * p2.z() - p1.z() * p2.y())
+                        - p0.y() * (p1.x() * p2.z() - p1.z() * p2.x())
+                        + p0.z() * (p1.x() * p2.y() - p1.y() * p2.x());
+            }
+        }
+        return sum / 6.0;
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -642,6 +743,7 @@ public final class SketchModelCheck {
         referenceOutlineStraightOnly();
         ensureOutwardSign();
         boxMeshWinding();
+        filletPrismSolid();
         triPolysReal();
         filletGeom();
         filletCsg();

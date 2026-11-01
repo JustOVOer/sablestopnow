@@ -700,6 +700,58 @@ public final class SketchModelCheck {
         return sum / 6.0;
     }
 
+    /**
+     * 拓扑引用（bug 依赖链）离线用例 ✓
+     *
+     * <p>验证四件事：
+     * <ol>
+     *   <li>同一几何 + 同一组来源 ⇒ **去重复用**（不产生两条记录）</li>
+     *   <li>contributors 不同 ⇒ 视为不同引用（一条棱可以由不同特征组合决定）</li>
+     *   <li>**一条棱依赖多个特征**：任一特征被删，都能查到它</li>
+     *   <li>EDGE 的端点解析正确</li>
+     * </ol>
+     */
+    private static void topoRefsBasics() {
+        final java.util.List<com.ovo.sablestopnow.sketch.TopoRef> store =
+                new java.util.ArrayList<>();
+        final java.util.UUID body = java.util.UUID.randomUUID();
+        final java.util.UUID extrude = java.util.UUID.randomUUID();
+        final java.util.UUID cut1 = java.util.UUID.randomUUID();
+        final java.util.UUID cut2 = java.util.UUID.randomUUID();
+        final double[] geom = {0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1};
+
+        final com.ovo.sablestopnow.sketch.TopoRef r1 =
+                com.ovo.sablestopnow.sketch.TopoRefs.ensure(store, store::add,
+                        com.ovo.sablestopnow.sketch.TopoRef.Kind.EDGE, body,
+                        java.util.List.of(extrude, cut1), geom);
+        final com.ovo.sablestopnow.sketch.TopoRef r2 =
+                com.ovo.sablestopnow.sketch.TopoRefs.ensure(store, store::add,
+                        com.ovo.sablestopnow.sketch.TopoRef.Kind.EDGE, body,
+                        java.util.List.of(extrude, cut1), geom);
+        check(r1.id().equals(r2.id()), "topo: 同几何+同来源 ⇒ **复用一个引用**（去重）");
+        check(store.size() == 1, "topo: 去重后表里只有 1 条（实际 " + store.size() + "）");
+
+        final com.ovo.sablestopnow.sketch.TopoRef r3 =
+                com.ovo.sablestopnow.sketch.TopoRefs.ensure(store, store::add,
+                        com.ovo.sablestopnow.sketch.TopoRef.Kind.EDGE, body,
+                        java.util.List.of(extrude, cut1, cut2), geom);
+        check(!r1.id().equals(r3.id()), "topo: **来源不同 ⇒ 是不同引用**");
+        check(store.size() == 2, "topo: 现在表里 2 条（实际 " + store.size() + "）");
+
+        // 一条棱同时依赖多个特征：删除任意一个都要能查出来
+        check(com.ovo.sablestopnow.sketch.TopoRefs.dependingOn(store, extrude).size() == 2,
+                "topo: 依赖 extrude 的引用有 2 条");
+        check(com.ovo.sablestopnow.sketch.TopoRefs.dependingOn(store, cut2).size() == 1,
+                "topo: 依赖 cut2 的引用有 1 条");
+        check(com.ovo.sablestopnow.sketch.TopoRefs.dependingOn(store,
+                java.util.UUID.randomUUID()).isEmpty(), "topo: 无关特征查不到引用");
+
+        check(Math.abs(r1.edgeA()[0]) < 1.0e-9 && Math.abs(r1.edgeB()[0] - 2.0) < 1.0e-9,
+                "topo: EDGE 端点解析正确");
+        check(r1.kind() == com.ovo.sablestopnow.sketch.TopoRef.Kind.EDGE
+                && r1.contributors().size() == 2, "topo: 种类与来源数量正确");
+    }
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {
@@ -744,6 +796,7 @@ public final class SketchModelCheck {
         ensureOutwardSign();
         boxMeshWinding();
         filletPrismSolid();
+        topoRefsBasics();
         triPolysReal();
         filletGeom();
         filletCsg();

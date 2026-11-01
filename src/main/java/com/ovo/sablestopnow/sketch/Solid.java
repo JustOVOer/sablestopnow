@@ -1014,10 +1014,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                             "fillet idx=" + solid.index() + " polyIn=" + beforeN
                                     + " polyOut=" + acc.size()
                                     + " target=" + targetTris)) {
+                        // ⚠ 本包被**离线单独编译** ⇒ 不能引用 LOGGER（引用会导致 harness 编译失败）
+                        //   只把诊断字符串放进去，由客户端读取并打日志 ✓
                         lastCsgDiag = "fillet idx=" + solid.index() + " polyIn=" + beforeN
                                 + " polyOut=" + acc.size() + " target=" + targetTris;
-                        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[solid-csg] {}",
-                                lastCsgDiag);
                     }
                 }
                 if (!filletCuts.isEmpty()) {

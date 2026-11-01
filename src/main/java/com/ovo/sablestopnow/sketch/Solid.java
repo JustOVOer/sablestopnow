@@ -875,7 +875,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             if (!(s2.shape() instanceof final Shape.Fillet f)) {
                 continue;
             }
-            final List<Csg.Polygon> polys = new ArrayList<>();
+            final java.util.Map<UUID, List<Csg.Polygon>> polysBySrc =
+                    new java.util.HashMap<>();
             for (final Shape.EdgeRef ref : f.edges()) {
                 final Solid src = byId.get(ref.solidId());
                 if (src == null) {
@@ -948,11 +949,14 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     lastFilletDiag = "skip idx=" + s2.index() + " reason=prism-outside";
                     continue;
                 }
-                polys.addAll(triPolys(prismTris, fdir, nn[0]));
+                // ★ 按**被引用的实体**归集：圆角只作用于它指向的那个实体 ✓
+                //   （圆角是"拉伸之后的后处理"，不能溢出到镜像/阵列产物上）
+                polysBySrc.computeIfAbsent(ref.solidId(), k -> new ArrayList<>())
+                        .addAll(triPolys(prismTris, fdir, nn[0]));
             }
-            if (!polys.isEmpty()) {
-                filletPolyByBody.put(s2.body(), polys);
-                lastCsgDiag = "[fillet] prism polys=" + polys.size() + " for body " + s2.body();
+            for (final java.util.Map.Entry<UUID, List<Csg.Polygon>> en : polysBySrc.entrySet()) {
+                filletPolyByBody.computeIfAbsent(en.getKey(), k2 -> new ArrayList<>())
+                        .addAll(en.getValue());
             }
         }
         final java.util.Map<UUID, List<double[]>> localCutters = new java.util.HashMap<>();
@@ -964,7 +968,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             lastCsgDiag = "[fillet] idx=" + s2.index() + " boxes=" + boxes2.size()
                     + (boxes2.isEmpty() ? " (棱不是轴对齐 ⇒ 第一版不支持)" : "");
             if (!boxes2.isEmpty()) {
-                localCutters.computeIfAbsent(s2.body(), k -> new ArrayList<>()).addAll(boxes2);
+                // ★ 圆角盒子也按**被引用实体**归集（碰撞侧不能溢出到别的实体）✓
+                final var fe = ((Shape.Fillet) s2.shape()).edges();
+                if (!fe.isEmpty() && fe.get(0).solidId() != null) {
+                    localCutters.computeIfAbsent(fe.get(0).solidId(),
+                            k -> new ArrayList<>()).addAll(boxes2);
+                }
             }
         }
         final List<Placed> out = new ArrayList<>(solids.size());
@@ -1011,9 +1020,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final List<double[]> rawBoxes = solid.boxes(sketch);
             final List<CutFeat> feats = cutters.get(solid.body());
             // ★ item 8：有圆角也算"要切" ⇒ 走 CSG（否则只有圆角时渲染不变、碰撞却变了 ✗）
-            final List<double[]> filletCuts0 = localCutters.getOrDefault(solid.body(), List.of());
+            final List<double[]> filletCuts0 = localCutters.getOrDefault(solid.id(), List.of());
             final List<Csg.Polygon> filletPolys =
-                    filletPolyByBody.getOrDefault(solid.body(), List.of());
+                    filletPolyByBody.getOrDefault(solid.id(), List.of());
             final boolean cut = (feats != null && !feats.isEmpty()) || !filletCuts0.isEmpty()
                     || !filletPolys.isEmpty();
             final List<double[]> bodyCutters = new ArrayList<>();
@@ -1152,7 +1161,6 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
                 SolidMesh.Mesh mesh = e.mesh() == null ? null : reflectMesh(e.mesh(), o, n);
                 // ★ 圆角也作用到镜像产物上（回归修复：上一版改写时漏了这一步）✓
-                mesh = cutWithFillets(mesh, filletPolyByBody.get(mirror.body()));
                 if (!cutBoxes.isEmpty()) {
                     mesh = subtractBoxesMesh(mesh, cutBoxes);
                 }
@@ -1236,7 +1244,6 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                     SolidMesh.Mesh mesh = e.mesh() == null ? null : translateMesh(e.mesh(), off);
                     // ★ 圆角也作用到阵列产物上（回归修复）✓
-                    mesh = cutWithFillets(mesh, filletPolyByBody.get(pat.body()));
                     if (!cutHere.isEmpty()) {
                         mesh = subtractBoxesMesh(mesh, cutHere);
                     }

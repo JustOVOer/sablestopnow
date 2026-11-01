@@ -871,6 +871,33 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             byId.put(s2.id(), s2);
         }
         final java.util.Map<UUID, List<Csg.Polygon>> filletPolyByBody = new java.util.HashMap<>();
+
+        final java.util.function.BiFunction<Solid, Sketch, Eval> baseEvalOf = (srcS, sk) -> {
+            if (srcS == null || sk == null) {
+                return null;
+            }
+            final List<double[]> raw = srcS.boxes(sk);
+            final List<double[]> cutBoxes = new ArrayList<>();
+            for (final CutFeat cf : cutters.getOrDefault(srcS.body(), List.of())) {
+                cutBoxes.addAll(cf.boxes());
+            }
+            final List<double[]> baseBoxes = cutBoxes.isEmpty() ? raw
+                    : subtractBoxes(raw, cutBoxes);
+            final List<Vector3d[]> baseEdges = srcS.edges(sk);
+            SolidMesh.Mesh baseMesh = srcS.mesh(sk);
+            if (baseMesh != null && !baseMesh.isEmpty() && !cutBoxes.isEmpty()) {
+                final List<Csg.Polygon> bp = ensureOutward(CsgMesh.fromMesh(baseMesh, null));
+                final List<Csg.Polygon> cp = ensureOutward(
+                        CsgMesh.fromMesh(SolidMesh.fromBoxes(cutBoxes), null));
+                if (!bp.isEmpty() && !cp.isEmpty()) {
+                    final List<Csg.Polygon> rr = subtractLocal(bp, cp);
+                    if (!rr.isEmpty()) {
+                        baseMesh = CsgMesh.toMesh(rr);
+                    }
+                }
+            }
+            return new Eval(baseBoxes, baseEdges, baseMesh);
+        };
         for (final Solid s2 : solids) {
             if (!(s2.shape() instanceof final Shape.Fillet f)) {
                 continue;
@@ -1055,7 +1082,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     fallbackIds.add(solid.id());
                     targetMesh = boxesInLocal(sketch, rawBoxes);
                 }
-                List<Csg.Polygon> acc = CsgMesh.fromMesh(targetMesh, null);
+                List<Csg.Polygon> acc = ensureOutward(CsgMesh.fromMesh(targetMesh, null));
                 int cutterTris = 0;
                 for (final CutFeat f : feats) {
                     SolidMesh.Mesh cutterMesh = SolidMesh.build(f.sketch(), f.params());
@@ -1083,7 +1110,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     final int beforeN = acc.size();
                     final double volBefore = polysVolume(acc);
                     acc = subtractLocal(acc, ensureOutward(filletPolys));
-                    final double volAfter = polysVolume(acc);
+                    double volAfter = polysVolume(acc);
+                    if (volAfter < 0.0) {
+                        final List<Csg.Polygon> flipped = new ArrayList<>(acc.size());
+                        for (final Csg.Polygon pg : acc) {
+                            flipped.add(pg.flipped());
+                        }
+                        acc = flipped;
+                        volAfter = polysVolume(acc);
+                    }
                     if (!java.util.Objects.equals(lastCsgDiag,
                             "fillet idx=" + solid.index() + " polyIn=" + beforeN
                                     + " polyOut=" + acc.size()
@@ -1146,7 +1181,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                     continue;
                 }
-                final Eval e = evalById.get(sid);
+                final Eval e = baseEvalOf.apply(src, srcSketch);
                 if (e == null) {
                     continue;
                 }
@@ -1220,7 +1255,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         || src.shape instanceof Shape.Cut) {
                     continue;
                 }
-                final Eval e = evalById.get(sid);
+                final Eval e = baseEvalOf.apply(src, src.resolve(sketches));
                 if (e == null) {
                     continue;
                 }
@@ -1258,6 +1293,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
             }
         }
+        // ★ **镜像/阵列取"拉伸+切割之后、圆角之前"的几何** ✓
+        //   用户要求：圆角是拉伸的后处理，不该被镜像带走。
+        //   之前用的是 evalById（已扣圆角）⇒ 圆角看起来"同步到了镜像"✗
+
         // ★ 渲染清单诊断（贴图/高亮类问题唯一工具）✓
         final StringBuilder dump = new StringBuilder("placed=[" + out.size());
         for (final Placed pl : out) {

@@ -2343,6 +2343,31 @@ public final class ModelUi {
      * <p>n1 直接用命中面的法线（已知朝外 ✓）；n2 = dir × n1，再用"沿它挪一点是否落在实体内部"
      * 来定符号（朝外的那一侧一定是空的）✓ 这一步很关键：符号错了，圆角会切到外面去 ✗
      */
+    /**
+     * 推出圆角用的**两个面法线 + 楔块象限** ✓（用户实测法线可能一内一外，
+     * 会让预览圆成"补角"、创建后把本体减成补集）。
+     *
+     * <p>做法：先构造与棱垂直的正交基 (n1, n2)，然后对**四个象限**各建一次楔块，
+     * 用"楔块重心是否落在实体盒子内"来挑象限：
+     * <ul>
+     *   <li>有象限落在实体**内部** ⇒ 凸棱：那个楔块就是要切掉的材料 ✓</li>
+     *   <li>四个象限都在外部 ⇒ 凹棱：取**离棱最近**的那个（缺口侧），由求值阶段做并集补料 ✓</li>
+     * </ul>
+     * 于是预览与创建使用**同一个楔块**，而且不依赖"两个法线都朝外"这种不可靠前提。
+     */
+
+    /** 点是否落在该体的任意盒子内部 ✓（用于判定"朝里/朝外"） */
+    /**
+     * 推出圆角用的两个面法线 + 楔块象限 ✓
+     *
+     * <p>用户实测：拾取到的两个法线可能一个朝里一个朝外，这会让预览圆成"补角"、
+     * 创建后把本体减成补集。所以这里不依赖法线符号，而是对**四个象限**各建一次楔块，
+     * 用"楔块重心是否落在实体盒子内"挑出**材料侧**的那个：
+     * <ul>
+     *   <li>有象限在实体内部 ⇒ 凸棱：那就是要切掉的角 ✓</li>
+     *   <li>四个都在外部 ⇒ 凹棱：取离棱最近的缺口侧（求值阶段做并集补料）✓</li>
+     * </ul>
+     */
     private static void inferFilletNormals(final org.joml.Vector3dc dir,
                                            final org.joml.Vector3dc faceNormal,
                                            final org.joml.Vector3dc edgePoint) {
@@ -2354,27 +2379,67 @@ public final class ModelUi {
             return;
         }
         n1.normalize();
-        final org.joml.Vector3d n2 = new org.joml.Vector3d(dir).cross(n1, new org.joml.Vector3d());
+        final org.joml.Vector3d n2 = new org.joml.Vector3d(dir).cross(n1,
+                new org.joml.Vector3d());
         if (n2.lengthSquared() < 1.0e-9) {
             filletNormal1 = null;
             filletNormal2 = null;
             return;
         }
         n2.normalize();
-        // 朝外的符号：沿 ±n2 各挪 1e-2，落进实体内部的那一侧就是"里"⇒ 取反
-        final double probe = 1.0e-2 * 5.0;
-        final boolean inPlus = insideAnyBox(new org.joml.Vector3d(edgePoint).fma(probe, n2));
-        final boolean inMinus = insideAnyBox(new org.joml.Vector3d(edgePoint).fma(-probe, n2));
-        if (inPlus && !inMinus) {
-            n2.negate();
+        org.joml.Vector3d best1 = new org.joml.Vector3d(n1);
+        org.joml.Vector3d best2 = new org.joml.Vector3d(n2);
+        double bestInsideDist = Double.MAX_VALUE;
+        double bestOutsideDist = Double.MAX_VALUE;
+        boolean anyInside = false;
+        for (int s1 = -1; s1 <= 1; s1 += 2) {
+            for (int s2 = -1; s2 <= 1; s2 += 2) {
+                final org.joml.Vector3d m1 = new org.joml.Vector3d(n1).mul(s1);
+                final org.joml.Vector3d m2 = new org.joml.Vector3d(n2).mul(s2);
+                final java.util.List<org.joml.Vector3d[]> tris =
+                        com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                                new org.joml.Vector3d(filletEdgeA),
+                                new org.joml.Vector3d(filletEdgeB), m1, m2,
+                                filletRadius.get());
+                if (tris == null || tris.isEmpty()) {
+                    continue;
+                }
+                final org.joml.Vector3d c = new org.joml.Vector3d();
+                int n = 0;
+                for (final org.joml.Vector3d[] t : tris) {
+                    for (final org.joml.Vector3d q : t) {
+                        c.add(q);
+                        n++;
+                    }
+                }
+                if (n == 0) {
+                    continue;
+                }
+                c.div(n);
+                final double dist = c.distance(edgePoint);
+                if (insideAnyBox(c)) {
+                    if (!anyInside || dist < bestInsideDist) {
+                        bestInsideDist = dist;
+                        best1 = m1;
+                        best2 = m2;
+                    }
+                    anyInside = true;
+                } else if (!anyInside && dist < bestOutsideDist) {
+                    bestOutsideDist = dist;
+                    best1 = m1;
+                    best2 = m2;
+                }
+            }
         }
-        filletNormal1 = n1;
-        filletNormal2 = n2;
-        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[fillet] normals n1={} n2={} (in+={} in-={})",
-                n1, n2, inPlus, inMinus);
+        filletNormal1 = best1;
+        filletNormal2 = best2;
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[fillet] normals n1={} n2={} (insideWedge={} dist={})",
+                best1, best2, anyInside,
+                String.format(java.util.Locale.ROOT, "%.4f",
+                        anyInside ? bestInsideDist : bestOutsideDist));
     }
 
-    /** 点是否落在该体的任意盒子内部 ✓（用于判定"朝里/朝外"） */
     private static boolean insideAnyBox(final org.joml.Vector3dc p) {
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         final net.minecraft.world.level.Level level = mc == null ? null : mc.level;

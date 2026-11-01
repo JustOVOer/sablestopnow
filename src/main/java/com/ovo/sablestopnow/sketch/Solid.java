@@ -980,7 +980,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 //   ⇒ 空就用**几何网格**（由盒子生成）✓ 保证 CSG 的输入一定是封闭实体 ✓
                 SolidMesh.Mesh targetMesh = solid.mesh(sketch);
                 final int targetTris = targetMesh == null ? 0 : targetMesh.indices().length / 3;
-                if (targetMesh == null || targetMesh.isEmpty()) {
+                // ★ 目标网格为空 ⇒ 用盒子当 CSG 输入（只为了"能布尔"，**不能拿去渲染**）
+                //   之前这个回退结果被当成渲染网格 ⇒ 模型上盖了一层无贴图的盒子
+                //   （实测"圆角后贴图消失"就是这样）✗
+                final boolean fallbackMesh = targetMesh == null || targetMesh.isEmpty();
+                if (fallbackMesh) {
                     targetMesh = boxesInLocal(sketch, rawBoxes);
                 }
                 List<Csg.Polygon> acc = CsgMesh.fromMesh(targetMesh, null);

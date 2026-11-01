@@ -902,8 +902,53 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     continue;
                 }
                 final Vector3d fdir = new Vector3d(b).sub(a).normalize();
-                polys.addAll(triPolys(FilletCutter.prism(a, b, nn[0], nn[1], f.radius()),
-                        fdir, nn[0]));
+                final List<Vector3d[]> prismTris =
+                        FilletCutter.prism(a, b, nn[0], nn[1], f.radius());
+                if (prismTris == null || prismTris.isEmpty()) {
+                    lastFilletDiag = "skip idx=" + s2.index() + " reason=prism-empty";
+                    continue;
+                }
+                // ★ 合理性校验（用户实测：只有**部分棱**会出问题 ⇒ 棱柱被放到了实体外面/朝向反了）
+                //   ① 两个面法线不能几乎平行（那样定不出角，圆弧会退化成碎片）
+                //   ② 棱柱重心必须落在**该实体的盒子范围**内，否则减了也是"没反应/垃圾"
+                final Vector3d n1n = new Vector3d(nn[0]).normalize();
+                final Vector3d n2n = new Vector3d(nn[1]).normalize();
+                if (Math.abs(n1n.dot(n2n)) > 0.999) {
+                    lastFilletDiag = "skip idx=" + s2.index() + " reason=parallel-normals";
+                    continue;
+                }
+                double cx = 0.0;
+                double cy = 0.0;
+                double cz = 0.0;
+                int cn = 0;
+                for (final Vector3d[] t : prismTris) {
+                    for (final Vector3d q : t) {
+                        cx += q.x;
+                        cy += q.y;
+                        cz += q.z;
+                        cn++;
+                    }
+                }
+                if (cn > 0) {
+                    cx /= cn;
+                    cy /= cn;
+                    cz /= cn;
+                }
+                boolean inside = false;
+                final List<double[]> rawOfSrc = src.boxes(srcSketch);
+                for (final double[] box : rawOfSrc) {
+                    if (cx >= box[0] - 0.05 && cx <= box[3] + 0.05
+                            && cy >= box[1] - 0.05 && cy <= box[4] + 0.05
+                            && cz >= box[2] - 0.05 && cz <= box[5] + 0.05) {
+                        inside = true;
+                        break;
+                    }
+                }
+                if (!rawOfSrc.isEmpty() && !inside) {
+                    lastFilletDiag = "skip idx=" + s2.index() + " reason=prism-outside";
+                    continue;
+                }
+                polys.addAll(triPolys(prismTris, fdir, nn[0]));
             }
             if (!polys.isEmpty()) {
                 filletPolyByBody.put(s2.body(), polys);

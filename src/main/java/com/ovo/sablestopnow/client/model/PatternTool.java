@@ -74,7 +74,8 @@ public final class PatternTool {
             return;
         }
         for (final Solid sd : solids) {
-            if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
+            // ★ 圆角与切割同等对待，可以被阵列 ✓
+            if (sd.isPlane() || sd.isMirror() || sd.isPattern()) {
                 continue;
             }
             SOURCES.add(sd.id());

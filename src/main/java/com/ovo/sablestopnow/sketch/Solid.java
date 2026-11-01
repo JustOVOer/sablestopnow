@@ -978,7 +978,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
                 // ★ 按**被引用的实体**归集：圆角只作用于它指向的那个实体 ✓
                 //   （圆角是"拉伸之后的后处理"，不能溢出到镜像/阵列产物上）
-                polysBySrc.computeIfAbsent(ref.solidId(), k -> new ArrayList<>())
+                // ★ 与**切割**完全一致：按 body 作用（不再按单个实体区分对待）✓
+                polysBySrc.computeIfAbsent(s2.body(), k -> new ArrayList<>())
                         .addAll(triPolys(prismTris, fdir, nn[0]));
             }
             for (final java.util.Map.Entry<UUID, List<Csg.Polygon>> en : polysBySrc.entrySet()) {
@@ -996,11 +997,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     + (boxes2.isEmpty() ? " (棱不是轴对齐 ⇒ 第一版不支持)" : "");
             if (!boxes2.isEmpty()) {
                 // ★ 圆角盒子也按**被引用实体**归集（碰撞侧不能溢出到别的实体）✓
-                final var fe = ((Shape.Fillet) s2.shape()).edges();
-                if (!fe.isEmpty() && fe.get(0).solidId() != null) {
-                    localCutters.computeIfAbsent(fe.get(0).solidId(),
-                            k -> new ArrayList<>()).addAll(boxes2);
-                }
+                // 与切割一致：按 body 作用 ✓
+                localCutters.computeIfAbsent(s2.body(), k -> new ArrayList<>()).addAll(boxes2);
             }
         }
         final List<Placed> out = new ArrayList<>(solids.size());
@@ -1047,7 +1045,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final List<double[]> rawBoxes = solid.boxes(sketch);
             final List<CutFeat> feats = cutters.get(solid.body());
             // ★ item 8：有圆角也算"要切" ⇒ 走 CSG（否则只有圆角时渲染不变、碰撞却变了 ✗）
-            final List<double[]> filletCuts0 = localCutters.getOrDefault(solid.id(), List.of());
+            final List<double[]> filletCuts0 = localCutters.getOrDefault(solid.body(), List.of());
             final List<Csg.Polygon> filletPolys =
                     filletPolyByBody.getOrDefault(solid.id(), List.of());
             final boolean cut = (feats != null && !feats.isEmpty()) || !filletCuts0.isEmpty()
@@ -1167,6 +1165,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             //   ② **切割源不再跳过**：切割盒反射后从镜像材料里减掉（洞跟着反射走）
             //   ③ 每个源**单独输出**一份 Placed，用**源自己的外观** ⇒ 贴图不串号 ✓
             final List<double[]> cutBoxes = new ArrayList<>();
+            final List<Csg.Polygon> filletPend = new ArrayList<>();
             for (final UUID sid : m.sources()) {
                 final Solid src = byId.get(sid);
                 if (src == null || src.shape instanceof Shape.Plane
@@ -1196,6 +1195,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
                 SolidMesh.Mesh mesh = e.mesh() == null ? null : reflectMesh(e.mesh(), o, n);
                 // ★ 圆角也作用到镜像产物上（回归修复：上一版改写时漏了这一步）✓
+                if (!filletPend.isEmpty()) {
+                    final List<Csg.Polygon> bp = mesh == null || mesh.isEmpty() ? null
+                            : ensureOutward(CsgMesh.fromMesh(mesh, null));
+                    if (bp != null && !bp.isEmpty()) {
+                        final List<Csg.Polygon> rr2 = subtractLocal(bp, ensureOutward(filletPend));
+                        if (!rr2.isEmpty()) {
+                            mesh = CsgMesh.toMesh(rr2);
+                        }
+                    }
+                }
                 if (!cutBoxes.isEmpty()) {
                     mesh = subtractBoxesMesh(mesh, cutBoxes);
                 }

@@ -4411,7 +4411,8 @@ public final class ModelUi {
                   mirrorBody = b0;
                   for (final com.ovo.sablestopnow.sketch.Solid sd
                           : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv0, b0)) {
-                      if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
+                      // ★ 圆角也可以被镜像（与切割同等）✓
+                      if (sd.isPlane() || sd.isMirror() || sd.isPattern()) {
                           continue;
                       }
                       mirrorSources.add(sd.id());

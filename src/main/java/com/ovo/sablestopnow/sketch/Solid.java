@@ -1519,6 +1519,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 continue;
             }
             final double theory = (r * r - Math.PI * r * r / 4.0) * len;
+            // 诊断：两法线夹角 φ 与理想内切圆参数 d —— 若 φ≈0（两面几乎平行）
+            // 则 d = r/sin(φ/2) 会爆炸，楔块巨大（实测 wedge=18 vs theory=0.05）
+            double cosPhi = Math.max(-1.0, Math.min(1.0, n1.dot(n2)));
+            final double phi = Math.acos(cosPhi);
+            trace("fillet:  apply n1=(" + fmt(n1.x) + "," + fmt(n1.y) + "," + fmt(n1.z)
+                    + ") n2=(" + fmt(n2.x) + "," + fmt(n2.y) + "," + fmt(n2.z)
+                    + ") phiDeg=" + String.format(java.util.Locale.ROOT, "%.2f",
+                            Math.toDegrees(phi))
+                    + " len=" + fmt(len) + " r=" + fmt(r) + " theory=" + fmt(theory));
             List<Csg.Polygon> bestWedge = null;
             boolean bestAdd = false;
             double bestScore = Double.MAX_VALUE;

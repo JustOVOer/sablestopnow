@@ -1468,6 +1468,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         continue;
                     }
                     final double wedgeVol = Math.abs(polysVolume(wedge));
+                    // ★ 保护：老存档的圆角**没有法线**（历史 bug），faceNormals 兜底可能给出
+                    //   几乎平行的两面 ⇒ φ≈0 ⇒ 截面半径爆炸（实测 wedgeVol=1.69 而理论值 0.027）
+                    //   ⇒ 这种楔块必须跳过，否则会乱切别的几何。
+                    if (wedgeVol > theory * 3.0 + 1.0e-4) {
+                        lastFilletDiag = "skip idx=" + index + " reason=wedge-too-big"
+                                + " wedge=" + String.format(java.util.Locale.ROOT, "%.4f", wedgeVol)
+                                + " theory=" + String.format(java.util.Locale.ROOT, "%.4f", theory)
+                                + " edge=" + source;
+                        continue;
+                    }
                     final double inVol = Math.abs(polysVolume(intersectLocal(out, wedge)));
                     final double outVol = Math.abs(wedgeVol - inVol);
                     // 凸棱：楔块落在材料内

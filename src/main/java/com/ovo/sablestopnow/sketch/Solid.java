@@ -1034,6 +1034,18 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         + ")");
                 Solid src = byId.get(ref.solidId());
                 String srcNote = "";
+                // ★ 拾取到"切割体/基准面/镜像"等**非材料**实体的面时（最常见的例子：
+                //   孔的圆柱面来自切割体的网格 ⇒ hover 给的是 Cut 的 id），
+                //   solidId 会指向一个永远不会进主循环的实体 ⇒ 圆角数据挂在那儿没人用
+                //   ⇒ 表现就是"预览正常、创建后模型不变"（实测）。这里统一改判为材料实体 ✓
+                if (src != null && (src.shape instanceof Shape.Plane
+                        || src.shape instanceof Shape.Cut
+                        || src.shape instanceof Shape.Mirror
+                        || src.shape instanceof Shape.Pattern
+                        || src.shape instanceof Shape.Fillet)) {
+                    srcNote = "src-nonmaterial->";
+                    src = null;
+                }
                 if (src == null) {
                     // ★ 回退：老特征/被重建过的特征，solidId 可能已失效。
                     //   按"端点落在盒子里"在**同一 body** 的实体中找最匹配的那个 ✓
@@ -1665,11 +1677,27 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     new Vector3d(e[0], e[1], e[2]), new Vector3d(e[3], e[4], e[5]),
                     new Vector3d(e[6], e[7], e[8]), new Vector3d(e[9], e[10], e[11]),
                     e[12], qd);
+            // ★ 同一条棱/弧的**首段**必须与中间段同结论（凸/凹不能半路翻转）
+            //   不一致 ⇒ 探针不可靠 ⇒ 整项跳过（否则会把补料糊到外面 ⇒ "模型崩坏"）
+            final double[] ef = edges.get(rg[0]);
+            final double[] qdf = new double[4];
+            final int qf = filletQuadrant(probe,
+                    new Vector3d(ef[0], ef[1], ef[2]), new Vector3d(ef[3], ef[4], ef[5]),
+                    new Vector3d(ef[6], ef[7], ef[8]), new Vector3d(ef[9], ef[10], ef[11]),
+                    ef[12], qdf);
+            if ((itemQuads[it] == 1 || itemQuads[it] == 3)
+                    && (qf == 1 || qf == 3) && qf != itemQuads[it]) {
+                itemQuads[it] = -2; // 明确不可判定：不允许继承
+                log.append(" [f").append(index).append(":disagree]");
+            }
         }
         // ③ 曲线链里个别项探针落在盒子边界（0/4、2/4）⇒ 从**相邻**项继承象限 ✓
         for (int it = 0; it < ni; it++) {
             if (itemQuads[it] == 1 || itemQuads[it] == 3) {
                 continue;
+            }
+            if (itemQuads[it] == -2) {
+                continue; // 明确不可判定（首段/中间段结论相反）⇒ 不继承、不应用
             }
             boolean inherited = false;
             for (int jt = 0; jt < ni; jt++) {

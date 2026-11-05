@@ -2519,6 +2519,25 @@ public final class ModelUi {
                     new org.joml.Vector3d(mid.seg()[0], mid.seg()[1], mid.seg()[2]),
                     new org.joml.Vector3d(mid.seg()[3], mid.seg()[4], mid.seg()[5]),
                     mn1, mn2, radius, qd);
+            // ★ 与求值一致：首段结论必须与中间段一致，否则视为不可判定（不画/不建）✓
+            if (gq[i] == 1 || gq[i] == 3) {
+                final FilletPick f0 = g.get(0);
+                final double[] qdF = new double[4];
+                final int qF = com.ovo.sablestopnow.sketch.Solid.filletQuadrant(
+                        pt -> insideAnyBox(pt),
+                        new org.joml.Vector3d(f0.seg()[0], f0.seg()[1], f0.seg()[2]),
+                        new org.joml.Vector3d(f0.seg()[3], f0.seg()[4], f0.seg()[5]),
+                        f0.n1() == null ? mn1 : f0.n1(),
+                        f0.n2() == null ? mn2 : f0.n2(), radius, qdF);
+                if ((qF == 1 || qF == 3) && qF != gq[i]) {
+                    gq[i] = 0; // 不可判定
+                }
+            }
+            if (System.currentTimeMillis() - lastFilletPreviewLog > 2000L) {
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                        "[fillet] group segs={} quads={}/4 pattern={} a={}",
+                        g.size(), gq[i], (int) qd[3], g.get(0).seg());
+            }
         }
         // ② 凸/凹过渡：与**相反分类**的组共顶点 ⇒ 该端半径收小（与求值一致）✓
         final boolean[] tStart = new boolean[gn];
@@ -2738,13 +2757,19 @@ public final class ModelUi {
                     ? new org.joml.Vector3d(0, 0, 0) : first.n1();
             final org.joml.Vector3d n2 = first.n2() == null
                     ? new org.joml.Vector3d(0, 0, 0) : first.n2();
+            // ★ 引用必须指向**拥有这条棱的材料实体**：hover 到孔壁时给的是切割体 id，
+            //   挂到切割体上永远不会被求值（"创建后模型不变"的另一个真因）✓
+            final org.joml.Vector3d gMid = new org.joml.Vector3d(
+                    (first.seg()[0] + first.seg()[3]) * 0.5,
+                    (first.seg()[1] + first.seg()[4]) * 0.5,
+                    (first.seg()[2] + first.seg()[5]) * 0.5);
+            java.util.UUID ownerId = pipSolid(filletSourceSolid, gMid);
+            if (ownerId == null) {
+                ownerId = filletSolidId;
+            }
             if (g.size() == 1) {
                 refs.add(new com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef(
-                        filletSolidId != null ? filletSolidId
-                                : pipSolid(filletSourceSolid, new org.joml.Vector3d(
-                                        (first.seg()[0] + first.seg()[3]) * 0.5,
-                                        (first.seg()[1] + first.seg()[4]) * 0.5,
-                                        (first.seg()[2] + first.seg()[5]) * 0.5)),
+                        ownerId,
                         first.seg()[0], first.seg()[1], first.seg()[2],
                         first.seg()[3], first.seg()[4], first.seg()[5],
                         n1.x, n1.y, n1.z, n2.x, n2.y, n2.z));
@@ -2762,9 +2787,7 @@ public final class ModelUi {
                 curve[kk++] = pick.seg()[5];
             }
             refs.add(new com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef(
-                    filletSolidId != null ? filletSolidId
-                            : pipSolid(filletSourceSolid,
-                                    new org.joml.Vector3d(curve[0], curve[1], curve[2])),
+                    ownerId,
                     curve[0], curve[1], curve[2],
                     curve[kk - 3], curve[kk - 2], curve[kk - 1],
                     n1.x, n1.y, n1.z, n2.x, n2.y, n2.z, curve));

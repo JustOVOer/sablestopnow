@@ -177,6 +177,124 @@ public final class FilletCutter {
     }
 
     /**
+     * **沿一条折线**扫出圆角楔块 ✓（曲线棱专用：整条弧一个整体，不是逐段棱柱）
+     *
+     * <p>逐段棱柱在弧形上会在相邻段之间留下**楔形空隙**（用户实测"每个小圆角之间有间隙"）；
+     * 扫掠体在关节处用**角平分面**（miter）连接 ⇒ 整条弧是连续的一根圆角 ✓
+     *
+     * @param points 折线点（首尾相接；闭合链把最后一个点写成第一个点即可）
+     * @param cap    盖面法线（单位向量，参考法线 n1）
+     * @param radius 半径
+     * @param q1     ±1：楔块沿 cap 的哪一侧延伸
+     * @param q2     ±1：楔块沿 (T×cap) 的哪一侧延伸
+     * @return 三角面列表；退化时返回空
+     */
+    public static List<Vector3d[]> sweep(final List<Vector3d> points, final Vector3dc cap,
+                                         final double radius, final int q1, final int q2) {
+        final List<Vector3d[]> out = new ArrayList<>();
+        if (points == null || points.size() < 2 || radius <= 1.0e-6) {
+            return out;
+        }
+        final Vector3d n = new Vector3d(cap);
+        if (n.lengthSquared() < 1.0e-9) {
+            return out;
+        }
+        n.normalize();
+        // 去掉连续重复点
+        final List<Vector3d> pts = new ArrayList<>();
+        for (final Vector3d p : points) {
+            if (!pts.isEmpty() && pts.get(pts.size() - 1).distanceSquared(p) < 1.0e-12) {
+                continue;
+            }
+            pts.add(new Vector3d(p));
+        }
+        if (pts.size() < 2) {
+            return out;
+        }
+        final boolean closed = pts.size() > 2
+                && pts.get(0).distanceSquared(pts.get(pts.size() - 1)) < 1.0e-10;
+        if (closed) {
+            pts.remove(pts.size() - 1);
+        }
+        final int m = pts.size();
+        if (m < 2) {
+            return out;
+        }
+        // 每个关节的切线（内部用前后点的角平分方向）
+        final Vector3d[] tan = new Vector3d[m];
+        for (int i = 0; i < m; i++) {
+            final boolean first = i == 0;
+            final boolean last = i == m - 1;
+            final Vector3d prev = closed ? pts.get((i - 1 + m) % m) : (first ? pts.get(0) : pts.get(i - 1));
+            final Vector3d next = closed ? pts.get((i + 1) % m) : (last ? pts.get(m - 1) : pts.get(i + 1));
+            final Vector3d t = new Vector3d(next).sub(prev);
+            if (t.lengthSquared() < 1.0e-12) {
+                // 端点退化成单段方向
+                if (first) {
+                    t.set(new Vector3d(pts.get(1)).sub(pts.get(0)));
+                } else {
+                    t.set(new Vector3d(pts.get(m - 1)).sub(pts.get(m - 2)));
+                }
+            }
+            if (t.lengthSquared() < 1.0e-12) {
+                return out;
+            }
+            tan[i] = t.normalize();
+        }
+        // 每个关节的截面（角平分面内），点数必须一致
+        final List<List<Vector3d>> sections = new ArrayList<>(m);
+        for (int i = 0; i < m; i++) {
+            final Vector3d side = new Vector3d(tan[i]).cross(n);
+            if (side.lengthSquared() < 1.0e-9) {
+                return out;
+            }
+            side.normalize();
+            final Vector3d e1 = new Vector3d(n).mul(q1);
+            final Vector3d e2 = side.mul(q2);
+            final List<Vector3d> sec = sectionOffsets(
+                    new Vector3d(e1).negate(), new Vector3d(e2).negate(), radius);
+            if (sec.size() < 3) {
+                return out;
+            }
+            final List<Vector3d> placed = new ArrayList<>(sec.size());
+            for (final Vector3d off : sec) {
+                placed.add(new Vector3d(pts.get(i)).add(off));
+            }
+            sections.add(placed);
+        }
+        final int k = sections.get(0).size();
+        for (int i = 0; i < m; i++) {
+            for (final List<Vector3d> s : sections) {
+                if (s.size() != k) {
+                    return out;
+                }
+            }
+        }
+        final int rings = closed ? m : m - 1;
+        for (int i = 0; i < rings; i++) {
+            final List<Vector3d> a = sections.get(i);
+            final List<Vector3d> b = sections.get((i + 1) % m);
+            for (int j = 0; j < k; j++) {
+                final int j2 = (j + 1) % k;
+                out.add(new Vector3d[] {a.get(j), b.get(j), b.get(j2)});
+                out.add(new Vector3d[] {a.get(j), b.get(j2), a.get(j2)});
+            }
+        }
+        if (!closed) {
+            // 两端封口（扇形；截面关于角点星形 ⇒ 用 0 号点扇开）
+            final List<Vector3d> s0 = sections.get(0);
+            for (int j = 1; j + 1 < k; j++) {
+                out.add(new Vector3d[] {s0.get(0), s0.get(j + 1), s0.get(j)});
+            }
+            final List<Vector3d> s1 = sections.get(m - 1);
+            for (int j = 1; j + 1 < k; j++) {
+                out.add(new Vector3d[] {s1.get(0), s1.get(j), s1.get(j + 1)});
+            }
+        }
+        return out;
+    }
+
+    /**
      * **预览用**：圆角的两条切线与圆弧折线 ✓（与 {@link #section} 同一套数学，保证预览不骗人）
      */
     public static List<Vector3d[]> outline(final Vector3dc a, final Vector3dc b,

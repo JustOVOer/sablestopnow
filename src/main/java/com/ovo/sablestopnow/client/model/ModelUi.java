@@ -2484,19 +2484,30 @@ public final class ModelUi {
         int cut = 0;
         int fill = 0;
         int skipped = 0;
+        // ★ 按"一次点选"分组：直线棱 = 1 段；曲线棱 = 整条弧 ⇒ **一个扫掠体**
+        //   逐段画棱柱会在弧的关节处留空隙（用户实测"每个小圆角之间有间隙"）
+        final java.util.LinkedHashMap<Integer, java.util.List<FilletPick>> groups =
+                new java.util.LinkedHashMap<>();
         for (final FilletPick pick : filletPicks) {
-            final org.joml.Vector3d a = new org.joml.Vector3d(
-                    pick.seg()[0], pick.seg()[1], pick.seg()[2]);
-            final org.joml.Vector3d b = new org.joml.Vector3d(
-                    pick.seg()[3], pick.seg()[4], pick.seg()[5]);
-            final org.joml.Vector3d n1 = pick.n1() == null
-                    ? new org.joml.Vector3d(0, 1, 0) : pick.n1();
-            final org.joml.Vector3d n2 = pick.n2() == null
-                    ? new org.joml.Vector3d(1, 0, 0) : pick.n2();
-            // 与求值同源：1 个实心象限 = 凸（楔块就在该象限）；3 个 = 凹（楔块在唯一空的象限）
+            groups.computeIfAbsent(pick.group(), k -> new java.util.ArrayList<>()).add(pick);
+        }
+        for (final java.util.List<FilletPick> g : groups.values()) {
+            final FilletPick first = g.get(0);
+            final org.joml.Vector3d n1 = first.n1() == null
+                    ? new org.joml.Vector3d(0, 1, 0) : first.n1();
+            final org.joml.Vector3d n2 = first.n2() == null
+                    ? new org.joml.Vector3d(1, 0, 0) : first.n2();
+            final int midIdx = (g.size() - 1) / 2;
+            final FilletPick mid = g.get(midIdx);
+            final org.joml.Vector3d midN1 = mid.n1() == null ? n1 : mid.n1();
+            final org.joml.Vector3d midN2 = mid.n2() == null ? n2 : mid.n2();
+            final org.joml.Vector3d ma = new org.joml.Vector3d(
+                    mid.seg()[0], mid.seg()[1], mid.seg()[2]);
+            final org.joml.Vector3d mb = new org.joml.Vector3d(
+                    mid.seg()[3], mid.seg()[4], mid.seg()[5]);
             final double[] qd = new double[4];
             final int quads = com.ovo.sablestopnow.sketch.Solid.filletQuadrant(
-                    pt -> insideAnyBox(pt), a, b, n1, n2, radius, qd);
+                    pt -> insideAnyBox(pt), ma, mb, midN1, midN2, radius, qd);
             if (quads != 1 && quads != 3) {
                 skipped++;
                 continue;
@@ -2506,11 +2517,28 @@ public final class ModelUi {
             } else {
                 cut++;
             }
-            // prism 内部把传入法线取反当延伸方向 ⇒ 传 −q1·n1、−q2·n2
-            final org.joml.Vector3d m1 = new org.joml.Vector3d(n1).mul(-qd[0]);
-            final org.joml.Vector3d m2 = new org.joml.Vector3d(n2).mul(-qd[1]);
-            final java.util.List<org.joml.Vector3d[]> tris =
-                    com.ovo.sablestopnow.sketch.FilletCutter.prism(a, b, m1, m2, radius);
+            final java.util.List<org.joml.Vector3d[]> tris;
+            if (g.size() > 1) {
+                final java.util.List<org.joml.Vector3d> pts =
+                        new java.util.ArrayList<>(g.size() + 1);
+                pts.add(new org.joml.Vector3d(
+                        first.seg()[0], first.seg()[1], first.seg()[2]));
+                for (final FilletPick pick : g) {
+                    pts.add(new org.joml.Vector3d(
+                            pick.seg()[3], pick.seg()[4], pick.seg()[5]));
+                }
+                tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts, n1, radius,
+                        (int) Math.round(qd[0]), (int) Math.round(qd[1]));
+            } else {
+                final org.joml.Vector3d m1 = new org.joml.Vector3d(n1).mul(-qd[0]);
+                final org.joml.Vector3d m2 = new org.joml.Vector3d(n2).mul(-qd[1]);
+                tris = com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                        new org.joml.Vector3d(
+                                first.seg()[0], first.seg()[1], first.seg()[2]),
+                        new org.joml.Vector3d(
+                                first.seg()[3], first.seg()[4], first.seg()[5]),
+                        m1, m2, radius);
+            }
             if (tris == null) {
                 continue;
             }

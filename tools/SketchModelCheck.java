@@ -608,6 +608,83 @@ public final class SketchModelCheck {
                 "corner-blend: 尖角必须被切掉（点 " + gone + "）");
     }
 
+    /**
+     * **曲线棱的扫掠体** ✓（曲线棱 = 整条弧一个楔块，不是逐段棱柱）
+     *
+     * <p>逐段棱柱在弧的关节处会留楔形空隙（用户实测"每个小圆角之间有间隙"）。
+     * 扫掠体必须是**封闭流形**，且体积 ≈ 截面 × 弧长。
+     */
+    private static void filletSweepCurved() {
+        final double r = 0.25;
+        final double radius = 1.5;
+        final int n = 20;
+        final java.util.List<org.joml.Vector3d> pts = new java.util.ArrayList<>();
+        for (int i = 0; i <= n; i++) {
+            final double th = 0.5 * Math.PI * i / n;
+            pts.add(new org.joml.Vector3d(radius * Math.cos(th), radius * Math.sin(th), 0.0));
+        }
+        final java.util.List<org.joml.Vector3d[]> tris =
+                com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts,
+                        new org.joml.Vector3d(0, 0, 1), r, 1, 1);
+        check(tris != null && !tris.isEmpty(), "fillet-sweep: 扫掠体非空");
+        pathlib_Diag("fillet-sweep open tris=" + (tris == null ? -1 : tris.size()));
+        check(!hasNonManifoldEdge(tris), "fillet-sweep: 开链扫掠体必须是封闭流形");
+        final double area = r * r - Math.PI * r * r / 4.0;
+        final double expect = area * (radius * Math.PI / 2.0);
+        final double vol = Math.abs(volume(
+                com.ovo.sablestopnow.sketch.Solid.triPolys(tris)));
+        pathlib_Diag("fillet-sweep open vol=" + vol + " expect≈" + expect);
+        check(Math.abs(vol - expect) < Math.max(2.0e-3, expect * 0.06),
+                "fillet-sweep: 体积必须≈截面×弧长（" + vol + " vs " + expect + "）");
+
+        // 闭合整圈（圆环）：没有端盖，也必须封闭
+        final java.util.List<org.joml.Vector3d> ring = new java.util.ArrayList<>();
+        for (int i = 0; i <= n; i++) {
+            final double th = 2.0 * Math.PI * i / n;
+            ring.add(new org.joml.Vector3d(radius * Math.cos(th), radius * Math.sin(th), 0.0));
+        }
+        ring.set(ring.size() - 1, new org.joml.Vector3d(ring.get(0)));
+        final java.util.List<org.joml.Vector3d[]> ringTris =
+                com.ovo.sablestopnow.sketch.FilletCutter.sweep(ring,
+                        new org.joml.Vector3d(0, 0, 1), r, 1, 1);
+        check(ringTris != null && !ringTris.isEmpty(), "fillet-sweep: 闭合圆环非空");
+        pathlib_Diag("fillet-sweep ring tris=" + (ringTris == null ? -1 : ringTris.size()));
+        check(!hasNonManifoldEdge(ringTris), "fillet-sweep: 闭合圆环必须是无端盖的封闭流形");
+        final double ringVol = Math.abs(volume(
+                com.ovo.sablestopnow.sketch.Solid.triPolys(ringTris)));
+        final double ringExpect = area * (2.0 * Math.PI * radius);
+        check(Math.abs(ringVol - ringExpect) < Math.max(4.0e-3, ringExpect * 0.06),
+                "fillet-sweep: 圆环体积必须≈截面×周长（" + ringVol + " vs "
+                        + ringExpect + "）");
+    }
+
+    /** 有非流形边吗（每条边必须恰好被 2 个三角形共用）✓ */
+    private static boolean hasNonManifoldEdge(final java.util.List<org.joml.Vector3d[]> tris) {
+        if (tris == null || tris.isEmpty()) {
+            return true;
+        }
+        final java.util.Map<String, Integer> ec = new java.util.HashMap<>();
+        for (final org.joml.Vector3d[] t : tris) {
+            for (int k = 0; k < 3; k++) {
+                final org.joml.Vector3d p = t[k];
+                final org.joml.Vector3d q = t[(k + 1) % 3];
+                final String e1 = key(p) + "|" + key(q);
+                final String e2 = key(q) + "|" + key(p);
+                if (ec.containsKey(e2)) {
+                    ec.merge(e2, 1, Integer::sum);
+                } else {
+                    ec.merge(e1, 1, Integer::sum);
+                }
+            }
+        }
+        for (final int c : ec.values()) {
+            if (c != 2) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean near3(final double[] a, final int ia,
                                  final double[] b, final int ib) {
         return Math.abs(a[ia] - b[ib]) < 1.0e-3
@@ -1138,6 +1215,7 @@ public final class SketchModelCheck {
         referenceOutlineStraightOnly();
         curveChainMerging();
         cornerBlendGeometry();
+        filletSweepCurved();
         ensureOutwardSign();
         boxMeshWinding();
         filletPrismSolid();

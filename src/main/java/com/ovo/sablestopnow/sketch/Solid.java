@@ -981,10 +981,14 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             byId.put(s2.id(), s2);
         }
         final java.util.Map<UUID, List<Csg.Polygon>> filletPolyByBody = new java.util.HashMap<>();
-        // ★ 原始棱数据（a,b,n1,n2,r）：几何验证式求值用 ✓
+        // ★ 原始棱数据（a,b,n1,n2,r[,curveGroup]）：几何验证式求值用 ✓
+        //   **按"被引用的实体 id"归集**（不是 body）：一个 body 可能有多个材料实体，
+        //   圆角只能作用在**拥有这条棱的那个实体**上，否则探针看到的盒子/CSG 全在别处
+        //   ⇒ 实测 quads 0/4（"创建后模型没变化"的真正原因）✓
         final StringBuilder filletLog = new StringBuilder();
-        final java.util.Map<UUID, List<double[]>> filletEdgeByBody =
+        final java.util.Map<UUID, List<double[]>> filletEdgeBySolid =
                 new java.util.HashMap<>();
+        int curveGroupSeq = 0;
 
         final java.util.function.BiFunction<Solid, Sketch, Eval> baseEvalOf = (srcS, sk) -> {
             if (srcS == null || sk == null) {
@@ -1091,7 +1095,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
                 // ★ 曲线棱（一条弧 = 一个 EdgeRef + 折线）⇒ 逐段展开 ✓
                 //   直线棱只有一段，行为与以前完全一致。
+                //   同一条曲线的所有段共享 **curveGroup**（求值时合成一个扫掠体）。
                 final double rr = f.radius();
+                final int curveGroup = ref.isCurve() ? (++curveGroupSeq) : -1;
                 final java.util.List<double[]> segsToUse = ref.isCurve()
                         ? ref.curveSegs()
                         : java.util.List.of(new double[] {a.x, a.y, a.z, b.x, b.y, b.z});
@@ -1111,9 +1117,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     } else {
                         segN2.normalize();
                     }
-                    filletEdgeByBody.computeIfAbsent(s2.body(), k2 -> new ArrayList<>())
+                    filletEdgeBySolid.computeIfAbsent(src.id(), k2 -> new ArrayList<>())
                             .add(new double[] {sa.x, sa.y, sa.z, sb.x, sb.y, sb.z,
-                                segN1.x, segN1.y, segN1.z, segN2.x, segN2.y, segN2.z, rr});
+                                segN1.x, segN1.y, segN1.z, segN2.x, segN2.y, segN2.z, rr,
+                                curveGroup});
                     final List<Vector3d[]> tris = FilletCutter.prism(sa, sb, segN1, segN2, rr);
                     if (tris == null || tris.isEmpty()) {
                         continue;
@@ -1207,6 +1214,19 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             bodyCutters.addAll(filletCuts);
             // ① 碰撞/几何：仍是**盒子相减** ✓（物理只吃盒子，稳且快 ✓）
             final List<double[]> boxes = cut ? subtractBoxes(rawBoxes, bodyCutters) : rawBoxes;
+            // ★ 圆角象限探针用的盒子 = **只扣切割、不扣圆角**的材料 ✓
+            //   如果拿扣过圆角的盒子做探针，探针正好落在"已经被圆角挖掉的区域"
+            //   ⇒ 全部判成体外（实测 quads 0/4 × 96 ⇒ 整条弧一条都没倒成）
+            final List<double[]> probeBoxes;
+            if (feats != null && !feats.isEmpty()) {
+                final List<double[]> cutOnly = new ArrayList<>();
+                for (final CutFeat f : feats) {
+                    cutOnly.addAll(f.boxes());
+                }
+                probeBoxes = cutOnly.isEmpty() ? rawBoxes : subtractBoxes(rawBoxes, cutOnly);
+            } else {
+                probeBoxes = rawBoxes;
+            }
             // ② 渲染：**CSG 真布尔** ✓ —— 外观保持原样（顶点带 normal+uv ⇒ 贴图照常）✓
             SolidMesh.Mesh mesh = solid.mesh(sketch);
             List<Vector3d[]> drawnEdges = edges;
@@ -1248,20 +1268,19 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
                 lastCsgDiag = "tris target=" + targetTris + " cutter=" + cutterTris
                         + " resultPolys=" + acc.size();
-                // ★ item 8：圆角参与 CSG 减法 —— **通用方案**：沿棱扫出多边形棱柱（任意朝向）✓
-                //   盒子路径仍保留：给碰撞用（轴对齐时精确），渲染用棱柱 ⇒ 斜棱也能倒圆 ✓
-                // ★ 几何验证式圆角求值（凸棱减料 / 凹棱补料，四象限择优）✓
+                // ★ 圆角数据按**实体 id**取（一个 body 可能有多个材料实体）
                 final List<double[]> filletEdgeData =
-                        filletEdgeByBody.getOrDefault(solid.body(), List.of());
-                trace("fillet: solid idx=" + solid.index() + " body=" + shortId(solid.body())
+                        filletEdgeBySolid.getOrDefault(solid.id(), List.of());
+                trace("fillet: solid idx=" + solid.index() + " id=" + shortId(solid.id())
+                        + " body=" + shortId(solid.body())
                         + " edgeData=" + filletEdgeData.size()
-                        + " byBodyKeys=[" + bodyKeys(filletEdgeByBody) + "]");
+                        + " bySolidKeys=[" + bodyKeys(filletEdgeBySolid) + "]");
                 if (!filletEdgeData.isEmpty()) {
                     if (filletLog.length() < 400) {
                         filletLog.append(" [s").append(solid.index()).append(']');
                     }
                     acc = applyFillets(acc, filletEdgeData, solid.index(), "solid", filletLog,
-                            boxes);
+                            probeBoxes);
                 }
                 if (!filletCuts.isEmpty()) {
                     final List<Csg.Polygon> fb = CsgMesh.fromMesh(
@@ -1543,16 +1562,6 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      * 不经过主循环里的 CSG 减法 ⇒ 之前"镜像/阵列出来的模型上无法创建圆角"（用户实测）。
      */
 
-    /**
-     * **在局部原点附近做差集** ✓（bug ⑩ 的修法）
-     *
-     * <h2>为什么必须这样</h2>
-     * 玩家的模型在 2.0e7 附近，而 csg.js 的 BSP 用**绝对坐标**做平面分类
-     * （{@code EPSILON = 1e-5}）。坐标越大，浮点舍入相对越大 ⇒ 分类不稳定 ⇒
-     * 差集可能退化成"补集/碎片"：**原来的点线面都点不到，只剩被挖掉的那块**（实测）。
-     * 把两个操作数平移到 A 的第一个顶点附近再算，结束后平移回去 ⇒ 数值上等于
-     * 我们离线验证过（在原点）的那种情况 ✓
-     */
 
     /** 局部原点下做**交集**（与 subtractLocal 同一套数值处理）✓ */
     private static List<Csg.Polygon> intersectLocal(final List<Csg.Polygon> base,
@@ -1584,17 +1593,21 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     }
 
     /**
-     * 把一批圆角棱**应用到材料上** ✓（凸棱减料 / 凹棱补料，靠几何验证选择）
+     * 把一批圆角棱**应用到材料上** ✓（凸棱减料 / 凹棱补料，四象限探针定象限）
      *
-     * <p>每条棱对**四个象限**各建一次楔块，然后：
+     * <h2>为什么按"项"（item）而不是按"段"处理</h2>
+     * 曲线棱在文件里是**一个** EdgeRef + 折线，求值时展开成很多小段。逐段建棱柱会在
+     * 弧的关节处留下**楔形空隙**（用户实测"每个小圆角之间有间隙"）⇒ 这里把同一
+     * {@code curveGroup} 的连续段合成**一个扫掠体**（{@link FilletCutter#sweep}）：
      * <ul>
-     *   <li>{@code in = 楔块 ∩ 材料}：体积 ≈ 理论值 ⇒ **凸棱** ⇒ 材料 − 楔块</li>
-     *   <li>{@code out = 楔块 − 材料}：体积 ≈ 理论值 ⇒ **凹棱** ⇒ 材料 ∪ 楔块</li>
+     *   <li>整条弧只做**一次**分类（中间段探针）⇒ 不会出现"个别碎棱没倒"</li>
+     *   <li>只做**一次**布尔 ⇒ 几十段也不卡</li>
+     *   <li>关节用角平分面连接 ⇒ 表面连续</li>
      * </ul>
-     * 两者都不像 ⇒ **跳过**（宁可不倒角，也绝不产出垃圾几何）✓
      *
-     * <p>这样就不再依赖"两个法线必须都朝外"这种不可靠的前提（实测会出现一内一外，
-     * 导致预览圆成"补角"、本体被毁）。
+     * <h2>凸/凹判定</h2>
+     * 棱中点沿四条角平分线、距离 {@code 0.5r} 各一个探针：1 个实心=凸（减料）、
+     * 3 个实心=凹（补料）；2/0/4 说明不是棱或被薄壁骗了，从**相邻**项继承或跳过。
      */
     private static List<Csg.Polygon> applyFillets(final List<Csg.Polygon> acc,
                                                   final List<double[]> edges,
@@ -1606,87 +1619,124 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         if (en == 0) {
             return out;
         }
-        // ★ 探针材料：**用碰撞盒子**（体素化结果，与实际材料一致）✓
-        //   之前用 CSG 多边形做射线奇偶测试，孔洞/自相交的累积网格会给出"全都在外面"
-        //   （实测 quads 0/4 × 48 ⇒ 整条曲线棱一条都没倒成）。盒子是布尔后的真实材料，
-        //   而且和**预览**用的是同一份数据 ⇒ 预览=结果 ✓
+        // ★ 探针材料：**用碰撞盒子**（体素化后的真实材料，与预览同一份数据）✓
         final boolean useBoxes = materialBoxes != null && !materialBoxes.isEmpty();
         final List<Csg.Polygon> base = out; // lambda 只能捕获 effectively-final
         final java.util.function.Predicate<Vector3d> probe = useBoxes
                 ? pt -> insideBoxes(materialBoxes, pt)
                 : pt -> containsPoint(base, pt);
-        // ① 逐条棱算象限：1 实心=凸、3 实心=凹（与法线符号无关）
-        final int[] quadsArr = new int[en];
-        final double[][] qdArr = new double[en][];
-        final double[] theoryArr = new double[en];
-        final double[] radiusArr = new double[en];
-        for (int i = 0; i < en; i++) {
-            final double[] e = edges.get(i);
-            final Vector3d a = new Vector3d(e[0], e[1], e[2]);
-            final Vector3d b = new Vector3d(e[3], e[4], e[5]);
-            final Vector3d n1 = new Vector3d(e[6], e[7], e[8]);
-            final Vector3d n2 = new Vector3d(e[9], e[10], e[11]);
-            final double r = e[12];
-            radiusArr[i] = r;
-            final double len = a.distance(b);
-            if (r <= 1.0e-6 || len < 1.0e-6) {
-                quadsArr[i] = -1;
-                continue;
+
+        // ① 分组：同一 curveGroup 的连续段 = 一条曲线（合成一个扫掠体）
+        final List<int[]> items = new ArrayList<>();
+        for (int i = 0; i < en; ) {
+            final int g = curveGroupOf(edges.get(i));
+            int j = i + 1;
+            if (g >= 0) {
+                while (j < en && curveGroupOf(edges.get(j)) == g) {
+                    j++;
+                }
             }
-            theoryArr[i] = (r * r - Math.PI * r * r / 4.0) * len;
-            final double[] qd = new double[4];
-            qdArr[i] = qd;
-            quadsArr[i] = filletQuadrant(probe, a, b, n1, n2, r, qd);
+            items.add(new int[] {i, j});
+            i = j;
         }
-        // ② 曲线链里个别段（正好落在体素盒子边界上）探针会得到 0/4 或 2/4 ⇒
-        //    借用**相邻**棱段的象限（同一链的基向量连续，象限符号一致）✓
-        for (int i = 0; i < en; i++) {
-            if (quadsArr[i] == 1 || quadsArr[i] == 3) {
+        // ② 每项分类（曲线用中间那段探针）+ 理论体积
+        final int ni = items.size();
+        final int[] itemQuads = new int[ni];
+        final double[][] itemQd = new double[ni][];
+        final double[] itemTheory = new double[ni];
+        for (int it = 0; it < ni; it++) {
+            final int[] rg = items.get(it);
+            final int mid = (rg[0] + rg[1] - 1) / 2;
+            double theory = 0.0;
+            for (int i = rg[0]; i < rg[1]; i++) {
+                final double[] e = edges.get(i);
+                final double r = e[12];
+                final double dx = e[3] - e[0];
+                final double dy = e[4] - e[1];
+                final double dz = e[5] - e[2];
+                final double len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                theory += (r * r - Math.PI * r * r / 4.0) * len;
+            }
+            itemTheory[it] = theory;
+            final double[] e = edges.get(mid);
+            final double[] qd = new double[4];
+            itemQd[it] = qd;
+            itemQuads[it] = filletQuadrant(probe,
+                    new Vector3d(e[0], e[1], e[2]), new Vector3d(e[3], e[4], e[5]),
+                    new Vector3d(e[6], e[7], e[8]), new Vector3d(e[9], e[10], e[11]),
+                    e[12], qd);
+        }
+        // ③ 曲线链里个别项探针落在盒子边界（0/4、2/4）⇒ 从**相邻**项继承象限 ✓
+        for (int it = 0; it < ni; it++) {
+            if (itemQuads[it] == 1 || itemQuads[it] == 3) {
                 continue;
             }
             boolean inherited = false;
-            for (int j = 0; j < en; j++) {
-                if (j == i || (quadsArr[j] != 1 && quadsArr[j] != 3)
-                        || !shareEndpoint(edges.get(i), edges.get(j))) {
+            for (int jt = 0; jt < ni; jt++) {
+                if (jt == it || (itemQuads[jt] != 1 && itemQuads[jt] != 3)
+                        || !itemsTouch(edges, items.get(it), items.get(jt))) {
                     continue;
                 }
-                qdArr[i] = qdArr[j];
-                quadsArr[i] = quadsArr[j];
+                itemQd[it] = itemQd[jt];
+                itemQuads[it] = itemQuads[jt];
                 inherited = true;
                 break;
             }
             log.append(" [f").append(index).append(inherited ? ":inh]" : ":quads "
-                    + quadsArr[i] + "/4]");
+                    + itemQuads[it] + "/4]");
         }
-        // ③ 造楔块（凸=切料，凹=补料）
+        // ④ 造楔块 / 扫掠体（凸=切料，凹=补料）
         final List<List<Csg.Polygon>> cutWedges = new ArrayList<>();
         final List<List<Csg.Polygon>> fillWedges = new ArrayList<>();
         final List<double[]> cutEdges = new ArrayList<>();
-        for (int i = 0; i < en; i++) {
-            final int quads = quadsArr[i];
+        for (int it = 0; it < ni; it++) {
+            final int quads = itemQuads[it];
             if (quads != 1 && quads != 3) {
                 continue;
             }
-            final double[] e = edges.get(i);
-            final double[] qd = qdArr[i];
-            final double r = radiusArr[i];
-            final Vector3d a = new Vector3d(e[0], e[1], e[2]);
-            final Vector3d b = new Vector3d(e[3], e[4], e[5]);
-            final Vector3d n1 = new Vector3d(e[6], e[7], e[8]);
-            final Vector3d n2 = new Vector3d(e[9], e[10], e[11]);
-            final Vector3d dir = new Vector3d(b).sub(a).normalize();
+            final int[] rg = items.get(it);
+            final double[] qd = itemQd[it];
             final boolean concave = quads == 3;
-            trace("fillet:  quads=" + quads + "/4 pattern=" + (int) qd[3]
-                    + " -> " + (concave ? "concave(fill)" : "convex(cut)") + " idx=" + index);
-            // prism 内部把"传入法线"取反当作楔块的延伸方向 ⇒ 传 −q1·n1、−q2·n2
-            final Vector3d m1 = new Vector3d(n1).mul(-qd[0]);
-            final Vector3d m2 = new Vector3d(n2).mul(-qd[1]);
-            final List<Csg.Polygon> wedge = wedgePolys(a, b, m1, m2, r, dir, n1);
+            final boolean curve = rg[1] - rg[0] > 1;
+            final double[] e0 = edges.get(rg[0]);
+            final double r = e0[12];
+            final Vector3d cap = new Vector3d(e0[6], e0[7], e0[8]).normalize();
+            final List<Csg.Polygon> wedge;
+            if (curve) {
+                // 扫掠：整条弧一个封闭楔块 ✓
+                final List<Vector3d> pts = new ArrayList<>(rg[1] - rg[0] + 1);
+                pts.add(new Vector3d(e0[0], e0[1], e0[2]));
+                for (int i = rg[0]; i < rg[1]; i++) {
+                    final double[] ei = edges.get(i);
+                    pts.add(new Vector3d(ei[3], ei[4], ei[5]));
+                }
+                final double[] eMid = edges.get((rg[0] + rg[1] - 1) / 2);
+                final List<Vector3d[]> tris = FilletCutter.sweep(pts, cap, r,
+                        (int) Math.round(qd[0]), (int) Math.round(qd[1]));
+                if (tris == null || tris.isEmpty()) {
+                    log.append(" [f").append(index).append(":sweep-empty]");
+                    continue;
+                }
+                final Vector3d axisU = new Vector3d(eMid[3] - eMid[0],
+                        eMid[4] - eMid[1], eMid[5] - eMid[2]).normalize();
+                wedge = ensureOutward(triPolys(tris, axisU, cap));
+            } else {
+                final double[] e1 = edges.get(rg[0]);
+                final Vector3d a = new Vector3d(e1[0], e1[1], e1[2]);
+                final Vector3d b = new Vector3d(e1[3], e1[4], e1[5]);
+                final Vector3d dir = new Vector3d(b).sub(a).normalize();
+                final Vector3d m1 = new Vector3d(e1[6], e1[7], e1[8]).mul(-qd[0]);
+                final Vector3d m2 = new Vector3d(e1[9], e1[10], e1[11]).mul(-qd[1]);
+                wedge = wedgePolys(a, b, m1, m2, r, dir, cap);
+            }
             if (wedge.isEmpty()) {
                 log.append(" [f").append(index).append(":empty-prism]");
                 continue;
             }
-            final double theory = theoryArr[i];
+            trace("fillet:  quads=" + quads + "/4 pattern=" + (int) qd[3]
+                    + " -> " + (concave ? "concave(fill)" : "convex(cut)")
+                    + " idx=" + index + (curve ? " sweepSegs=" + (rg[1] - rg[0]) : ""));
+            final double theory = itemTheory[it];
             final double wedgeVol = Math.abs(polysVolume(wedge));
             if (wedgeVol > theory * 6.0 + 1.0e-3 || wedgeVol < theory * 0.25) {
                 log.append(" [f").append(index).append(":size ")
@@ -1709,19 +1759,23 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             log.append(" [f").append(index).append(concave ? ":fill " : ":cut ")
                     .append(String.format(java.util.Locale.ROOT, "%.4f/%.4f/%.4f",
                             inVol, outVol, theory))
-                    .append(ok ? " ok]" : " ?!]");
+                    .append(curve ? " c" : "").append(ok ? " ok]" : " ?!]");
             if (concave) {
                 fillWedges.add(wedge);
             } else {
                 cutWedges.add(wedge);
-                cutEdges.add(new double[] {a.x, a.y, a.z, b.x, b.y, b.z,
-                    n1.x, n1.y, n1.z, n2.x, n2.y, n2.z, r});
+                // 顶点混合的候选：曲线只取**两端**的段（内部关节是平滑的，不需要角球）
+                final int[] ends = curve
+                        ? new int[] {rg[0], rg[1] - 1} : new int[] {rg[0]};
+                for (final int ei : ends) {
+                    final double[] e = edges.get(ei);
+                    cutEdges.add(new double[] {e[0], e[1], e[2], e[3], e[4], e[5],
+                        e[6], e[7], e[8], e[9], e[10], e[11], e[12]});
+                }
             }
         }
-        // ④ 顶点混合：两条以上**切料**棱共用一个顶点时，只把各自楔块叠起来会在角上留尖刺。
-        //    在共顶点处再切掉"角块 − 半径 r 的球缺"（= 球心到三个面都是 r 的那块）✓
+        // ⑤ 顶点混合 + 统一应用（同类先合并成一个操作数，只做一次布尔）✓
         final List<List<Csg.Polygon>> corners = cornerBlends(cutEdges, log, index);
-        // ★ 统一应用：同类先合并成一个操作数，再对材料做一次布尔 ✓
         if (!cutWedges.isEmpty()) {
             out = subtractLocal(out, mergeWedges(cutWedges));
             log.append(" [cut n=").append(cutWedges.size()).append(']');
@@ -1735,6 +1789,23 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             log.append(" [fill n=").append(fillWedges.size()).append(']');
         }
         return out;
+    }
+
+    /** 边元组的曲线组号（-1 = 直线棱）✓ */
+    private static int curveGroupOf(final double[] e) {
+        return e != null && e.length > 13 ? (int) e[13] : -1;
+    }
+
+    /** 两组边是否共享端点 ✓（象限继承用） */
+    private static boolean itemsTouch(final List<double[]> edges, final int[] a, final int[] b) {
+        for (int i = a[0]; i < a[1]; i++) {
+            for (int j = b[0]; j < b[1]; j++) {
+                if (shareEndpoint(edges.get(i), edges.get(j))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** 点是否在任意碰撞盒子里 ✓（圆角象限探针用） */

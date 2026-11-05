@@ -230,6 +230,15 @@ public class SolidData extends SavedData {
                       et.putDouble("bx", e.bx());
                       et.putDouble("by", e.by());
                       et.putDouble("bz", e.bz());
+                    // ★★ 必须写入两个面法线！之前漏写 ⇒ 服务端回传后法线全为 0
+                    //   ⇒ placeAll 只能靠 faceNormals(网格) 兜底，兜不到就整条棱被跳过
+                    //   ⇒ 表现正是"**预览有、创建后毫无变化**"（碰撞盒不需要法线，所以照常生效）
+                    et.putDouble("n1x", e.n1x());
+                    et.putDouble("n1y", e.n1y());
+                    et.putDouble("n1z", e.n1z());
+                    et.putDouble("n2x", e.n2x());
+                    et.putDouble("n2y", e.n2y());
+                    et.putDouble("n2z", e.n2z());
                       edgeList.add(et);
                   }
                   entry.put("edges", edgeList);
@@ -353,10 +362,20 @@ public class SolidData extends SavedData {
                       final java.util.List<Solid.Shape.EdgeRef> refs = new java.util.ArrayList<>();
                       for (final Tag et : entry.getList("edges", Tag.TAG_COMPOUND)) {
                           final CompoundTag c = (CompoundTag) et;
-                          refs.add(new Solid.Shape.EdgeRef(
-                                  c.contains("src") ? NbtUtils.loadUUID(c.get("src")) : null,
-                                  c.getDouble("ax"), c.getDouble("ay"), c.getDouble("az"),
-                                  c.getDouble("bx"), c.getDouble("by"), c.getDouble("bz")));
+                          final java.util.UUID srcId = c.contains("src")
+                                  ? NbtUtils.loadUUID(c.get("src")) : null;
+                          if (c.contains("n1x")) {
+                              refs.add(new Solid.Shape.EdgeRef(srcId,
+                                      c.getDouble("ax"), c.getDouble("ay"), c.getDouble("az"),
+                                      c.getDouble("bx"), c.getDouble("by"), c.getDouble("bz"),
+                                      c.getDouble("n1x"), c.getDouble("n1y"), c.getDouble("n1z"),
+                                      c.getDouble("n2x"), c.getDouble("n2y"), c.getDouble("n2z")));
+                          } else {
+                              // 老存档没有法线字段 ⇒ 交给 faceNormals 兜底 ✓
+                              refs.add(new Solid.Shape.EdgeRef(srcId,
+                                      c.getDouble("ax"), c.getDouble("ay"), c.getDouble("az"),
+                                      c.getDouble("bx"), c.getDouble("by"), c.getDouble("bz")));
+                          }
                       }
                       yield new Solid.Shape.Fillet(entry.getDouble("radius"), refs);
                   }

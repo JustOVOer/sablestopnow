@@ -1168,7 +1168,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     if (filletLog.length() < 400) {
                         filletLog.append(" [s").append(solid.index()).append(']');
                     }
-                    acc = applyFillets(acc, filletEdgeData, solid.index(), "solid", filletLog);
+                    acc = applyFillets(acc, filletEdgeData, solid.index(), "solid", filletLog,
+                            boxes);
                 }
                 if (!filletCuts.isEmpty()) {
                     final List<Csg.Polygon> fb = CsgMesh.fromMesh(
@@ -1506,59 +1507,95 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     private static List<Csg.Polygon> applyFillets(final List<Csg.Polygon> acc,
                                                   final List<double[]> edges,
                                                   final int index, final String source,
-                                                  final StringBuilder log) {
+                                                  final StringBuilder log,
+                                                  final List<double[]> materialBoxes) {
         List<Csg.Polygon> out = acc;
-        final List<List<Csg.Polygon>> cutWedges = new ArrayList<>();
-        final List<List<Csg.Polygon>> fillWedges = new ArrayList<>();
-        for (final double[] e : edges) {
+        final int en = edges == null ? 0 : edges.size();
+        if (en == 0) {
+            return out;
+        }
+        // ★ 探针材料：**用碰撞盒子**（体素化结果，与实际材料一致）✓
+        //   之前用 CSG 多边形做射线奇偶测试，孔洞/自相交的累积网格会给出"全都在外面"
+        //   （实测 quads 0/4 × 48 ⇒ 整条曲线棱一条都没倒成）。盒子是布尔后的真实材料，
+        //   而且和**预览**用的是同一份数据 ⇒ 预览=结果 ✓
+        final boolean useBoxes = materialBoxes != null && !materialBoxes.isEmpty();
+        final List<Csg.Polygon> base = out; // lambda 只能捕获 effectively-final
+        final java.util.function.Predicate<Vector3d> probe = useBoxes
+                ? pt -> insideBoxes(materialBoxes, pt)
+                : pt -> containsPoint(base, pt);
+        // ① 逐条棱算象限：1 实心=凸、3 实心=凹（与法线符号无关）
+        final int[] quadsArr = new int[en];
+        final double[][] qdArr = new double[en][];
+        final double[] theoryArr = new double[en];
+        final double[] radiusArr = new double[en];
+        for (int i = 0; i < en; i++) {
+            final double[] e = edges.get(i);
             final Vector3d a = new Vector3d(e[0], e[1], e[2]);
             final Vector3d b = new Vector3d(e[3], e[4], e[5]);
             final Vector3d n1 = new Vector3d(e[6], e[7], e[8]);
             final Vector3d n2 = new Vector3d(e[9], e[10], e[11]);
             final double r = e[12];
+            radiusArr[i] = r;
             final double len = a.distance(b);
             if (r <= 1.0e-6 || len < 1.0e-6) {
+                quadsArr[i] = -1;
                 continue;
             }
-            final double theory = (r * r - Math.PI * r * r / 4.0) * len;
-            // 诊断：两法线夹角 φ 与理想内切圆参数 d —— 若 φ≈0（两面几乎平行）
-            // 则 d = r/sin(φ/2) 会爆炸，楔块巨大（实测 wedge=18 vs theory=0.05）
-            double cosPhi = Math.max(-1.0, Math.min(1.0, n1.dot(n2)));
-            final double phi = Math.acos(cosPhi);
-            trace("fillet:  apply n1=(" + fmt(n1.x) + "," + fmt(n1.y) + "," + fmt(n1.z)
-                    + ") n2=(" + fmt(n2.x) + "," + fmt(n2.y) + "," + fmt(n2.z)
-                    + ") phiDeg=" + String.format(java.util.Locale.ROOT, "%.2f",
-                            Math.toDegrees(phi))
-                    + " len=" + fmt(len) + " r=" + fmt(r) + " theory=" + fmt(theory));
-            // ── 凸/凹 + 楔块象限：**四象限探针** ✓（与 n1/n2 的符号无关）─────────
-            // 在棱中点沿四条角平分线、距离 0.5r 各取一个探针，数材料占几个象限：
-            //   1 个实心 ⇒ 凸棱：楔块就建在那个实心象限里 ⇒ **减料**
-            //   3 个实心 ⇒ 凹棱：楔块建在唯一空着的象限（缺口）⇒ **补料**
-            //   2 / 0 / 4 ⇒ 平面、台阶、或者根本不是棱 ⇒ 跳过（宁可不倒角）
-            // 这样就不依赖"n1/n2 必须都朝外"：象限是实测出来的，法线符号写反也能选对 ✓
-            final Vector3d dir = new Vector3d(b).sub(a).normalize();
+            theoryArr[i] = (r * r - Math.PI * r * r / 4.0) * len;
             final double[] qd = new double[4];
-            final List<Csg.Polygon> material = out; // lambda 只能捕获 effectively-final
-            final int quads = filletQuadrant(pt -> containsPoint(material, pt),
-                    a, b, n1, n2, r, qd);
-            if (quads != 1 && quads != 3) {
-                log.append(" [f").append(index).append(":quads ").append(quads).append("/4]");
+            qdArr[i] = qd;
+            quadsArr[i] = filletQuadrant(probe, a, b, n1, n2, r, qd);
+        }
+        // ② 曲线链里个别段（正好落在体素盒子边界上）探针会得到 0/4 或 2/4 ⇒
+        //    借用**相邻**棱段的象限（同一链的基向量连续，象限符号一致）✓
+        for (int i = 0; i < en; i++) {
+            if (quadsArr[i] == 1 || quadsArr[i] == 3) {
                 continue;
             }
+            boolean inherited = false;
+            for (int j = 0; j < en; j++) {
+                if (j == i || (quadsArr[j] != 1 && quadsArr[j] != 3)
+                        || !shareEndpoint(edges.get(i), edges.get(j))) {
+                    continue;
+                }
+                qdArr[i] = qdArr[j];
+                quadsArr[i] = quadsArr[j];
+                inherited = true;
+                break;
+            }
+            log.append(" [f").append(index).append(inherited ? ":inh]" : ":quads "
+                    + quadsArr[i] + "/4]");
+        }
+        // ③ 造楔块（凸=切料，凹=补料）
+        final List<List<Csg.Polygon>> cutWedges = new ArrayList<>();
+        final List<List<Csg.Polygon>> fillWedges = new ArrayList<>();
+        final List<double[]> cutEdges = new ArrayList<>();
+        for (int i = 0; i < en; i++) {
+            final int quads = quadsArr[i];
+            if (quads != 1 && quads != 3) {
+                continue;
+            }
+            final double[] e = edges.get(i);
+            final double[] qd = qdArr[i];
+            final double r = radiusArr[i];
+            final Vector3d a = new Vector3d(e[0], e[1], e[2]);
+            final Vector3d b = new Vector3d(e[3], e[4], e[5]);
+            final Vector3d n1 = new Vector3d(e[6], e[7], e[8]);
+            final Vector3d n2 = new Vector3d(e[9], e[10], e[11]);
+            final Vector3d dir = new Vector3d(b).sub(a).normalize();
             final boolean concave = quads == 3;
             trace("fillet:  quads=" + quads + "/4 pattern=" + (int) qd[3]
                     + " -> " + (concave ? "concave(fill)" : "convex(cut)") + " idx=" + index);
             // prism 内部把"传入法线"取反当作楔块的延伸方向 ⇒ 传 −q1·n1、−q2·n2
-            // 才能得到沿 (q1·n1, q2·n2) 那个象限的楔块 ✓
             final Vector3d m1 = new Vector3d(n1).mul(-qd[0]);
             final Vector3d m2 = new Vector3d(n2).mul(-qd[1]);
-            List<Csg.Polygon> wedge = wedgePolys(a, b, m1, m2, r, dir, n1);
+            final List<Csg.Polygon> wedge = wedgePolys(a, b, m1, m2, r, dir, n1);
             if (wedge.isEmpty()) {
                 log.append(" [f").append(index).append(":empty-prism]");
                 continue;
             }
+            final double theory = theoryArr[i];
             final double wedgeVol = Math.abs(polysVolume(wedge));
-            // 安全网：截面/法线异常时楔块会明显偏离理论体积 ⇒ 宁可不倒角，也不产出垃圾
             if (wedgeVol > theory * 6.0 + 1.0e-3 || wedgeVol < theory * 0.25) {
                 log.append(" [f").append(index).append(":size ")
                         .append(String.format(java.util.Locale.ROOT, "%.3f", wedgeVol))
@@ -1566,10 +1603,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         .append(']');
                 continue;
             }
-            final double inVol = Math.abs(polysVolume(intersectLocal(out, wedge)));
+            final List<Csg.Polygon> material = out;
+            final double inVol = Math.abs(polysVolume(intersectLocal(material, wedge)));
             final double outVol = Math.max(0.0, wedgeVol - inVol);
-            // 方向自检：凸棱的楔块应该几乎全在材料内；凹棱的应该几乎全在材料外。
-            // 完全反过来 ⇒ 探针被薄壁骗了 ⇒ 跳过，绝不把本体剪成补集
             if (concave ? (inVol > 0.95 * wedgeVol) : (inVol < 0.05 * wedgeVol)) {
                 log.append(" [f").append(index).append(":side ")
                         .append(String.format(java.util.Locale.ROOT, "%.4f/%.4f",
@@ -1586,20 +1622,233 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 fillWedges.add(wedge);
             } else {
                 cutWedges.add(wedge);
+                cutEdges.add(new double[] {a.x, a.y, a.z, b.x, b.y, b.z,
+                    n1.x, n1.y, n1.z, n2.x, n2.y, n2.z, r});
             }
         }
-        // ★ 统一应用：同类楔块先合并成**一个**操作数，再对材料做一次布尔 ✓
-        //   曲线棱是几十段 → 逐段对整块材料跑 CSG 会明显卡；合并后只做 1~2 次。
-        //   单条直棱时合并退化成"原样返回"，与旧行为逐字节一致 ✓
+        // ④ 顶点混合：两条以上**切料**棱共用一个顶点时，只把各自楔块叠起来会在角上留尖刺。
+        //    在共顶点处再切掉"角块 − 半径 r 的球缺"（= 球心到三个面都是 r 的那块）✓
+        final List<List<Csg.Polygon>> corners = cornerBlends(cutEdges, log, index);
+        // ★ 统一应用：同类先合并成一个操作数，再对材料做一次布尔 ✓
         if (!cutWedges.isEmpty()) {
             out = subtractLocal(out, mergeWedges(cutWedges));
             log.append(" [cut n=").append(cutWedges.size()).append(']');
+        }
+        if (!corners.isEmpty()) {
+            out = subtractLocal(out, mergeWedges(corners));
+            log.append(" [corner n=").append(corners.size()).append(']');
         }
         if (!fillWedges.isEmpty()) {
             out = unionLocal(out, mergeWedges(fillWedges));
             log.append(" [fill n=").append(fillWedges.size()).append(']');
         }
         return out;
+    }
+
+    /** 点是否在任意碰撞盒子里 ✓（圆角象限探针用） */
+    private static boolean insideBoxes(final List<double[]> boxes, final Vector3d p) {
+        if (boxes == null) {
+            return false;
+        }
+        for (final double[] b : boxes) {
+            if (b == null || b.length < 6) {
+                continue;
+            }
+            if (p.x >= b[0] - 1.0e-4 && p.x <= b[3] + 1.0e-4
+                    && p.y >= b[1] - 1.0e-4 && p.y <= b[4] + 1.0e-4
+                    && p.z >= b[2] - 1.0e-4 && p.z <= b[5] + 1.0e-4) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 两条棱是否共用端点 ✓（顶点混合/象限继承的邻接判据） */
+    private static boolean shareEndpoint(final double[] e1, final double[] e2) {
+        return samePoint(e1, 0, e2, 0) || samePoint(e1, 0, e2, 3)
+                || samePoint(e1, 3, e2, 0) || samePoint(e1, 3, e2, 3);
+    }
+
+    private static boolean samePoint(final double[] a, final int ia,
+                                     final double[] b, final int ib) {
+        return Math.abs(a[ia] - b[ib]) < 2.0e-3
+                && Math.abs(a[ia + 1] - b[ib + 1]) < 2.0e-3
+                && Math.abs(a[ia + 2] - b[ib + 2]) < 2.0e-3;
+    }
+
+    /**
+     * **顶点混合**（共顶点的多条切料圆角）✓
+     *
+     * <p>对每个被 2 条以上切料棱共用的顶点：从这两条棱的面法线里挑出 3 个两两近正交的
+     * 方向 (n1,n2,n3)，在顶点处切掉
+     * <pre>  角块 [0,r]³(沿 −n1,−n2,−n3)  −  球心 (−r,−r,−r)、半径 r 的球</pre>
+     * 剩下的正好是"以顶点为中心、半径 r 的球面片" ⇒ 三条圆角在这里**共用同一张球面**，
+     * 不再各切各的、在角上留尖刺 ✓
+     */
+    private static List<List<Csg.Polygon>> cornerBlends(final List<double[]> cutEdges,
+                                                        final StringBuilder log,
+                                                        final int index) {
+        final List<List<Csg.Polygon>> out = new ArrayList<>();
+        if (cutEdges == null || cutEdges.size() < 2) {
+            return out;
+        }
+        final java.util.List<double[]> verts = new ArrayList<>();
+        final java.util.List<java.util.List<double[]>> atVert = new ArrayList<>();
+        for (final double[] e : cutEdges) {
+            for (int end = 0; end < 2; end++) {
+                final int k = end == 0 ? 0 : 3;
+                int vi = -1;
+                for (int i = 0; i < verts.size(); i++) {
+                    if (samePoint(verts.get(i), 0, e, k)) {
+                        vi = i;
+                        break;
+                    }
+                }
+                if (vi < 0) {
+                    verts.add(new double[] {e[k], e[k + 1], e[k + 2]});
+                    atVert.add(new ArrayList<>());
+                    vi = verts.size() - 1;
+                }
+                atVert.get(vi).add(e);
+            }
+        }
+        for (int v = 0; v < verts.size(); v++) {
+            final java.util.List<double[]> inc = atVert.get(v);
+            if (inc.size() < 2) {
+                continue;
+            }
+            // 收集入射棱的面法线（去重）
+            final java.util.List<Vector3d> normals = new ArrayList<>();
+            for (final double[] e : inc) {
+                for (int k : new int[] {6, 9}) {
+                    final Vector3d n = new Vector3d(e[k], e[k + 1], e[k + 2]);
+                    if (n.lengthSquared() < 1.0e-9) {
+                        continue;
+                    }
+                    n.normalize();
+                    boolean dup = false;
+                    for (final Vector3d o : normals) {
+                        if (Math.abs(o.dot(n)) > 0.995) {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if (!dup) {
+                        normals.add(n);
+                    }
+                }
+            }
+            if (normals.size() < 3) {
+                continue;
+            }
+            // 挑 3 个两两近正交的
+            Vector3d n1 = null;
+            Vector3d n2 = null;
+            Vector3d n3 = null;
+            for (int i = 0; i < normals.size() && n1 == null; i++) {
+                for (int j = 0; j < normals.size() && n1 == null; j++) {
+                    if (j == i || Math.abs(normals.get(i).dot(normals.get(j))) > 0.35) {
+                        continue;
+                    }
+                    for (int k = 0; k < normals.size(); k++) {
+                        if (k == i || k == j) {
+                            continue;
+                        }
+                        final Vector3d c = normals.get(k);
+                        if (Math.abs(c.dot(normals.get(i))) > 0.35
+                                || Math.abs(c.dot(normals.get(j))) > 0.35) {
+                            continue;
+                        }
+                        n1 = normals.get(i);
+                        n2 = normals.get(j);
+                        n3 = c;
+                        break;
+                    }
+                }
+            }
+            if (n1 == null) {
+                continue;
+            }
+            final double r = inc.get(0)[12];
+            final Vector3d vp = new Vector3d(verts.get(v)[0], verts.get(v)[1],
+                    verts.get(v)[2]);
+            final List<Csg.Polygon> blend = cornerBlend(vp, n1, n2, n3, r);
+            if (!blend.isEmpty()) {
+                out.add(blend);
+            }
+        }
+        if (!out.isEmpty()) {
+            log.append(" [f").append(index).append(":vblend ").append(out.size()).append(']');
+        }
+        return out;
+    }
+
+    /** 单个顶点的混合切割体 = 角块 − 球缺 ✓（harness 直接验几何） */
+    public static List<Csg.Polygon> cornerBlend(final Vector3d v, final Vector3d n1,
+                                                 final Vector3d n2, final Vector3d n3,
+                                                 final double r) {
+        if (r <= 1.0e-6) {
+            return List.of();
+        }
+        // 材料侧方向（法线取反）
+        final Vector3d a = new Vector3d(n1).negate();
+        final Vector3d b = new Vector3d(n2).negate();
+        final Vector3d c = new Vector3d(n3).negate();
+        final List<Vector3d[]> cube = new ArrayList<>(12);
+        final Vector3d[] p = new Vector3d[8];
+        for (int i = 0; i < 8; i++) {
+            p[i] = new Vector3d(v)
+                    .fma((i & 1) == 0 ? 0.0 : r, a)
+                    .fma((i & 2) == 0 ? 0.0 : r, b)
+                    .fma((i & 4) == 0 ? 0.0 : r, c);
+        }
+        final int[][] faces = {
+            {0, 2, 3, 1}, {4, 5, 7, 6}, {0, 1, 5, 4},
+            {2, 6, 7, 3}, {0, 4, 6, 2}, {1, 3, 7, 5},
+        };
+        for (final int[] f : faces) {
+            cube.add(new Vector3d[] {p[f[0]], p[f[1]], p[f[2]]});
+            cube.add(new Vector3d[] {p[f[0]], p[f[2]], p[f[3]]});
+        }
+        final List<Csg.Polygon> cubePolys = ensureOutward(triPolys(cube));
+        final Vector3d center = new Vector3d(v).fma(r, a).fma(r, b).fma(r, c);
+        final List<Csg.Polygon> ballPolys = ensureOutward(triPolys(ball(center, r, 8, 16)));
+        if (cubePolys.isEmpty() || ballPolys.isEmpty()) {
+            return List.of();
+        }
+        return subtractLocal(cubePolys, ballPolys);
+    }
+
+    /** 经纬球（三角面）✓ */
+    private static List<Vector3d[]> ball(final Vector3d c, final double r,
+                                         final int stacks, final int slices) {
+        final List<Vector3d[]> tris = new ArrayList<>();
+        final double[][] grid = new double[(stacks + 1) * (slices + 1)][];
+        for (int i = 0; i <= stacks; i++) {
+            final double phi = Math.PI * i / stacks;
+            for (int j = 0; j <= slices; j++) {
+                final double th = 2.0 * Math.PI * j / slices;
+                grid[i * (slices + 1) + j] = new double[] {
+                    c.x + r * Math.sin(phi) * Math.cos(th),
+                    c.y + r * Math.cos(phi),
+                    c.z + r * Math.sin(phi) * Math.sin(th)};
+            }
+        }
+        for (int i = 0; i < stacks; i++) {
+            for (int j = 0; j < slices; j++) {
+                final double[] p00 = grid[i * (slices + 1) + j];
+                final double[] p01 = grid[i * (slices + 1) + j + 1];
+                final double[] p10 = grid[(i + 1) * (slices + 1) + j];
+                final double[] p11 = grid[(i + 1) * (slices + 1) + j + 1];
+                tris.add(new Vector3d[] {new Vector3d(p00[0], p00[1], p00[2]),
+                    new Vector3d(p10[0], p10[1], p10[2]),
+                    new Vector3d(p11[0], p11[1], p11[2])});
+                tris.add(new Vector3d[] {new Vector3d(p00[0], p00[1], p00[2]),
+                    new Vector3d(p11[0], p11[1], p11[2]),
+                    new Vector3d(p01[0], p01[1], p01[2])});
+            }
+        }
+        return tris;
     }
 
     /** 把一批楔块合并成一个操作数（单个原样返回；多个顺序并集）✓ */

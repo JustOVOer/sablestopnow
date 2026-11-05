@@ -163,8 +163,13 @@ public final class FeatureHover {
                 edgeIndex = i;
             }
         }
+        // ★ 曲线棱：离散弧上每个接头都"是个顶点"，但它不是真正的角 ⇒
+        //   否则鼠标停在弧上永远判成 VERTEX（渲染画成十字）⇒ 用户实测"移过去还是叉、
+        //   但点一下能选中"。判据：该顶点处**任意两条相邻段**的转角是否够大。
+        if (vertIndex >= 0 && !isRealCorner(face.segments(), localVerts.get(vertIndex))) {
+            vertIndex = -1;
+        }
         final Kind kind = vertIndex >= 0 ? Kind.VERTEX : (edgeIndex >= 0 ? Kind.EDGE : Kind.FACE);
-
         // 世界坐标缓存（渲染直接用 ✓）
         final List<Vec3[]> worldTris = new ArrayList<>(face.triangles().size());
         for (final Vector3d[] tri : face.triangles()) {
@@ -206,6 +211,44 @@ public final class FeatureHover {
     private static Vec3 toWorld(final Pose3dc pose, final Vector3d local) {
         final Vector3d w = pose.transformPosition(local, new Vector3d());
         return new Vec3(w.x, w.y, w.z);
+    }
+
+    /**
+     * 这个"顶点"是不是**真正的角** ✓（曲线离散接头不算）
+     *
+     * <p>在弧/样条的离散步里，每个接头都是网格顶点，但两侧段几乎共线 ⇒ 转角正弦很小。
+     * 只要有一对相邻段的转角够大（正弦 &gt; 0.5）才算角 ⇒ 悬停时优先判 EDGE，
+     * 而不是把整条弧都判成 VERTEX（用户实测"鼠标移过去还是叉"）✓
+     */
+    private static boolean isRealCorner(final List<double[]> segs, final Vector3d p) {
+        if (segs == null || p == null) {
+            return false;
+        }
+        final List<Vector3d> dirs = new ArrayList<>();
+        for (final double[] s : segs) {
+            final boolean atA = Math.abs(s[0] - p.x) < 2.0e-3
+                    && Math.abs(s[1] - p.y) < 2.0e-3 && Math.abs(s[2] - p.z) < 2.0e-3;
+            final boolean atB = Math.abs(s[3] - p.x) < 2.0e-3
+                    && Math.abs(s[4] - p.y) < 2.0e-3 && Math.abs(s[5] - p.z) < 2.0e-3;
+            if (!atA && !atB) {
+                continue;
+            }
+            final Vector3d d = atA
+                    ? new Vector3d(s[3] - s[0], s[4] - s[1], s[5] - s[2])
+                    : new Vector3d(s[0] - s[3], s[1] - s[4], s[2] - s[5]);
+            if (d.lengthSquared() < 1.0e-12) {
+                continue;
+            }
+            dirs.add(d.normalize());
+        }
+        for (int i = 0; i < dirs.size(); i++) {
+            for (int j = i + 1; j < dirs.size(); j++) {
+                if (new Vector3d(dirs.get(i)).cross(dirs.get(j)).length() > 0.5) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** 点到线段距离 ✓。 */

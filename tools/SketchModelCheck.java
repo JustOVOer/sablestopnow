@@ -558,6 +558,56 @@ public final class SketchModelCheck {
         return segs;
     }
 
+    /**
+     * **顶点混合**：共顶点的多条圆角共用一张球面 ✓
+     *
+     * <p>`cornerBlend` = 角块 − 球缺。对单位立方体的 (1,1,1) 角（外法线 +X,+Y,+Z）：
+     * 切掉 r³(1−π/6) 那块，剩下的角必须是**球面**（角上留尖刺就是这里错了）。
+     */
+    private static void cornerBlendGeometry() {
+        final double ox = 20481032.0;
+        final double oy = 130.0;
+        final double oz = 20530186.0;
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> cube =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(
+                                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(
+                                        java.util.List.of(new double[] {
+                                                ox, oy, oz, ox + 1, oy + 1, oz + 1})), null));
+        final double r = 0.25;
+        final org.joml.Vector3d v = new org.joml.Vector3d(ox + 1, oy + 1, oz + 1);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> blend =
+                com.ovo.sablestopnow.sketch.Solid.cornerBlend(v,
+                        new org.joml.Vector3d(1, 0, 0), new org.joml.Vector3d(0, 1, 0),
+                        new org.joml.Vector3d(0, 0, 1), r);
+        check(blend != null && !blend.isEmpty(), "corner-blend: 混合切割体非空");
+        pathlib_Diag("corner-blend polys=" + (blend == null ? -1 : blend.size()));
+        // 局部原点做差集（与生产路径一致）
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> localCube =
+                shiftPolys(cube, -ox, -oy, -oz);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> localBlend =
+                shiftPolys(blend, -ox, -oy, -oz);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> res =
+                shiftPolys(com.ovo.sablestopnow.sketch.csg.Csg.subtract(localCube, localBlend),
+                        ox, oy, oz);
+        final double vol = com.ovo.sablestopnow.sketch.Solid.polysVolume(res);
+        final double removed = r * r * r * (1.0 - Math.PI / 6.0);
+        final double expect = 1.0 - removed;
+        pathlib_Diag("corner-blend vol=" + vol + " expect≈" + expect);
+        check(Math.abs(vol - expect) < 0.02,
+                "corner-blend: 切掉角块−球缺后体积必须≈1−r³(1−π/6)（" + vol
+                        + " vs " + expect + "）");
+        // 球心方向留料、角尖被切掉
+        final org.joml.Vector3d keep = new org.joml.Vector3d(
+                ox + 1 - 0.20, oy + 1 - 0.20, oz + 1 - 0.20);
+        final org.joml.Vector3d gone = new org.joml.Vector3d(
+                ox + 1 - 0.02, oy + 1 - 0.02, oz + 1 - 0.02);
+        check(com.ovo.sablestopnow.sketch.Solid.containsPoint(res, keep),
+                "corner-blend: 球面内的材料必须保留（点 " + keep + "）");
+        check(!com.ovo.sablestopnow.sketch.Solid.containsPoint(res, gone),
+                "corner-blend: 尖角必须被切掉（点 " + gone + "）");
+    }
+
     private static boolean near3(final double[] a, final int ia,
                                  final double[] b, final int ib) {
         return Math.abs(a[ia] - b[ib]) < 1.0e-3
@@ -1087,6 +1137,7 @@ public final class SketchModelCheck {
     public static void main(final String[] args) throws Exception {
         referenceOutlineStraightOnly();
         curveChainMerging();
+        cornerBlendGeometry();
         ensureOutwardSign();
         boxMeshWinding();
         filletPrismSolid();

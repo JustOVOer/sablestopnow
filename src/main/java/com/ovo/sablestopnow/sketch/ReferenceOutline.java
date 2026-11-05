@@ -24,6 +24,9 @@ import java.util.List;
  *
  * <p>连"直线与弧相切"也安全：相切处转角≈0，但直边长度与弧步长明显不同 ⇒ 不被吃掉 ✓
  *
+ * <p>{@link #curveFlags(List)} 把这套判据单独暴露出来：曲线棱拾取（
+ * {@link EdgeChains}）用的就是**同一份**判定 ⇒ "直线棱"和"曲线棱"永远不会互相抢段 ✓
+ *
  * <p>纯计算、无游戏依赖（本包被离线编译 ✓）。
  */
 public final class ReferenceOutline {
@@ -32,13 +35,13 @@ public final class ReferenceOutline {
     }
 
     /** 端点视为同一点的容差（格）✓ */
-    private static final double JOIN_TOL = 2.0e-3;
+    static final double JOIN_TOL = 2.0e-3;
 
     /** 视为"可见转角"的最小正弦值（真实共线只有 1e-9 量级）✓ */
     private static final double TURN_MIN = 1.0e-5;
 
     /** 超过它就当"角"而不是"曲线步"（同一曲线的相邻步远小于它）✓ */
-    private static final double TURN_MAX = 0.5;
+    static final double TURN_MAX = 0.5;
 
     /** 曲线步之间的长度相似度 ✓ */
     private static final double LEN_RATIO = 0.35;
@@ -52,6 +55,7 @@ public final class ReferenceOutline {
     public static int lastSegments;
     public static int lastChains;
     public static int lastKept;
+    public static int lastCurveSegments;
 
     /**
      * @param segs 线段，每项 {@code {x1,y1,z1,x2,y2,z2}}（3D，与 {@code Features} 一致）
@@ -59,11 +63,37 @@ public final class ReferenceOutline {
      */
     public static List<double[]> straightEdges(final List<double[]> segs) {
         final List<double[]> out = new ArrayList<>();
+        final boolean[] curve = curveFlags(segs);
+        final int n = curve.length;
+        for (int i = 0; i < n; i++) {
+            final double[] s = segs.get(i);
+            if (s == null || s.length < 6 || curve[i]) {
+                continue;
+            }
+            final double len = Math.sqrt(sq(s[3] - s[0]) + sq(s[4] - s[1]) + sq(s[5] - s[2]));
+            if (len < MIN_LEN) {
+                continue;
+            }
+            out.add(new double[] {s[0], s[1], s[2], s[3], s[4], s[5]});
+            if (out.size() >= MAX_RUNS) {
+                break;
+            }
+        }
+        lastChains = out.size();
+        lastKept = out.size();
+        return out;
+    }
+
+    /**
+     * 每一段是否是**曲线碎段**（弧/样条的离散步）✓
+     *
+     * <p>判据见类注释；曲线棱拾取（{@link EdgeChains}）直接复用本方法 ✓
+     */
+    public static boolean[] curveFlags(final List<double[]> segs) {
         lastSegments = segs == null ? 0 : segs.size();
-        lastKept = 0;
-        lastChains = 0;
+        lastCurveSegments = 0;
         if (segs == null || segs.isEmpty()) {
-            return out;
+            return new boolean[0];
         }
         final int n = segs.size();
         final double[] len = new double[n];
@@ -149,27 +179,20 @@ public final class ReferenceOutline {
                 }
             }
         }
-        for (int i = 0; i < n; i++) {
-            if (curve[i] || len[i] < MIN_LEN) {
-                continue;
-            }
-            final double[] s = segs.get(i);
-            out.add(new double[] {s[0], s[1], s[2], s[3], s[4], s[5]});
-            if (out.size() >= MAX_RUNS) {
-                break;
+        for (final boolean c : curve) {
+            if (c) {
+                lastCurveSegments++;
             }
         }
-        lastChains = out.size();
-        lastKept = out.size();
-        return out;
+        return curve;
     }
 
-    private static boolean visibleSmall(final double sin) {
+    static boolean visibleSmall(final double sin) {
         return !Double.isNaN(sin) && sin > TURN_MIN && sin < TURN_MAX;
     }
 
-    private static boolean close(final double[] a, final int endA,
-                                 final double[] b, final int endB) {
+    static boolean close(final double[] a, final int endA,
+                         final double[] b, final int endB) {
         final int ia = endA == 0 ? 0 : 3;
         final int ib = endB == 0 ? 0 : 3;
         return Math.abs(a[ia] - b[ib]) <= JOIN_TOL
@@ -178,15 +201,15 @@ public final class ReferenceOutline {
     }
 
     /** 段 s 在端点 a 处的**向外**方向 ✓ */
-    private static double[] dir(final double[] s, final int a) {
+    static double[] dir(final double[] s, final int a) {
         final int from = a == 0 ? 0 : 3;
         final int to = a == 0 ? 3 : 0;
         return new double[] {s[to] - s[from], s[to + 1] - s[from + 1], s[to + 2] - s[from + 2]};
     }
 
     /** 两段在公共端点处的方向夹角正弦绝对值 ✓ */
-    private static double sinBetween(final double[] a, final int endA,
-                                     final double[] b, final int endB) {
+    static double sinBetween(final double[] a, final int endA,
+                             final double[] b, final int endB) {
         final double[] da = dir(a, endA);
         final double[] db = dir(b, endB);
         final double[] cr = {da[1] * db[2] - da[2] * db[1],
@@ -201,7 +224,7 @@ public final class ReferenceOutline {
         return lc / (la * lb);
     }
 
-    private static double sq(final double v) {
+    static double sq(final double v) {
         return v * v;
     }
 }

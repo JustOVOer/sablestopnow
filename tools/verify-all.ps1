@@ -1,4 +1,4 @@
-﻿# Full pre-handoff verification for sablestopnow. ASCII only (Windows PowerShell 5.1 reads
+# Full pre-handoff verification for sablestopnow. ASCII only (Windows PowerShell 5.1 reads
 # a BOM-less .ps1 as ANSI, and native tools write diagnostics to stderr).
 #
 # Checks, in order:
@@ -236,7 +236,7 @@ if (-not (Test-Path $solverSrc) -or -not (Test-Path $harnessSrc)) {
         # reads like a wrong argument type, not like a missing file. That trap bit us more than
         # six times; hence the single list.
         $pureSketch = @(
-            'SketchPlane.java', 'Sketch.java', 'SketchSession.java', 'SketchDatumPlanes.java', 'ReferenceOutline.java', 'TopoRef.java', 'TopoRefs.java', 'TopoStore.java', 'TopoRebuild.java',
+            'SketchPlane.java', 'Sketch.java', 'SketchSession.java', 'SketchDatumPlanes.java', 'ReferenceOutline.java', 'EdgeChains.java', 'TopoRef.java', 'TopoRefs.java', 'TopoStore.java', 'TopoRebuild.java',
             'SketchMode.java', 'SketchProfiles.java', 'Extrude.java', 'Revolve.java',
             'Solid.java', 'SolidMesh.java', 'SolidUv.java', 'SolidAppearance.java',
             'SolidCollision.java', 'SketchDof.java', 'SketchMeasure.java',

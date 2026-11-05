@@ -478,6 +478,94 @@ public final class SketchModelCheck {
     }
 
     /**
+     * **曲线棱拾取**：点中弧上任意一段 ⇒ 整条弧的所有碎段按首尾相接合成一条链 ✓
+     *
+     * <p>与"只保留直线棱"用**同一份**判定（{@code ReferenceOutline.curveFlags}）⇒
+     * 直线棱永远不会被曲线链吃掉，两条弧在尖角处也不会被错误地并成一条。
+     */
+    private static void curveChainMerging() {
+        final java.util.List<double[]> segs = roundedRect44();
+        final boolean[] curve =
+                com.ovo.sablestopnow.sketch.ReferenceOutline.curveFlags(segs);
+        int curveCount = 0;
+        for (final boolean c : curve) {
+            if (c) {
+                curveCount++;
+            }
+        }
+        check(curveCount == 40, "curve-chain: 44 段里应有 40 段被判定为曲线碎段（实际 "
+                + curveCount + "）");
+        check(!curve[0] && !curve[1] && !curve[2] && !curve[3],
+                "curve-chain: 4 条直边不能被判成曲线碎段");
+
+        // 点中第一个角的第 4 段弧 ⇒ 应该正好拿到该角的 10 段
+        final java.util.List<double[]> chain =
+                com.ovo.sablestopnow.sketch.EdgeChains.chainAt(segs, curve, 4 + 3);
+        check(chain.size() == 10, "curve-chain: 点中弧中段应合成 10 段（实际 "
+                + chain.size() + "）");
+        for (int i = 1; i < chain.size(); i++) {
+            check(near3(chain.get(i - 1), 3, chain.get(i), 0),
+                    "curve-chain: 第 " + i + " 段必须与上一段首尾相接");
+        }
+        final org.joml.Vector3d n = com.ovo.sablestopnow.sketch.EdgeChains.planeNormal(
+                chain, new org.joml.Vector3d(0, 0, -1));
+        check(Math.abs(Math.abs(n.z) - 1.0) < 1.0e-6,
+                "curve-chain: 平面法线必须是 ±Z（实际 " + n + "）");
+        check(n.z < 0.0, "curve-chain: 平面法线要跟参考方向同侧（实际 " + n + "）");
+
+        // 点中直边 ⇒ 只返回它自己（不会被拉进旁边的弧）
+        final java.util.List<double[]> one =
+                com.ovo.sablestopnow.sketch.EdgeChains.chainAt(segs, curve, 0);
+        check(one.size() == 1, "curve-chain: 直边只应返回 1 段（实际 " + one.size() + "）");
+
+        // 整圈（无直边）也必须能合起来：把 4 条直边换成弧段风格会破坏几何，
+        // 这里只验证"闭合链不会死循环" —— 用圆环的 40 段做输入。
+        final java.util.List<double[]> ring = new java.util.ArrayList<>();
+        for (int k = 0; k < 40; k++) {
+            final double t0 = 2 * Math.PI * k / 40.0;
+            final double t1 = 2 * Math.PI * (k + 1) / 40.0;
+            ring.add(new double[] {
+                1.75 * Math.cos(t0), 1.75 * Math.sin(t0), 0.0,
+                1.75 * Math.cos(t1), 1.75 * Math.sin(t1), 0.0});
+        }
+        final boolean[] ringCurve =
+                com.ovo.sablestopnow.sketch.ReferenceOutline.curveFlags(ring);
+        final java.util.List<double[]> ringChain =
+                com.ovo.sablestopnow.sketch.EdgeChains.chainAt(ring, ringCurve, 0);
+        check(ringChain.size() == 40, "curve-chain: 闭合圆链应合成 40 段（实际 "
+                + ringChain.size() + "）");
+    }
+
+    /** 4 条直边 + 每角 10 段弧（共 44 段）——与 referenceOutlineStraightOnly 同构 ✓ */
+    private static java.util.List<double[]> roundedRect44() {
+        final java.util.List<double[]> segs = new java.util.ArrayList<>();
+        segs.add(new double[] {0.0, 0.0, 0.0, 2.0, 0.0, 0.0});
+        segs.add(new double[] {2.0, 0.0, 0.0, 2.0, 2.0, 0.0});
+        segs.add(new double[] {2.0, 2.0, 0.0, 0.0, 2.0, 0.0});
+        segs.add(new double[] {0.0, 2.0, 0.0, 0.0, 0.0, 0.0});
+        for (int corner = 0; corner < 4; corner++) {
+            final double cx = corner == 0 || corner == 3 ? 0.0 : 2.0;
+            final double cy = corner < 2 ? 0.0 : 2.0;
+            final double a0 = Math.PI * 0.5 * corner;
+            for (int k = 0; k < 10; k++) {
+                final double th0 = a0 + k * 0.037;
+                final double th1 = a0 + (k + 1) * 0.037;
+                segs.add(new double[] {
+                    cx + 1.75 * Math.cos(th0), cy + 1.75 * Math.sin(th0), 0.0,
+                    cx + 1.75 * Math.cos(th1), cy + 1.75 * Math.sin(th1), 0.0});
+            }
+        }
+        return segs;
+    }
+
+    private static boolean near3(final double[] a, final int ia,
+                                 final double[] b, final int ib) {
+        return Math.abs(a[ia] - b[ib]) < 1.0e-3
+                && Math.abs(a[ia + 1] - b[ib + 1]) < 1.0e-3
+                && Math.abs(a[ia + 2] - b[ib + 2]) < 1.0e-3;
+    }
+
+    /**
      * bug ⑨/⑩ 回归：`Solid.ensureOutward` 的有向体积判定必须正确 ✓
      *
      * <p>如果它把**本来朝外**的切割体判成朝内并翻转，`Csg.subtract` 会得到"补集"式垃圾：
@@ -998,6 +1086,7 @@ public final class SketchModelCheck {
 
     public static void main(final String[] args) throws Exception {
         referenceOutlineStraightOnly();
+        curveChainMerging();
         ensureOutwardSign();
         boxMeshWinding();
         filletPrismSolid();

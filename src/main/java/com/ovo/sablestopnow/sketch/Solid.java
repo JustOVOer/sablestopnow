@@ -1508,6 +1508,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                                   final int index, final String source,
                                                   final StringBuilder log) {
         List<Csg.Polygon> out = acc;
+        final List<List<Csg.Polygon>> cutWedges = new ArrayList<>();
+        final List<List<Csg.Polygon>> fillWedges = new ArrayList<>();
         for (final double[] e : edges) {
             final Vector3d a = new Vector3d(e[0], e[1], e[2]);
             final Vector3d b = new Vector3d(e[3], e[4], e[5]);
@@ -1574,22 +1576,42 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                 inVol, wedgeVol)).append(']');
                 continue;
             }
-            final List<Csg.Polygon> applied = concave
-                    ? unionLocal(out, wedge) : subtractLocal(out, wedge);
-            if (applied.isEmpty() || applied == out) {
-                // subtractLocal/unionLocal 在操作数为空时原样返回 base ⇒ 不能再往下用
-                log.append(" [f").append(index).append(":csg-empty]");
-                continue;
-            }
-            out = applied;
             final boolean ok = concave ? (inVol < 0.35 * wedgeVol)
                     : (inVol > 0.65 * wedgeVol);
             log.append(" [f").append(index).append(concave ? ":fill " : ":cut ")
                     .append(String.format(java.util.Locale.ROOT, "%.4f/%.4f/%.4f",
                             inVol, outVol, theory))
                     .append(ok ? " ok]" : " ?!]");
+            if (concave) {
+                fillWedges.add(wedge);
+            } else {
+                cutWedges.add(wedge);
+            }
+        }
+        // ★ 统一应用：同类楔块先合并成**一个**操作数，再对材料做一次布尔 ✓
+        //   曲线棱是几十段 → 逐段对整块材料跑 CSG 会明显卡；合并后只做 1~2 次。
+        //   单条直棱时合并退化成"原样返回"，与旧行为逐字节一致 ✓
+        if (!cutWedges.isEmpty()) {
+            out = subtractLocal(out, mergeWedges(cutWedges));
+            log.append(" [cut n=").append(cutWedges.size()).append(']');
+        }
+        if (!fillWedges.isEmpty()) {
+            out = unionLocal(out, mergeWedges(fillWedges));
+            log.append(" [fill n=").append(fillWedges.size()).append(']');
         }
         return out;
+    }
+
+    /** 把一批楔块合并成一个操作数（单个原样返回；多个顺序并集）✓ */
+    private static List<Csg.Polygon> mergeWedges(final List<List<Csg.Polygon>> wedges) {
+        if (wedges == null || wedges.isEmpty()) {
+            return List.of();
+        }
+        List<Csg.Polygon> acc = wedges.get(0);
+        for (int i = 1; i < wedges.size(); i++) {
+            acc = unionLocal(acc, wedges.get(i));
+        }
+        return acc;
     }
 
     /**

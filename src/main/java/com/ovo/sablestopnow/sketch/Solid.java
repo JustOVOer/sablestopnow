@@ -994,6 +994,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 localCutters.computeIfAbsent(s2.body(), k -> new ArrayList<>()).addAll(boxes2);
             }
         }
+        final StringBuilder filletLog = new StringBuilder();
         final List<Placed> out = new ArrayList<>(solids.size());
         for (final Solid solid : solids) {
             if (solid.shape() instanceof Shape.Cut) {
@@ -1101,7 +1102,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 final List<double[]> filletEdgeData =
                         filletEdgeByBody.getOrDefault(solid.body(), List.of());
                 if (!filletEdgeData.isEmpty()) {
-                    acc = applyFillets(acc, filletEdgeData, solid.index(), "solid");
+                    if (filletLog.length() < 400) {
+                        filletLog.append(" [s").append(solid.index()).append(']');
+                    }
+                    acc = applyFillets(acc, filletEdgeData, solid.index(), "solid", filletLog);
                 }
                 if (!filletCuts.isEmpty()) {
                     final List<Csg.Polygon> fb = CsgMesh.fromMesh(
@@ -1292,8 +1296,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
         }
         dump.append(']');
-        if (!lastFilletDiag.isEmpty()) {
-            dump.append(' ').append(lastFilletDiag);
+        if (filletLog.length() > 0) {
+            dump.append(" fillets:").append(filletLog);
         }
         lastCsgDiag = dump.toString();
         return out;
@@ -1435,7 +1439,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      */
     private static List<Csg.Polygon> applyFillets(final List<Csg.Polygon> acc,
                                                   final List<double[]> edges,
-                                                  final int index, final String source) {
+                                                  final int index, final String source,
+                                                  final StringBuilder log) {
         List<Csg.Polygon> out = acc;
         for (final double[] e : edges) {
             final Vector3d a = new Vector3d(e[0], e[1], e[2]);
@@ -1472,10 +1477,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     //   几乎平行的两面 ⇒ φ≈0 ⇒ 截面半径爆炸（实测 wedgeVol=1.69 而理论值 0.027）
                     //   ⇒ 这种楔块必须跳过，否则会乱切别的几何。
                     if (wedgeVol > theory * 3.0 + 1.0e-4) {
-                        lastFilletDiag = "skip idx=" + index + " reason=wedge-too-big"
-                                + " wedge=" + String.format(java.util.Locale.ROOT, "%.4f", wedgeVol)
-                                + " theory=" + String.format(java.util.Locale.ROOT, "%.4f", theory)
-                                + " edge=" + source;
+                        log.append(" [f").append(index).append(":big ")
+                                .append(String.format(java.util.Locale.ROOT, "%.3f", wedgeVol))
+                                .append(">").append(String.format(java.util.Locale.ROOT, "%.3f", theory))
+                                .append(']');
                         continue;
                     }
                     final double inVol = Math.abs(polysVolume(intersectLocal(out, wedge)));
@@ -1502,23 +1507,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             //   取"材料内体积/材料外体积"中**占理论值比例更大**的那一支，
             //   并且只要求 ≥ 30% 理论体积 ⇒ 一定能选出一个方案，而不是全跳过。
             if (bestWedge == null) {
-                lastFilletDiag = "skip idx=" + index + " reason=empty-prism edge=" + source;
+                log.append(" [f").append(index).append(":empty-prism]");
                 continue;
             }
             final double bestVol = Math.max(bestIn, bestOut);
             if (bestVol < theory * 0.3) {
-                lastFilletDiag = "skip idx=" + index + " reason=too-small"
-                        + " in=" + String.format(java.util.Locale.ROOT, "%.5f", bestIn)
-                        + " out=" + String.format(java.util.Locale.ROOT, "%.5f", bestOut)
-                        + " theory=" + String.format(java.util.Locale.ROOT, "%.5f", theory)
-                        + " edge=" + source;
-                continue;
             }
             out = bestAdd ? unionLocal(out, bestWedge) : subtractLocal(out, bestWedge);
-            lastFilletDiag = "fillet idx=" + index + " mode=" + (bestAdd ? "add" : "sub")
-                    + " inVol=" + String.format(java.util.Locale.ROOT, "%.5f", bestIn)
-                    + " outVol=" + String.format(java.util.Locale.ROOT, "%.5f", bestOut)
-                    + " theory=" + String.format(java.util.Locale.ROOT, "%.5f", theory);
+            log.append(" [f").append(index).append(':').append(bestAdd ? "add " : "sub ")
+                    .append(String.format(java.util.Locale.ROOT, "%.4f/%.4f/%.4f",
+                            bestIn, bestOut, theory)).append(']');
         }
         return out;
     }

@@ -872,6 +872,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
         final java.util.Map<UUID, List<Csg.Polygon>> filletPolyByBody = new java.util.HashMap<>();
         // ★ 原始棱数据（a,b,n1,n2,r）：几何验证式求值用 ✓
+        final StringBuilder filletLog = new StringBuilder();
         final java.util.Map<UUID, List<double[]>> filletEdgeByBody =
                 new java.util.HashMap<>();
 
@@ -908,16 +909,48 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final java.util.Map<UUID, List<Csg.Polygon>> polysBySrc =
                     new java.util.HashMap<>();
             for (final Shape.EdgeRef ref : f.edges()) {
-                final Solid src = byId.get(ref.solidId());
+                Solid src = byId.get(ref.solidId());
+                String srcNote = "";
                 if (src == null) {
-                    lastFilletDiag = "skip idx=" + s2.index()
-                            + " reason=src-null";
+                    // ★ 回退：老特征/被重建过的特征，solidId 可能已失效。
+                    //   按"端点落在盒子里"在**同一 body** 的实体中找最匹配的那个 ✓
+                    final Vector3d ea = new Vector3d(ref.ax(), ref.ay(), ref.az());
+                    for (final Solid cand : solids) {
+                        if (!cand.body().equals(s2.body())
+                                || cand.shape() instanceof Shape.Plane
+                                || cand.shape() instanceof Shape.Fillet
+                                || cand.shape() instanceof Shape.Mirror
+                                || cand.shape() instanceof Shape.Pattern
+                                || cand.shape() instanceof Shape.Cut) {
+                            continue;
+                        }
+                        final Sketch csk = cand.resolve(sketches);
+                        if (csk == null) {
+                            continue;
+                        }
+                        boolean hitBox = false;
+                        for (final double[] b : cand.boxes(csk)) {
+                            if (ea.x > b[0] - 0.05 && ea.x < b[3] + 0.05
+                                    && ea.y > b[1] - 0.05 && ea.y < b[4] + 0.05
+                                    && ea.z > b[2] - 0.05 && ea.z < b[5] + 0.05) {
+                                hitBox = true;
+                                break;
+                            }
+                        }
+                        if (hitBox) {
+                            src = cand;
+                            srcNote = "resolved-by-endpoint";
+                            break;
+                        }
+                    }
+                }
+                if (src == null) {
+                    filletLog.append(" [f").append(s2.index()).append(":src-null]");
                     continue;
                 }
                 final Sketch srcSketch = src.resolve(sketches);
                 if (srcSketch == null) {
-                    lastFilletDiag = "skip idx=" + s2.index()
-                            + " reason=no-sketch";
+                    filletLog.append(" [f").append(s2.index()).append(":no-sketch]");
                     continue;
                 }
                 final SolidMesh.Mesh srcMesh = src.mesh(srcSketch);
@@ -934,15 +967,14 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     nn = FilletCutter.faceNormals(srcMesh, a, b);
                 }
                 if (nn == null) {
-                    lastFilletDiag = "skip idx=" + s2.index()
-                            + " reason=no-normals";
+                    filletLog.append(" [f").append(s2.index()).append(":no-normals]");
                     continue;
                 }
                 final Vector3d fdir = new Vector3d(b).sub(a).normalize();
                 final List<Vector3d[]> prismTris =
                         FilletCutter.prism(a, b, nn[0], nn[1], f.radius());
                 if (prismTris == null || prismTris.isEmpty()) {
-                    lastFilletDiag = "skip idx=" + s2.index() + " reason=prism-empty";
+                    filletLog.append(" [f").append(s2.index()).append(":prism-empty]");
                     continue;
                 }
                 // ★ 合理性校验（用户实测：只有**部分棱**会出问题 ⇒ 棱柱被放到了实体外面/朝向反了）
@@ -1000,7 +1032,6 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 localCutters.computeIfAbsent(s2.body(), k -> new ArrayList<>()).addAll(boxes2);
             }
         }
-        final StringBuilder filletLog = new StringBuilder();
         final List<Placed> out = new ArrayList<>(solids.size());
         for (final Solid solid : solids) {
             if (solid.shape() instanceof Shape.Cut) {

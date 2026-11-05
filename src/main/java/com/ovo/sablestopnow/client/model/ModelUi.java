@@ -2528,6 +2528,36 @@ public final class ModelUi {
                 || filletSourceSolid == null) {
             return;
         }
+        // ★ 坐标系核对（创建必经之路，保证一定打印）
+        {
+            final org.joml.Vector3d midS = new org.joml.Vector3d(filletEdgeA)
+                    .add(filletEdgeB).mul(0.5);
+            boolean insideS = false;
+            double bestS = Double.MAX_VALUE;
+            for (final com.ovo.sablestopnow.sketch.Solid.Placed pl
+                    : com.ovo.sablestopnow.sketch.SolidClientState.placed(level)) {
+                if (filletSourceSolid == null || !pl.solid().body().equals(filletSourceSolid)) {
+                    continue;
+                }
+                for (final double[] b : pl.boxes()) {
+                    final double dx = Math.max(Math.max(b[0] - midS.x, 0), midS.x - b[3]);
+                    final double dy = Math.max(Math.max(b[1] - midS.y, 0), midS.y - b[4]);
+                    final double dz = Math.max(Math.max(b[2] - midS.z, 0), midS.z - b[5]);
+                    bestS = Math.min(bestS, Math.sqrt(dx * dx + dy * dy + dz * dz));
+                    if (dx <= 0 && dy <= 0 && dz <= 0) {
+                        insideS = true;
+                    }
+                }
+            }
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[fillet] spacecheck body={} mid=({},{},{}) inside={} dist={}",
+                    filletSourceSolid == null ? "?"
+                            : filletSourceSolid.toString().substring(0, 8),
+                    String.format(java.util.Locale.ROOT, "%.2f", midS.x),
+                    String.format(java.util.Locale.ROOT, "%.2f", midS.y),
+                    String.format(java.util.Locale.ROOT, "%.2f", midS.z),
+                    insideS, String.format(java.util.Locale.ROOT, "%.3f", bestS));
+        }
         final double edgeLen = new org.joml.Vector3d(filletEdgeB)
                 .sub(filletEdgeA).length();
         com.ovo.sablestopnow.SablestopNow.LOGGER.info(

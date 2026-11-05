@@ -1299,6 +1299,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         if (filletLog.length() > 0) {
             dump.append(" fillets:").append(filletLog);
         }
+        if (!lastFilletDiag.isEmpty()) {
+            dump.append(" prep:").append(lastFilletDiag);
+        }
         lastCsgDiag = dump.toString();
         return out;
     }

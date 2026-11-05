@@ -752,6 +752,7 @@ public final class SketchModelCheck {
                 && r1.contributors().size() == 2, "topo: 种类与来源数量正确");
     }
 
+
     private static void check(final boolean condition, final String label) {
         checks++;
         if (!condition) {

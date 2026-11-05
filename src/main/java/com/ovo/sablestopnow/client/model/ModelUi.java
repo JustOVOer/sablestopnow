@@ -2205,7 +2205,43 @@ public final class ModelUi {
                 ModelMode.prompt("model.fillet.pick_edge");
                 return false;
             }
-            filletEdgeA = new org.joml.Vector3d(seg[0], seg[1], seg[2]);
+            // ★ 坐标系诊断（用户怀疑 Sable 的坐标换算）：拾取到的点是否**真的落在**该体的
+          //   碰撞盒里？如果不在，说明 hit 给的是世界坐标而 placeAll 用的是 plot 局部坐标
+          //   ⇒ 楔块会被造到 2e7 那么远、与材料零交集 ⇒ "创建后毫无变化"。
+          {
+              boolean inside = false;
+              final net.minecraft.client.Minecraft mcS = net.minecraft.client.Minecraft.getInstance();
+              final net.minecraft.world.level.Level lvS = mcS == null ? null : mcS.level;
+              if (lvS != null && hit.body() != null) {
+                  final org.joml.Vector3d pm = new org.joml.Vector3d(
+                          (seg[0] + seg[3]) * 0.5, (seg[1] + seg[4]) * 0.5,
+                          (seg[2] + seg[5]) * 0.5);
+                  for (final com.ovo.sablestopnow.sketch.Solid.Placed pl
+                          : com.ovo.sablestopnow.sketch.SolidClientState.placed(lvS)) {
+                      if (!pl.solid().body().equals(hit.body())) {
+                          continue;
+                      }
+                      for (final double[] b : pl.boxes()) {
+                          if (pm.x > b[0] - 0.05 && pm.x < b[3] + 0.05
+                                  && pm.y > b[1] - 0.05 && pm.y < b[4] + 0.05
+                                  && pm.z > b[2] - 0.05 && pm.z < b[5] + 0.05) {
+                              inside = true;
+                              break;
+                          }
+                      }
+                      if (inside) {
+                          break;
+                      }
+                  }
+              }
+              com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                      "[fillet] spacecheck mid=({},{},{}) insideBodyBoxes={} body={}",
+                      String.format(java.util.Locale.ROOT, "%.2f", (seg[0] + seg[3]) * 0.5),
+                      String.format(java.util.Locale.ROOT, "%.2f", (seg[1] + seg[4]) * 0.5),
+                      String.format(java.util.Locale.ROOT, "%.2f", (seg[2] + seg[5]) * 0.5),
+                      inside, hit.body() == null ? "?" : hit.body().toString().substring(0, 8));
+          }
+          filletEdgeA = new org.joml.Vector3d(seg[0], seg[1], seg[2]);
             filletEdgeB = new org.joml.Vector3d(seg[3], seg[4], seg[5]);
             filletSourceSolid = bh.body();
             filletSolidId = null;

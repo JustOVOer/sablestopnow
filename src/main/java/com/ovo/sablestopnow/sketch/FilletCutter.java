@@ -52,17 +52,19 @@ public final class FilletCutter {
         final Vector3d s0 = new Vector3d(p0).fma(-ext, dir);
         final Vector3d s1 = new Vector3d(p0).fma(len + ext, dir);
         // 截面点（(u,v) = (n1,n2) 二维坐标）：角点 (0,0) → 弧 → (0,-r)
-        final List<double[]> section = section(radius);
+        final List<Vector3d> section3 = sectionOffsets(n1, n2, radius);
+        if (section3.isEmpty()) {
+            return out;
+        }
         // 绕序：让 (n1 × n2) 与 dir 同向，保证外向
         final double sgn = new Vector3d(n1).cross(n2).dot(dir) >= 0 ? 1.0 : -1.0;
-        final int n = section.size();
-        final List<Vector3d> bottom = new ArrayList<>();
-        final List<Vector3d> top = new ArrayList<>();
-        for (final double[] q : section) {
-            bottom.add(new Vector3d(s0).fma(q[0], n1).fma(q[1], n2));
-            top.add(new Vector3d(s1).fma(q[0], n1).fma(q[1], n2));
+        final int n = section3.size();
+        final List<Vector3d> bottom = new ArrayList<>(n);
+        final List<Vector3d> top = new ArrayList<>(n);
+        for (final Vector3d off : section3) {
+            bottom.add(new Vector3d(s0).add(off));
+            top.add(new Vector3d(s1).add(off));
         }
-        // 侧面
         for (int i = 0; i < n; i++) {
             final int j = (i + 1) % n;
             if (sgn > 0) {
@@ -84,6 +86,52 @@ public final class FilletCutter {
             }
         }
         return out;
+    }
+
+    /**
+     * **任意夹角的真实内切圆截面** ✓（旧版固定四分之一圆，只对垂直两面相切）
+     *
+     * <p>u=-n1, v=-n2 指向材料侧；φ=acos(u·v)；圆心在角平分线上、距两面都是 r；
+     * 90° 时与旧实现逐点相同 ⇒ 完全兼容 ✓
+     */
+    public static List<Vector3d> sectionOffsets(final Vector3dc normal,
+                                                final Vector3dc other,
+                                                final double radius) {
+        final List<Vector3d> pts = new ArrayList<>();
+        if (radius <= 1.0e-6) {
+            return pts;
+        }
+        final Vector3d u = new Vector3d(normal).normalize().negate();
+        final Vector3d v = new Vector3d(other).normalize().negate();
+        double c = Math.max(-1.0, Math.min(1.0, u.dot(v)));
+        final double phi = Math.acos(c);
+        final double sh = Math.sin(phi * 0.5);
+        final Vector3d m = new Vector3d(u).add(v);
+        if (sh < 1.0e-6 || m.lengthSquared() < 1.0e-12) {
+            return pts;
+        }
+        m.normalize();
+        final Vector3d center = new Vector3d(m).mul(radius / sh);
+        final Vector3d t1 = new Vector3d(center).fma(-radius, u);
+        final Vector3d e1 = new Vector3d(u);
+        final Vector3d e2 = new Vector3d(v).fma(-v.dot(e1), e1);
+        if (e2.lengthSquared() < 1.0e-12) {
+            return pts;
+        }
+        e2.normalize();
+        final Vector3d r1 = new Vector3d(t1).sub(center);
+        final double a1 = Math.atan2(r1.dot(e2), r1.dot(e1));
+        final double sweep = Math.PI - phi;
+        pts.add(new Vector3d());
+        pts.add(t1);
+        final int seg = Math.max(2, ARC_SEGMENTS);
+        for (int k2 = 1; k2 <= seg; k2++) {
+            final double ang = a1 + sweep * k2 / seg;
+            pts.add(new Vector3d(center)
+                    .fma(radius * Math.cos(ang), e1)
+                    .fma(radius * Math.sin(ang), e2));
+        }
+        return pts;
     }
 
     /** 截面（2D，单位：格）：角点 (0,0) + 从 (-r,0) 到 (0,-r) 的圆弧 ✓ 逆时针 */

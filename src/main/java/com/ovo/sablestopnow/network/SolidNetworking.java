@@ -71,13 +71,13 @@ public final class SolidNetworking {
             if (!(context.player() instanceof final ServerPlayer player)
                     || !(context.level() instanceof final ServerLevel level)) {
                 com.ovo.sablestopnow.SablestopNow.LOGGER.warn(
-                        "[solid-reject] sketch-missing-or-body-mismatch");
+                        "[solid-reject] player/level missing");
                 return;
             }
             final Solid solid = SolidData.readSolid(this.solid);
             if (solid == null) {
                 com.ovo.sablestopnow.SablestopNow.LOGGER.warn(
-                        "[solid-reject] existing-mismatch");
+                        "[solid-reject] solid-null (decode failed)");
                 return;
             }
             final SolidData data = SolidData.get(level);
@@ -86,7 +86,7 @@ public final class SolidNetworking {
             if (existing != null && (!existing.body().equals(solid.body())
                     || !existing.sketchId().equals(solid.sketchId()))) {
                 com.ovo.sablestopnow.SablestopNow.LOGGER.warn(
-                        "[solid-reject] solid==null");
+                        "[solid-reject] existing-mismatch body/sketch changed");
                 return;
             }
             // 引用的草图必须存在，且与本实体属于同一个结构

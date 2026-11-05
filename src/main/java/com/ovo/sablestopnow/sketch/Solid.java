@@ -1504,8 +1504,19 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                 }
             }
-            if (bestWedge == null || bestScore > Math.max(1.0e-3, theory * 0.5)) {
-                lastFilletDiag = "skip idx=" + index + " reason=no-matching-wedge"
+            // ★ 判定放宽（用户实测：严格匹配理论值会让所有棱都被跳过）：
+            //   取"材料内体积/材料外体积"中**占理论值比例更大**的那一支，
+            //   并且只要求 ≥ 30% 理论体积 ⇒ 一定能选出一个方案，而不是全跳过。
+            if (bestWedge == null) {
+                lastFilletDiag = "skip idx=" + index + " reason=empty-prism edge=" + source;
+                continue;
+            }
+            final double bestVol = Math.max(bestIn, bestOut);
+            if (bestVol < theory * 0.3) {
+                lastFilletDiag = "skip idx=" + index + " reason=too-small"
+                        + " in=" + String.format(java.util.Locale.ROOT, "%.5f", bestIn)
+                        + " out=" + String.format(java.util.Locale.ROOT, "%.5f", bestOut)
+                        + " theory=" + String.format(java.util.Locale.ROOT, "%.5f", theory)
                         + " edge=" + source;
                 continue;
             }

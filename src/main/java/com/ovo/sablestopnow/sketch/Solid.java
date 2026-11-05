@@ -988,6 +988,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         final StringBuilder filletLog = new StringBuilder();
         final java.util.Map<UUID, List<double[]>> filletEdgeBySolid =
                 new java.util.HashMap<>();
+        // ★ 圆角引用指向**镜像/阵列特征**时（用户在镜像产物上点棱）：
+        //   棱数据单独归集，等镜像/阵列产物生成后**在变换后的空间**里应用 ✓
+        final java.util.Map<UUID, List<double[]>> filletEdgeByMirror = new java.util.HashMap<>();
+        final java.util.Map<UUID, List<double[]>> filletEdgeByPattern = new java.util.HashMap<>();
         int curveGroupSeq = 0;
 
         final java.util.function.BiFunction<Solid, Sketch, Eval> baseEvalOf = (srcS, sk) -> {
@@ -1066,6 +1070,31 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         + ")");
                 Solid src = byId.get(ref.solidId());
                 String srcNote = "";
+                // ★ 用户在**镜像/阵列产物**上点的棱：引用指向镜像/阵列特征本身。
+                //   这些产物不经过主循环的材料累积 ⇒ 单独归集，在产物生成时做 ✓
+                if (src != null && (src.shape instanceof Shape.Mirror
+                        || src.shape instanceof Shape.Pattern)) {
+                    final Vector3d mn1 = new Vector3d(ref.n1x(), ref.n1y(), ref.n1z());
+                    final Vector3d mn2 = new Vector3d(ref.n2x(), ref.n2y(), ref.n2z());
+                    if (mn1.lengthSquared() < 1.0e-12) {
+                        filletLog.append(" [f").append(s2.index()).append(":no-normals]");
+                        continue;
+                    }
+                    mn1.normalize();
+                    if (mn2.lengthSquared() < 1.0e-12) {
+                        mn2.zero();
+                    } else {
+                        mn2.normalize();
+                    }
+                    final int cg = ref.isCurve() ? (++curveGroupSeq) : -1;
+                    final boolean isMirror = src.shape instanceof Shape.Mirror;
+                    expandRef(isMirror ? filletEdgeByMirror : filletEdgeByPattern,
+                            src.id(), ref, mn1, mn2, f.radius(), cg, null);
+                    trace("fillet:  target=" + (isMirror ? "mirror " : "pattern ")
+                            + shortId(src.id()) + " segs=" + (ref.isCurve()
+                                    ? ref.curveSegs().size() : 1));
+                    continue;
+                }
                 // ★ 拾取到"切割体/基准面/镜像"等**非材料**实体的面时（最常见的例子：
                 //   孔的圆柱面来自切割体的网格 ⇒ hover 给的是 Cut 的 id），
                 //   solidId 会指向一个永远不会进主循环的实体 ⇒ 圆角数据挂在那儿没人用
@@ -1140,44 +1169,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 // ★ 曲线棱（一条弧 = 一个 EdgeRef + 折线）⇒ 逐段展开 ✓
                 //   直线棱只有一段，行为与以前完全一致。
                 //   同一条曲线的所有段共享 **curveGroup**（求值时合成一个扫掠体）。
-                final double rr = f.radius();
-                final int curveGroup = ref.isCurve() ? (++curveGroupSeq) : -1;
-                final java.util.List<double[]> segsToUse = ref.isCurve()
-                        ? ref.curveSegs()
-                        : java.util.List.of(new double[] {a.x, a.y, a.z, b.x, b.y, b.z});
-                for (int si = 0; si < segsToUse.size(); si++) {
-                    final double[] sg = segsToUse.get(si);
-                    final Vector3d sa = new Vector3d(sg[0], sg[1], sg[2]);
-                    final Vector3d sb = new Vector3d(sg[3], sg[4], sg[5]);
-                    if (sa.distance(sb) < 1.0e-6) {
-                        continue;
-                    }
-                    final Vector3d sd = new Vector3d(sb).sub(sa).normalize();
-                    // 每个线段自己的第二个法线：dir × 盖面法线（弧面逐段变化）✓
-                    final Vector3d segN1 = new Vector3d(nn[0]).normalize();
-                    final Vector3d segN2 = new Vector3d(sd).cross(segN1);
-                    if (segN2.lengthSquared() < 1.0e-9) {
-                        segN2.set(nn[1]);
-                    } else {
-                        segN2.normalize();
-                    }
-                    filletEdgeBySolid.computeIfAbsent(src.id(), k2 -> new ArrayList<>())
-                            .add(new double[] {sa.x, sa.y, sa.z, sb.x, sb.y, sb.z,
-                                segN1.x, segN1.y, segN1.z, segN2.x, segN2.y, segN2.z, rr,
-                                curveGroup});
-                    final List<Vector3d[]> tris = FilletCutter.prism(sa, sb, segN1, segN2, rr);
-                    if (tris == null || tris.isEmpty()) {
-                        continue;
-                    }
-                    if (si == 0) {
-                        trace("fillet:  prism tris=" + tris.size()
-                                + " src=" + shortId(src.id()) + " srcBody="
-                                + shortId(src.body()) + srcNote
-                                + (ref.isCurve() ? " curveSegs=" + segsToUse.size() : ""));
-                    }
-                    polysBySrc.computeIfAbsent(s2.body(), k -> new ArrayList<>())
-                            .addAll(triPolys(tris, sd, segN1));
-                }
+                final java.util.List<Csg.Polygon> prismPolys = new ArrayList<>();
+                expandRef(filletEdgeBySolid, src.id(), ref, nn[0], nn[1], f.radius(),
+                        ref.isCurve() ? (++curveGroupSeq) : -1, prismPolys);
+                trace("fillet:  prism polys=" + prismPolys.size()
+                        + " src=" + shortId(src.id()) + " srcBody="
+                        + shortId(src.body()) + srcNote
+                        + (ref.isCurve() ? " curveSegs=" + ref.curveSegs().size() : ""));
+                polysBySrc.computeIfAbsent(s2.body(), k -> new ArrayList<>())
+                        .addAll(prismPolys);
             }
             for (final java.util.Map.Entry<UUID, List<Csg.Polygon>> en : polysBySrc.entrySet()) {
                 filletPolyByBody.computeIfAbsent(en.getKey(), k2 -> new ArrayList<>())
@@ -1391,22 +1391,25 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                             reflectPoint(ed[1], o, n)});
                 }
                 SolidMesh.Mesh mesh = e.mesh() == null ? null : reflectMesh(e.mesh(), o, n);
-                // ★ 圆角也作用到镜像产物上（回归修复：上一版改写时漏了这一步）✓
-                if (!filletPend.isEmpty()) {
-                    final List<Csg.Polygon> bp = mesh == null || mesh.isEmpty() ? null
-                            : ensureOutward(CsgMesh.fromMesh(mesh, null));
-                    if (bp != null && !bp.isEmpty()) {
-                        final List<Csg.Polygon> rr2 = subtractLocal(bp, ensureOutward(filletPend));
-                        if (!rr2.isEmpty()) {
-                            mesh = CsgMesh.toMesh(rr2);
-                        }
-                    }
-                }
                 if (!cutBoxes.isEmpty()) {
                     mesh = subtractBoxesMesh(mesh, cutBoxes);
                 }
                 final List<double[]> finalBoxes = cutBoxes.isEmpty() ? boxes
                         : subtractBoxes(boxes, cutBoxes);
+                // ★ 镜像产物上的圆角：棱数据本来就存成镜像后的局部坐标 ⇒ 直接在产物上应用 ✓
+                //   （以前这一步是死代码：filletPend 从没被填过 ⇒ "镜像体上无法圆角"）
+                final List<double[]> mirEdges = filletEdgeByMirror.get(mirror.id());
+                if (mirEdges != null && !mirEdges.isEmpty()
+                        && mesh != null && !mesh.isEmpty()) {
+                    List<Csg.Polygon> mp = ensureOutward(CsgMesh.fromMesh(mesh, null));
+                    if (!mp.isEmpty()) {
+                        mp = applyFillets(mp, mirEdges, mirror.index(), "mirror", filletLog,
+                                finalBoxes);
+                        if (!mp.isEmpty()) {
+                            mesh = CsgMesh.toMesh(mp);
+                        }
+                    }
+                }
                 if (finalBoxes.isEmpty() || edges.isEmpty()) {
                     continue;
                 }
@@ -1490,6 +1493,23 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                     final List<double[]> finalBoxes = cutHere.isEmpty() ? boxes
                             : subtractBoxes(boxes, cutHere);
+                    // ★ 阵列产物上的圆角：棱数据按**本副本的平移量**搬过来再应用 ✓
+                    final List<double[]> patEdges = filletEdgeByPattern.get(pat.id());
+                    if (patEdges != null && !patEdges.isEmpty()
+                            && mesh != null && !mesh.isEmpty()) {
+                        final List<double[]> moved = new ArrayList<>(patEdges.size());
+                        for (final double[] ed : patEdges) {
+                            moved.add(translateEdgeTuple(ed, off));
+                        }
+                        List<Csg.Polygon> pp = ensureOutward(CsgMesh.fromMesh(mesh, null));
+                        if (!pp.isEmpty()) {
+                            pp = applyFillets(pp, moved, pat.index(), "pattern", filletLog,
+                                    finalBoxes);
+                            if (!pp.isEmpty()) {
+                                mesh = CsgMesh.toMesh(pp);
+                            }
+                        }
+                    }
                     if (finalBoxes.isEmpty() || edges.isEmpty()) {
                         continue;
                     }
@@ -1909,6 +1929,63 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             total += Math.sqrt(dx * dx + dy * dy + dz * dz);
         }
         return total;
+    }
+
+    /**
+     * 把一条 EdgeRef（直线 / 曲线折线）展开成求值用的**逐段元组** ✓
+     *
+     * <p>每段都重新算"第二个法线"= dir × 盖面法线 ⇒ 弧面逐段都正确；
+     * 同一条曲线的所有段共享 {@code curveGroup}，求值时合成一个扫掠体。
+     *
+     * @param polysOut 非 null 时同时把逐段棱柱追加进去（镜像/阵列的旧路径用）
+     */
+    private static void expandRef(final java.util.Map<UUID, List<double[]>> map, final UUID key,
+                                  final Shape.EdgeRef ref, final Vector3d n1v,
+                                  final Vector3d n2v, final double rr, final int curveGroup,
+                                  final java.util.List<Csg.Polygon> polysOut) {
+        if (map == null || key == null || ref == null) {
+            return;
+        }
+        final java.util.List<double[]> segs = ref.isCurve()
+                ? ref.curveSegs()
+                : java.util.List.of(new double[] {ref.ax(), ref.ay(), ref.az(),
+                    ref.bx(), ref.by(), ref.bz()});
+        final java.util.List<double[]> out = map.computeIfAbsent(key, k -> new ArrayList<>());
+        for (final double[] sg : segs) {
+            final Vector3d sa = new Vector3d(sg[0], sg[1], sg[2]);
+            final Vector3d sb = new Vector3d(sg[3], sg[4], sg[5]);
+            if (sa.distance(sb) < 1.0e-6) {
+                continue;
+            }
+            final Vector3d sd = new Vector3d(sb).sub(sa).normalize();
+            final Vector3d segN1 = new Vector3d(n1v).normalize();
+            final Vector3d segN2 = new Vector3d(sd).cross(segN1);
+            if (segN2.lengthSquared() < 1.0e-9) {
+                if (n2v == null || n2v.lengthSquared() < 1.0e-9) {
+                    continue;
+                }
+                segN2.set(n2v);
+            } else {
+                segN2.normalize();
+            }
+            out.add(new double[] {sa.x, sa.y, sa.z, sb.x, sb.y, sb.z,
+                segN1.x, segN1.y, segN1.z, segN2.x, segN2.y, segN2.z, rr, curveGroup});
+            if (polysOut != null) {
+                final List<Vector3d[]> tris =
+                        FilletCutter.prism(sa, sb, segN1, segN2, rr);
+                if (tris != null && !tris.isEmpty()) {
+                    polysOut.addAll(triPolys(tris, sd, segN1));
+                }
+            }
+        }
+    }
+
+    /** 平移一条圆角边元组（阵列副本用）✓ */
+    private static double[] translateEdgeTuple(final double[] e, final double[] off) {
+        return new double[] {e[0] + off[0], e[1] + off[1], e[2] + off[2],
+            e[3] + off[0], e[4] + off[1], e[5] + off[2],
+            e[6], e[7], e[8], e[9], e[10], e[11], e[12],
+            e.length > 13 ? e[13] : -1};
     }
 
     /** 边元组的曲线组号（-1 = 直线棱）✓ */

@@ -2757,15 +2757,25 @@ public final class ModelUi {
                     ? new org.joml.Vector3d(0, 0, 0) : first.n1();
             final org.joml.Vector3d n2 = first.n2() == null
                     ? new org.joml.Vector3d(0, 0, 0) : first.n2();
-            // ★ 引用必须指向**拥有这条棱的材料实体**：hover 到孔壁时给的是切割体 id，
-            //   挂到切割体上永远不会被求值（"创建后模型不变"的另一个真因）✓
+            // ★ 引用归属：
+            //   ① 镜像/阵列产物上拾取 ⇒ 必须指向**镜像/阵列特征**（求值在变换后的空间做）
+            //   ② 拾取到切割体/基准面/圆角这类非材料实体 ⇒ 改用 owning 材料实体
             final org.joml.Vector3d gMid = new org.joml.Vector3d(
                     (first.seg()[0] + first.seg()[3]) * 0.5,
                     (first.seg()[1] + first.seg()[4]) * 0.5,
                     (first.seg()[2] + first.seg()[5]) * 0.5);
-            java.util.UUID ownerId = pipSolid(filletSourceSolid, gMid);
-            if (ownerId == null) {
-                ownerId = filletSolidId;
+            java.util.UUID ownerId = filletSolidId;
+            final com.ovo.sablestopnow.sketch.Solid ownerSolid = ownerId == null
+                    ? null : com.ovo.sablestopnow.sketch.SolidClientState.byId(level, ownerId);
+            final boolean ownerUsable = ownerSolid != null
+                    && !(ownerSolid.shape()
+                            instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut)
+                    && !ownerSolid.isPlane() && !ownerSolid.isFillet();
+            if (!ownerUsable) {
+                final java.util.UUID pip = pipSolid(filletSourceSolid, gMid);
+                if (pip != null) {
+                    ownerId = pip;
+                }
             }
             if (g.size() == 1) {
                 refs.add(new com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef(

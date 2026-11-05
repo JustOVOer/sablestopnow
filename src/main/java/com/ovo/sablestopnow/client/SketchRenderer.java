@@ -1518,7 +1518,13 @@ public final class SketchRenderer {
             lineA(vl, pose, rel(seg[0], cameraPos), rel(seg[1], cameraPos), outline, 0.9f);
             drawn++;
         }
-        if (fh.kind() == com.ovo.sablestopnow.client.model.FeatureHover.Kind.EDGE
+        // 棱高亮：曲线棱时 hotSegs = **整条弧**（不是被点中的那一小段）✓
+        if (!fh.hotSegs().isEmpty()) {
+            for (final Vec3[] seg : fh.hotSegs()) {
+                lineA(vl, pose, rel(seg[0], cameraPos), rel(seg[1], cameraPos), hot, 1.0f);
+                drawn++;
+            }
+        } else if (fh.kind() == com.ovo.sablestopnow.client.model.FeatureHover.Kind.EDGE
                 && fh.index() >= 0 && fh.index() < fh.worldSegs().size()) {
             final Vec3[] seg = fh.worldSegs().get(fh.index());
             lineA(vl, pose, rel(seg[0], cameraPos), rel(seg[1], cameraPos), hot, 1.0f);

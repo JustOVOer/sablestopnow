@@ -128,12 +128,86 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         record EdgeRef(java.util.UUID solidId, double ax, double ay, double az,
                        double bx, double by, double bz,
                        double n1x, double n1y, double n1z,
-                       double n2x, double n2y, double n2z) {
+                       double n2x, double n2y, double n2z,
+                       double[] curve) {
+
+            public EdgeRef {
+                curve = curve == null ? new double[0] : curve;
+            }
+
+            /** 直线棱（12 参数签名，curve 为空）✓ */
+            public EdgeRef(final java.util.UUID solidId, final double ax, final double ay,
+                           final double az, final double bx, final double by, final double bz,
+                           final double n1x, final double n1y, final double n1z,
+                           final double n2x, final double n2y, final double n2z) {
+                this(solidId, ax, ay, az, bx, by, bz, n1x, n1y, n1z, n2x, n2y, n2z,
+                        new double[0]);
+            }
 
             /** 旧版（无面法线）：法线置零，几何侧会退回"从网格搜相邻面"✓ */
             public EdgeRef(final java.util.UUID solidId, final double ax, final double ay,
                            final double az, final double bx, final double by, final double bz) {
-                this(solidId, ax, ay, az, bx, by, bz, 0, 0, 0, 0, 0, 0);
+                this(solidId, ax, ay, az, bx, by, bz, 0, 0, 0, 0, 0, 0, new double[0]);
+            }
+
+            /** 是**曲线棱**吗？（curve = 折线点，至少 3 个点 = 9 个数）✓ */
+            public boolean isCurve() {
+                return curve.length >= 9;
+            }
+
+            /** 曲线折线的点（局部坐标 {x,y,z} 每 3 个一组）✓ */
+            public java.util.List<double[]> curvePoints() {
+                final java.util.List<double[]> pts = new java.util.ArrayList<>();
+                for (int i = 0; i + 2 < curve.length; i += 3) {
+                    pts.add(new double[] {curve[i], curve[i + 1], curve[i + 2]});
+                }
+                return pts;
+            }
+
+            /** 曲线拆成有序线段 {x1,y1,z1,x2,y2,z2} ✓（直线棱返回空） */
+            public java.util.List<double[]> curveSegs() {
+                final java.util.List<double[]> out = new java.util.ArrayList<>();
+                final java.util.List<double[]> pts = curvePoints();
+                for (int i = 0; i + 1 < pts.size(); i++) {
+                    final double[] p = pts.get(i);
+                    final double[] q = pts.get(i + 1);
+                    out.add(new double[] {p[0], p[1], p[2], q[0], q[1], q[2]});
+                }
+                return out;
+            }
+
+            @Override
+            public boolean equals(final Object o) {
+                if (this == o) {
+                    return true;
+                }
+                if (!(o instanceof final EdgeRef r)) {
+                    return false;
+                }
+                return java.util.Objects.equals(solidId, r.solidId)
+                        && ax == r.ax && ay == r.ay && az == r.az
+                        && bx == r.bx && by == r.by && bz == r.bz
+                        && n1x == r.n1x && n1y == r.n1y && n1z == r.n1z
+                        && n2x == r.n2x && n2y == r.n2y && n2z == r.n2z
+                        && java.util.Arrays.equals(curve, r.curve);
+            }
+
+            @Override
+            public int hashCode() {
+                int h = java.util.Objects.hashCode(solidId);
+                h = 31 * h + Double.hashCode(ax);
+                h = 31 * h + Double.hashCode(ay);
+                h = 31 * h + Double.hashCode(az);
+                h = 31 * h + Double.hashCode(bx);
+                h = 31 * h + Double.hashCode(by);
+                h = 31 * h + Double.hashCode(bz);
+                h = 31 * h + Double.hashCode(n1x);
+                h = 31 * h + Double.hashCode(n1y);
+                h = 31 * h + Double.hashCode(n1z);
+                h = 31 * h + Double.hashCode(n2x);
+                h = 31 * h + Double.hashCode(n2y);
+                h = 31 * h + Double.hashCode(n2z);
+                return 31 * h + java.util.Arrays.hashCode(curve);
             }
         }
 
@@ -319,6 +393,31 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         for (final Shape.EdgeRef ref : f.edges()) {
             final Solid src = byId.get(ref.solidId());
             if (src == null || src.shape instanceof Shape.Plane || src.shape instanceof Shape.Cut) {
+                continue;
+            }
+            // ★ 曲线棱：碰撞盒也要**逐段**做（用弦线会把弧内部整块切掉）✓
+            if (ref.isCurve()) {
+                final org.joml.Vector3d curveCap = new org.joml.Vector3d(
+                        ref.n1x(), ref.n1y(), ref.n1z());
+                if (curveCap.lengthSquared() < 1.0e-9) {
+                    curveCap.set(0, 1, 0);
+                }
+                curveCap.normalize();
+                for (final double[] sg : ref.curveSegs()) {
+                    final org.joml.Vector3d sa = new org.joml.Vector3d(sg[0], sg[1], sg[2]);
+                    final org.joml.Vector3d sb = new org.joml.Vector3d(sg[3], sg[4], sg[5]);
+                    final org.joml.Vector3d d = new org.joml.Vector3d(sb).sub(sa);
+                    if (d.length() < 1.0e-6) {
+                        continue;
+                    }
+                    d.normalize();
+                    final org.joml.Vector3d side = new org.joml.Vector3d(d).cross(curveCap);
+                    if (side.lengthSquared() < 1.0e-9) {
+                        continue;
+                    }
+                    side.normalize();
+                    out.addAll(FilletGeom.boxesFor(sa, sb, curveCap, side, f.radius(), true));
+                }
                 continue;
             }
             // 只用"棱方向"与"草图平面法线"两面 ⇒ 与 FilletGeom 的轴对齐判据配合 ✓
@@ -990,51 +1089,44 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     filletLog.append(" [f").append(s2.index()).append(":no-normals]");
                     continue;
                 }
-                final Vector3d fdir = new Vector3d(b).sub(a).normalize();
-                final List<Vector3d[]> prismTris =
-                        FilletCutter.prism(a, b, nn[0], nn[1], f.radius());
-                trace("fillet:  prism tris=" + (prismTris == null ? -1 : prismTris.size())
-                        + " src=" + shortId(src.id()) + " srcBody=" + shortId(src.body())
-                        + srcNote);
-                if (prismTris == null || prismTris.isEmpty()) {
-                    filletLog.append(" [f").append(s2.index()).append(":prism-empty]");
-                    continue;
-                }
-                // ★ 合理性校验（用户实测：只有**部分棱**会出问题 ⇒ 棱柱被放到了实体外面/朝向反了）
-                //   ① 两个面法线不能几乎平行（那样定不出角，圆弧会退化成碎片）
-                //   ② 棱柱重心必须落在**该实体的盒子范围**内，否则减了也是"没反应/垃圾"
-                final Vector3d n1n = new Vector3d(nn[0]).normalize();
-                final Vector3d n2n = new Vector3d(nn[1]).normalize();
-                if (Math.abs(n1n.dot(n2n)) > 0.999) {
-                    lastFilletDiag = "skip idx=" + s2.index() + " reason=parallel-normals";
-                    continue;
-                }
-                double cx = 0.0;
-                double cy = 0.0;
-                double cz = 0.0;
-                int cn = 0;
-                for (final Vector3d[] t : prismTris) {
-                    for (final Vector3d q : t) {
-                        cx += q.x;
-                        cy += q.y;
-                        cz += q.z;
-                        cn++;
+                // ★ 曲线棱（一条弧 = 一个 EdgeRef + 折线）⇒ 逐段展开 ✓
+                //   直线棱只有一段，行为与以前完全一致。
+                final double rr = f.radius();
+                final java.util.List<double[]> segsToUse = ref.isCurve()
+                        ? ref.curveSegs()
+                        : java.util.List.of(new double[] {a.x, a.y, a.z, b.x, b.y, b.z});
+                for (int si = 0; si < segsToUse.size(); si++) {
+                    final double[] sg = segsToUse.get(si);
+                    final Vector3d sa = new Vector3d(sg[0], sg[1], sg[2]);
+                    final Vector3d sb = new Vector3d(sg[3], sg[4], sg[5]);
+                    if (sa.distance(sb) < 1.0e-6) {
+                        continue;
                     }
+                    final Vector3d sd = new Vector3d(sb).sub(sa).normalize();
+                    // 每个线段自己的第二个法线：dir × 盖面法线（弧面逐段变化）✓
+                    final Vector3d segN1 = new Vector3d(nn[0]).normalize();
+                    final Vector3d segN2 = new Vector3d(sd).cross(segN1);
+                    if (segN2.lengthSquared() < 1.0e-9) {
+                        segN2.set(nn[1]);
+                    } else {
+                        segN2.normalize();
+                    }
+                    filletEdgeByBody.computeIfAbsent(s2.body(), k2 -> new ArrayList<>())
+                            .add(new double[] {sa.x, sa.y, sa.z, sb.x, sb.y, sb.z,
+                                segN1.x, segN1.y, segN1.z, segN2.x, segN2.y, segN2.z, rr});
+                    final List<Vector3d[]> tris = FilletCutter.prism(sa, sb, segN1, segN2, rr);
+                    if (tris == null || tris.isEmpty()) {
+                        continue;
+                    }
+                    if (si == 0) {
+                        trace("fillet:  prism tris=" + tris.size()
+                                + " src=" + shortId(src.id()) + " srcBody="
+                                + shortId(src.body()) + srcNote
+                                + (ref.isCurve() ? " curveSegs=" + segsToUse.size() : ""));
+                    }
+                    polysBySrc.computeIfAbsent(s2.body(), k -> new ArrayList<>())
+                            .addAll(triPolys(tris, sd, segN1));
                 }
-                if (cn > 0) {
-                    cx /= cn;
-                    cy /= cn;
-                    cz /= cn;
-                }
-                // ★ 按**被引用的实体**归集：圆角只作用于它指向的那个实体 ✓
-                //   （圆角是"拉伸之后的后处理"，不能溢出到镜像/阵列产物上）
-                // ★ 与**切割**完全一致：按 body 作用（不再按单个实体区分对待）✓
-                filletEdgeByBody.computeIfAbsent(s2.body(), k2 -> new ArrayList<>())
-                        .add(new double[] {a.x, a.y, a.z, b.x, b.y, b.z,
-                            nn[0].x, nn[0].y, nn[0].z, nn[1].x, nn[1].y, nn[1].z,
-                            f.radius()});
-                polysBySrc.computeIfAbsent(s2.body(), k -> new ArrayList<>())
-                        .addAll(triPolys(prismTris, fdir, nn[0]));
             }
             for (final java.util.Map.Entry<UUID, List<Csg.Polygon>> en : polysBySrc.entrySet()) {
                 filletPolyByBody.computeIfAbsent(en.getKey(), k2 -> new ArrayList<>())

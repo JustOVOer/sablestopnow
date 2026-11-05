@@ -53,11 +53,13 @@ public final class FeatureHover {
      * @param worldTris   面的三角形（世界坐标，渲染填充用）
      * @param worldSegs   面的边界直线段（世界坐标）
      * @param worldVerts  面的顶点（世界坐标）
+     * @param hotSegs     **整条棱**的线段（世界坐标）：曲线棱 = 整条弧的折线，
+     *                    悬停时整条高亮（而不是只亮被点中的那一小段）✓
      */
     public record Hit(UUID body, UUID solidId, Features.Face face, Kind kind, int index,
                       Vector3d localHit, Vector3d localCenter, Vector3d localNormal, Vector3d localU,
                       List<Vec3[]> worldTris, List<Vec3[]> worldSegs, List<Vec3> worldVerts,
-                      double distance) {
+                      List<Vec3[]> hotSegs, double distance) {
     }
 
     @Nullable
@@ -203,9 +205,24 @@ public final class FeatureHover {
         if (Math.abs(axisU.dot(normal)) > 1.0e-6) {
             axisU.fma(-axisU.dot(normal), normal).normalize();
         }
+        // ★ 曲线棱：悬停要**整条弧**高亮（不是只亮被点中的 0.1 格小段）⇒
+        //   用"直线棱/曲线棱"共用的判定把整条链取出来 ✓
+        final List<Vec3[]> hotSegs = new ArrayList<>();
+        if (edgeIndex >= 0 && kind != Kind.VERTEX) {
+            final boolean[] curveFlag =
+                    com.ovo.sablestopnow.sketch.ReferenceOutline.curveFlags(face.segments());
+            final java.util.List<double[]> chain =
+                    com.ovo.sablestopnow.sketch.EdgeChains.chainAt(face.segments(), curveFlag,
+                            edgeIndex);
+            for (final double[] s : chain) {
+                hotSegs.add(new Vec3[] {
+                        toWorld(pose, new Vector3d(s[0], s[1], s[2])),
+                        toWorld(pose, new Vector3d(s[3], s[4], s[5]))});
+            }
+        }
         return new Hit(bodyId, solidId, face, kind, kind == Kind.VERTEX ? vertIndex : edgeIndex,
                 new Vector3d(localHit), new Vector3d(face.origin()), normal, axisU,
-                worldTris, worldSegs, worldVerts, dist);
+                worldTris, worldSegs, worldVerts, hotSegs, dist);
     }
 
     private static Vec3 toWorld(final Pose3dc pose, final Vector3d local) {

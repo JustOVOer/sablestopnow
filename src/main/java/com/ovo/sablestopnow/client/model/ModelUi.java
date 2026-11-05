@@ -2648,25 +2648,51 @@ public final class ModelUi {
             index = Math.max(index, s.index() + 1);
         }
         index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(filletSourceSolid, 0) + 1);
-        // 每条棱段一个 EdgeRef（曲线棱 = 整条链的多段；求值侧逐段建楔块）✓
-        final java.util.List<com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef> refs =
-                new java.util.ArrayList<>(filletPicks.size());
+        // ★ **一次点选 = 一个特征引用**：直线棱 1 段；曲线棱整条弧 = 1 个带折线的
+        //   EdgeRef（curve 字段）⇒ 弧在特征系统里是**一条棱**，不是几十条碎棱 ✓
+        final java.util.LinkedHashMap<Integer, java.util.List<FilletPick>> groups =
+                new java.util.LinkedHashMap<>();
         for (final FilletPick pick : filletPicks) {
-            final org.joml.Vector3d a = new org.joml.Vector3d(
-                    pick.seg()[0], pick.seg()[1], pick.seg()[2]);
-            final org.joml.Vector3d mid = new org.joml.Vector3d(
-                    (pick.seg()[0] + pick.seg()[3]) * 0.5,
-                    (pick.seg()[1] + pick.seg()[4]) * 0.5,
-                    (pick.seg()[2] + pick.seg()[5]) * 0.5);
-            final org.joml.Vector3d n1 = pick.n1() == null
-                    ? new org.joml.Vector3d(0, 0, 0) : pick.n1();
-            final org.joml.Vector3d n2 = pick.n2() == null
-                    ? new org.joml.Vector3d(0, 0, 0) : pick.n2();
+            groups.computeIfAbsent(pick.group(), k -> new java.util.ArrayList<>()).add(pick);
+        }
+        final java.util.List<com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef> refs =
+                new java.util.ArrayList<>(groups.size());
+        for (final java.util.List<FilletPick> g : groups.values()) {
+            final FilletPick first = g.get(0);
+            final org.joml.Vector3d n1 = first.n1() == null
+                    ? new org.joml.Vector3d(0, 0, 0) : first.n1();
+            final org.joml.Vector3d n2 = first.n2() == null
+                    ? new org.joml.Vector3d(0, 0, 0) : first.n2();
+            if (g.size() == 1) {
+                refs.add(new com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef(
+                        filletSolidId != null ? filletSolidId
+                                : pipSolid(filletSourceSolid, new org.joml.Vector3d(
+                                        (first.seg()[0] + first.seg()[3]) * 0.5,
+                                        (first.seg()[1] + first.seg()[4]) * 0.5,
+                                        (first.seg()[2] + first.seg()[5]) * 0.5)),
+                        first.seg()[0], first.seg()[1], first.seg()[2],
+                        first.seg()[3], first.seg()[4], first.seg()[5],
+                        n1.x, n1.y, n1.z, n2.x, n2.y, n2.z));
+                continue;
+            }
+            // 曲线棱：折线 = 首段起点 + 每段终点（段已按链顺序定向）
+            final double[] curve = new double[g.size() * 3 + 3];
+            int kk = 0;
+            curve[kk++] = first.seg()[0];
+            curve[kk++] = first.seg()[1];
+            curve[kk++] = first.seg()[2];
+            for (final FilletPick pick : g) {
+                curve[kk++] = pick.seg()[3];
+                curve[kk++] = pick.seg()[4];
+                curve[kk++] = pick.seg()[5];
+            }
             refs.add(new com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef(
-                    filletSolidId != null ? filletSolidId : pipSolid(filletSourceSolid, mid),
-                    pick.seg()[0], pick.seg()[1], pick.seg()[2],
-                    pick.seg()[3], pick.seg()[4], pick.seg()[5],
-                    n1.x, n1.y, n1.z, n2.x, n2.y, n2.z));
+                    filletSolidId != null ? filletSolidId
+                            : pipSolid(filletSourceSolid,
+                                    new org.joml.Vector3d(curve[0], curve[1], curve[2])),
+                    curve[0], curve[1], curve[2],
+                    curve[kk - 3], curve[kk - 2], curve[kk - 1],
+                    n1.x, n1.y, n1.z, n2.x, n2.y, n2.z, curve));
         }
         com.ovo.sablestopnow.SablestopNow.LOGGER.info(
                 "[fillet-step] EdgeRefs body={} count={} first=({},{},{})-({},{},{}) r={}",

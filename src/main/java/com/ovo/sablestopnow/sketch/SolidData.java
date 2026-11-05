@@ -239,6 +239,14 @@ public class SolidData extends SavedData {
                     et.putDouble("n2x", e.n2x());
                     et.putDouble("n2y", e.n2y());
                     et.putDouble("n2z", e.n2z());
+                    // ★ 曲线棱：折线点按 double 位写进 long 数组（避免额外的 NBT 标签类型）
+                    if (e.curve().length > 0) {
+                        final long[] bits = new long[e.curve().length];
+                        for (int i = 0; i < bits.length; i++) {
+                            bits[i] = Double.doubleToRawLongBits(e.curve()[i]);
+                        }
+                        et.putLongArray("curve", bits);
+                    }
                       edgeList.add(et);
                   }
                   entry.put("edges", edgeList);
@@ -369,7 +377,8 @@ public class SolidData extends SavedData {
                                       c.getDouble("ax"), c.getDouble("ay"), c.getDouble("az"),
                                       c.getDouble("bx"), c.getDouble("by"), c.getDouble("bz"),
                                       c.getDouble("n1x"), c.getDouble("n1y"), c.getDouble("n1z"),
-                                      c.getDouble("n2x"), c.getDouble("n2y"), c.getDouble("n2z")));
+                                      c.getDouble("n2x"), c.getDouble("n2y"), c.getDouble("n2z"),
+                                      readCurve(c)));
                           } else {
                               // 老存档没有法线字段 ⇒ 交给 faceNormals 兜底 ✓
                               refs.add(new Solid.Shape.EdgeRef(srcId,
@@ -404,5 +413,18 @@ public class SolidData extends SavedData {
             // 深度非法（<=0）、模式名字不认识、轴方向为零、字段缺失 —— 一律跳过这一条
             return null;
         }
+    }
+
+    /** 读曲线棱的折线点（double 位存在 long 数组里）✓ */
+    private static double[] readCurve(final CompoundTag c) {
+        if (!c.contains("curve")) {
+            return new double[0];
+        }
+        final long[] bits = c.getLongArray("curve");
+        final double[] out = new double[bits.length];
+        for (int i = 0; i < bits.length; i++) {
+            out[i] = Double.longBitsToDouble(bits[i]);
+        }
+        return out;
     }
 }

@@ -1016,6 +1016,38 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             return new Eval(baseBoxes, baseEdges, baseMesh);
         };
+        // ★ 圆角象限探针用的**体级**材料盒子（多个材料实体合并、只扣切割、不扣圆角）✓
+        //   按单个实体取会漏：实测弧所在实体的 boxes 不含该区域/为空 ⇒ quads 0/4
+        //   ⇒ 弧棱永远倒不出来（预览用的是全体盒子，所以预览正常）
+        final java.util.Map<UUID, List<double[]>> bodyProbeBoxes = new java.util.HashMap<>();
+        for (final Solid s : solids) {
+            if (s.shape instanceof Shape.Cut || s.shape instanceof Shape.Plane
+                    || s.shape instanceof Shape.Fillet || s.shape instanceof Shape.Mirror
+                    || s.shape instanceof Shape.Pattern) {
+                continue;
+            }
+            final Sketch sk = s.resolve(sketches);
+            if (sk == null) {
+                continue;
+            }
+            List<double[]> bx = s.boxes(sk);
+            if (bx == null) {
+                bx = List.of();
+            }
+            final List<CutFeat> cf = cutters.get(s.body());
+            if (cf != null && !cf.isEmpty()) {
+                final List<double[]> cb = new ArrayList<>();
+                for (final CutFeat f : cf) {
+                    cb.addAll(f.boxes());
+                }
+                if (!cb.isEmpty()) {
+                    bx = subtractBoxes(bx, cb);
+                }
+            }
+            final List<double[]> agg = bodyProbeBoxes.computeIfAbsent(
+                    s.body(), k -> new ArrayList<>());
+            agg.addAll(bx);
+        }
         for (final Solid s2 : solids) {
             if (!(s2.shape() instanceof final Shape.Fillet f)) {
                 continue;
@@ -1286,13 +1318,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 trace("fillet: solid idx=" + solid.index() + " id=" + shortId(solid.id())
                         + " body=" + shortId(solid.body())
                         + " edgeData=" + filletEdgeData.size()
+                        + " probeBoxes=" + (bodyProbeBoxes.get(solid.body()) == null ? 0
+                                : bodyProbeBoxes.get(solid.body()).size())
                         + " bySolidKeys=[" + bodyKeys(filletEdgeBySolid) + "]");
                 if (!filletEdgeData.isEmpty()) {
                     if (filletLog.length() < 400) {
                         filletLog.append(" [s").append(solid.index()).append(']');
                     }
+                    final List<double[]> probeAgg = bodyProbeBoxes.get(solid.body());
                     acc = applyFillets(acc, filletEdgeData, solid.index(), "solid", filletLog,
-                            probeBoxes);
+                            probeAgg != null && !probeAgg.isEmpty() ? probeAgg : probeBoxes);
                 }
                 if (!filletCuts.isEmpty()) {
                     final List<Csg.Polygon> fb = CsgMesh.fromMesh(
@@ -1748,6 +1783,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         for (int it = 0; it < ni; it++) {
             final int quads = itemQuads[it];
             if (quads != 1 && quads != 3) {
+                continue;
+            }
+            // ★ 凸/凹共顶点的过渡体目前**先跳过**：扫掠锥体在极小半径端会退化，
+            //   接进 CSG 会把网格弄坏（实测"模型崩坏"）。宁可暂时不倒，也不产出垃圾。
+            if (taperStart[it] || taperEnd[it]) {
+                log.append(" [f").append(index).append(":cc-skip]");
                 continue;
             }
             final int[] rg = items.get(it);

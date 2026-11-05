@@ -2375,6 +2375,12 @@ public final class ModelUi {
                 && Math.abs(a[ia + 2] - b[ib + 2]) < 1.0e-3;
     }
 
+    /** 两段在指定端点是否重合 ✓（段端点：0 = 起点，1 = 终点） */
+    private static boolean segPointEq(final double[] a, final int endA,
+                                      final double[] b, final int endB) {
+        return near3(a, endA == 1 ? 3 : 0, b, endB == 1 ? 3 : 0);
+    }
+
     private static boolean filletHasPick(final double[] seg) {
         for (final FilletPick p : filletPicks) {
             if (sameSeg(p.seg(), seg)) {
@@ -2486,28 +2492,60 @@ public final class ModelUi {
         int skipped = 0;
         // ★ 按"一次点选"分组：直线棱 = 1 段；曲线棱 = 整条弧 ⇒ **一个扫掠体**
         //   逐段画棱柱会在弧的关节处留空隙（用户实测"每个小圆角之间有间隙"）
-        final java.util.LinkedHashMap<Integer, java.util.List<FilletPick>> groups =
-                new java.util.LinkedHashMap<>();
-        for (final FilletPick pick : filletPicks) {
-            groups.computeIfAbsent(pick.group(), k -> new java.util.ArrayList<>()).add(pick);
+        final java.util.List<java.util.List<FilletPick>> gl = new java.util.ArrayList<>();
+        {
+            final java.util.LinkedHashMap<Integer, java.util.List<FilletPick>> groups =
+                    new java.util.LinkedHashMap<>();
+            for (final FilletPick pick : filletPicks) {
+                groups.computeIfAbsent(pick.group(), k -> new java.util.ArrayList<>()).add(pick);
+            }
+            gl.addAll(groups.values());
         }
-        for (final java.util.List<FilletPick> g : groups.values()) {
-            final FilletPick first = g.get(0);
-            final org.joml.Vector3d n1 = first.n1() == null
-                    ? new org.joml.Vector3d(0, 1, 0) : first.n1();
-            final org.joml.Vector3d n2 = first.n2() == null
-                    ? new org.joml.Vector3d(1, 0, 0) : first.n2();
-            final int midIdx = (g.size() - 1) / 2;
-            final FilletPick mid = g.get(midIdx);
-            final org.joml.Vector3d midN1 = mid.n1() == null ? n1 : mid.n1();
-            final org.joml.Vector3d midN2 = mid.n2() == null ? n2 : mid.n2();
-            final org.joml.Vector3d ma = new org.joml.Vector3d(
-                    mid.seg()[0], mid.seg()[1], mid.seg()[2]);
-            final org.joml.Vector3d mb = new org.joml.Vector3d(
-                    mid.seg()[3], mid.seg()[4], mid.seg()[5]);
+        final int gn = gl.size();
+        final int[] gq = new int[gn];
+        final double[][] gqd = new double[gn][];
+        // ① 逐组分类（中间段探针）
+        for (int i = 0; i < gn; i++) {
+            final java.util.List<FilletPick> g = gl.get(i);
+            final FilletPick mid = g.get((g.size() - 1) / 2);
+            final org.joml.Vector3d mn1 = mid.n1() == null
+                    ? new org.joml.Vector3d(0, 1, 0) : mid.n1();
+            final org.joml.Vector3d mn2 = mid.n2() == null
+                    ? new org.joml.Vector3d(1, 0, 0) : mid.n2();
             final double[] qd = new double[4];
-            final int quads = com.ovo.sablestopnow.sketch.Solid.filletQuadrant(
-                    pt -> insideAnyBox(pt), ma, mb, midN1, midN2, radius, qd);
+            gqd[i] = qd;
+            gq[i] = com.ovo.sablestopnow.sketch.Solid.filletQuadrant(
+                    pt -> insideAnyBox(pt),
+                    new org.joml.Vector3d(mid.seg()[0], mid.seg()[1], mid.seg()[2]),
+                    new org.joml.Vector3d(mid.seg()[3], mid.seg()[4], mid.seg()[5]),
+                    mn1, mn2, radius, qd);
+        }
+        // ② 凸/凹过渡：与**相反分类**的组共顶点 ⇒ 该端半径收小（与求值一致）✓
+        final boolean[] tStart = new boolean[gn];
+        final boolean[] tEnd = new boolean[gn];
+        for (int i = 0; i < gn; i++) {
+            for (int j = 0; j < gn; j++) {
+                if (i == j || (gq[i] != 1 && gq[i] != 3)
+                        || (gq[j] != 1 && gq[j] != 3)
+                        || ((gq[j] == 3) == (gq[i] == 3))) {
+                    continue;
+                }
+                final double[] aS = gl.get(i).get(0).seg();
+                final double[] aE = gl.get(i).get(gl.get(i).size() - 1).seg();
+                final double[] bS = gl.get(j).get(0).seg();
+                final double[] bE = gl.get(j).get(gl.get(j).size() - 1).seg();
+                if (segPointEq(aS, 0, bS, 0) || segPointEq(aS, 0, bE, 3)) {
+                    tStart[i] = true;
+                }
+                if (segPointEq(aE, 3, bS, 0) || segPointEq(aE, 3, bE, 3)) {
+                    tEnd[i] = true;
+                }
+            }
+        }
+        // ③ 造线框
+        for (int i = 0; i < gn; i++) {
+            final java.util.List<FilletPick> g = gl.get(i);
+            final int quads = gq[i];
             if (quads != 1 && quads != 3) {
                 skipped++;
                 continue;
@@ -2517,8 +2555,17 @@ public final class ModelUi {
             } else {
                 cut++;
             }
+            final FilletPick first = g.get(0);
+            final org.joml.Vector3d n1 = first.n1() == null
+                    ? new org.joml.Vector3d(0, 1, 0) : first.n1();
+            final org.joml.Vector3d n2 = first.n2() == null
+                    ? new org.joml.Vector3d(1, 0, 0) : first.n2();
+            final double[] qd = gqd[i];
+            final boolean tapered = tStart[i] || tEnd[i];
+            final double r0 = tStart[i] ? radius * 0.06 : radius;
+            final double r1 = tEnd[i] ? radius * 0.06 : radius;
             final java.util.List<org.joml.Vector3d[]> tris;
-            if (g.size() > 1) {
+            if (g.size() > 1 || tapered) {
                 final java.util.List<org.joml.Vector3d> pts =
                         new java.util.ArrayList<>(g.size() + 1);
                 pts.add(new org.joml.Vector3d(
@@ -2527,7 +2574,7 @@ public final class ModelUi {
                     pts.add(new org.joml.Vector3d(
                             pick.seg()[3], pick.seg()[4], pick.seg()[5]));
                 }
-                tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts, n1, radius,
+                tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts, n1, r0, r1,
                         (int) Math.round(qd[0]), (int) Math.round(qd[1]));
             } else {
                 final org.joml.Vector3d m1 = new org.joml.Vector3d(n1).mul(-qd[0]);

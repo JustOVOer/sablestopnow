@@ -656,6 +656,24 @@ public final class SketchModelCheck {
         check(Math.abs(ringVol - ringExpect) < Math.max(4.0e-3, ringExpect * 0.06),
                 "fillet-sweep: 圆环体积必须≈截面×周长（" + ringVol + " vs "
                         + ringExpect + "）");
+
+        // ★ 凸/凹过渡：半径沿链线性收小（r0 -> r1），体积按 r² 的均值算 ✓
+        final java.util.List<org.joml.Vector3d> line = java.util.List.of(
+                new org.joml.Vector3d(0, 0, 0), new org.joml.Vector3d(2, 0, 0));
+        final double rEnd = 0.025;
+        final java.util.List<org.joml.Vector3d[]> taperTris =
+                com.ovo.sablestopnow.sketch.FilletCutter.sweep(line,
+                        new org.joml.Vector3d(0, 0, 1), r, rEnd, 1, 1);
+        check(taperTris != null && !taperTris.isEmpty(), "fillet-sweep: 过渡扫掠体非空");
+        check(!hasNonManifoldEdge(taperTris), "fillet-sweep: 过渡扫掠体必须是封闭流形");
+        final double taperExpect = 2.0 * area * (r * r + r * rEnd + rEnd * rEnd)
+                / (3.0 * r * r);
+        final double taperVol = Math.abs(volume(
+                com.ovo.sablestopnow.sketch.Solid.triPolys(taperTris)));
+        pathlib_Diag("fillet-sweep taper vol=" + taperVol + " expect≈" + taperExpect);
+        check(Math.abs(taperVol - taperExpect) < Math.max(2.0e-3, taperExpect * 0.08),
+                "fillet-sweep: 过渡扫掠体体积必须按半径平方插值（" + taperVol
+                        + " vs " + taperExpect + "）");
     }
 
     /** 有非流形边吗（每条边必须恰好被 2 个三角形共用）✓ */

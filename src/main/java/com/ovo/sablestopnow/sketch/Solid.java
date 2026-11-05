@@ -1685,6 +1685,34 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             log.append(" [f").append(index).append(inherited ? ":inh]" : ":quads "
                     + itemQuads[it] + "/4]");
         }
+        // ③b **凸/凹过渡**：一个顶点上同时有"切料"和"补料"两种圆角时，两个圆角面
+        //     在顶点处方向相反 ⇒ 直接摞起来会留下一个台阶。
+        //     做法：两边都把半径**渐变收小到 ~0**（fillet runout）⇒ 在顶点处切向相接 ✓
+        final boolean[] taperStart = new boolean[ni];
+        final boolean[] taperEnd = new boolean[ni];
+        for (int a = 0; a < ni; a++) {
+            if (itemQuads[a] != 1 && itemQuads[a] != 3) {
+                continue;
+            }
+            final int[] ra = items.get(a);
+            final double[] aStart = edges.get(ra[0]);
+            final double[] aEnd = edges.get(ra[1] - 1);
+            for (int b = 0; b < ni; b++) {
+                if (a == b || (itemQuads[b] != 1 && itemQuads[b] != 3)
+                        || ((itemQuads[b] == 3) == (itemQuads[a] == 3))) {
+                    continue;
+                }
+                final int[] rb = items.get(b);
+                final double[] bStart = edges.get(rb[0]);
+                final double[] bEnd = edges.get(rb[1] - 1);
+                if (samePoint(aStart, 0, bStart, 0) || samePoint(aStart, 0, bEnd, 3)) {
+                    taperStart[a] = true;
+                }
+                if (samePoint(aEnd, 3, bStart, 0) || samePoint(aEnd, 3, bEnd, 3)) {
+                    taperEnd[a] = true;
+                }
+            }
+        }
         // ④ 造楔块 / 扫掠体（凸=切料，凹=补料）
         final List<List<Csg.Polygon>> cutWedges = new ArrayList<>();
         final List<List<Csg.Polygon>> fillWedges = new ArrayList<>();
@@ -1701,9 +1729,19 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final double[] e0 = edges.get(rg[0]);
             final double r = e0[12];
             final Vector3d cap = new Vector3d(e0[6], e0[7], e0[8]).normalize();
+            final boolean tapered = taperStart[it] || taperEnd[it];
+            final double rStart = taperStart[it] ? r * 0.06 : r;
+            final double rEnd = taperEnd[it] ? r * 0.06 : r;
+            double theory = itemTheory[it];
+            if (tapered) {
+                // 半径沿链线性变化 ⇒ ∫r²dt/L = (r0² + r0·r1 + r1²)/3 ✓
+                theory = (r * r - Math.PI * r * r / 4.0) * curveLength(edges, rg)
+                        * ((rStart * rStart + rStart * rEnd + rEnd * rEnd)
+                        / (3.0 * r * r));
+            }
             final List<Csg.Polygon> wedge;
-            if (curve) {
-                // 扫掠：整条弧一个封闭楔块 ✓
+            if (curve || tapered) {
+                // 扫掠：整条弧一个封闭楔块（过渡时半径沿链线性变化）✓
                 final List<Vector3d> pts = new ArrayList<>(rg[1] - rg[0] + 1);
                 pts.add(new Vector3d(e0[0], e0[1], e0[2]));
                 for (int i = rg[0]; i < rg[1]; i++) {
@@ -1711,7 +1749,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     pts.add(new Vector3d(ei[3], ei[4], ei[5]));
                 }
                 final double[] eMid = edges.get((rg[0] + rg[1] - 1) / 2);
-                final List<Vector3d[]> tris = FilletCutter.sweep(pts, cap, r,
+                final List<Vector3d[]> tris = FilletCutter.sweep(pts, cap, rStart, rEnd,
                         (int) Math.round(qd[0]), (int) Math.round(qd[1]));
                 if (tris == null || tris.isEmpty()) {
                     log.append(" [f").append(index).append(":sweep-empty]");
@@ -1735,8 +1773,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             trace("fillet:  quads=" + quads + "/4 pattern=" + (int) qd[3]
                     + " -> " + (concave ? "concave(fill)" : "convex(cut)")
-                    + " idx=" + index + (curve ? " sweepSegs=" + (rg[1] - rg[0]) : ""));
-            final double theory = itemTheory[it];
+                    + " idx=" + index + (curve ? " sweepSegs=" + (rg[1] - rg[0]) : "")
+                    + (tapered ? " taper" : ""));
             final double wedgeVol = Math.abs(polysVolume(wedge));
             if (wedgeVol > theory * 6.0 + 1.0e-3 || wedgeVol < theory * 0.25) {
                 log.append(" [f").append(index).append(":size ")
@@ -1789,6 +1827,19 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             log.append(" [fill n=").append(fillWedges.size()).append(']');
         }
         return out;
+    }
+
+    /** 一组边元组的总长度 ✓（过渡半径的体积估算用） */
+    private static double curveLength(final List<double[]> edges, final int[] rg) {
+        double total = 0.0;
+        for (int i = rg[0]; i < rg[1]; i++) {
+            final double[] e = edges.get(i);
+            final double dx = e[3] - e[0];
+            final double dy = e[4] - e[1];
+            final double dz = e[5] - e[2];
+            total += Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+        return total;
     }
 
     /** 边元组的曲线组号（-1 = 直线棱）✓ */

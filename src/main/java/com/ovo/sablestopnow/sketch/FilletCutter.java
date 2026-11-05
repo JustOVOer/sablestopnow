@@ -191,8 +191,21 @@ public final class FilletCutter {
      */
     public static List<Vector3d[]> sweep(final List<Vector3d> points, final Vector3dc cap,
                                          final double radius, final int q1, final int q2) {
+        return sweep(points, cap, radius, radius, q1, q2);
+    }
+
+    /**
+     * 扫掠体（**半径可以沿链线性变化**）✓ —— 凸/凹过渡处把半径收小到 ~0，
+     * 两个圆角在共顶点处切向相接，不再有台阶 ✓
+     *
+     * @param r0 起点半径
+     * @param r1 终点半径（闭合链忽略，用平均值）
+     */
+    public static List<Vector3d[]> sweep(final List<Vector3d> points, final Vector3dc cap,
+                                         final double r0, final double r1,
+                                         final int q1, final int q2) {
         final List<Vector3d[]> out = new ArrayList<>();
-        if (points == null || points.size() < 2 || radius <= 1.0e-6) {
+        if (points == null || points.size() < 2 || r0 <= 1.0e-6 || r1 <= 1.0e-6) {
             return out;
         }
         final Vector3d n = new Vector3d(cap);
@@ -241,6 +254,13 @@ public final class FilletCutter {
             }
             tan[i] = t.normalize();
         }
+        // 沿链的累计长度 ⇒ 每个关节的**局部半径**（r0→r1 线性变化）✓
+        final double[] cum = new double[m];
+        for (int i = 1; i < m; i++) {
+            cum[i] = cum[i - 1] + pts.get(i).distance(pts.get(i - 1));
+        }
+        final double total = closed
+                ? cum[m - 1] + pts.get(0).distance(pts.get(m - 1)) : cum[m - 1];
         // 每个关节的截面（角平分面内），点数必须一致
         final List<List<Vector3d>> sections = new ArrayList<>(m);
         for (int i = 0; i < m; i++) {
@@ -251,8 +271,14 @@ public final class FilletCutter {
             side.normalize();
             final Vector3d e1 = new Vector3d(n).mul(q1);
             final Vector3d e2 = side.mul(q2);
+            final double ri;
+            if (closed || total < 1.0e-9) {
+                ri = (r0 + r1) * 0.5;
+            } else {
+                ri = r0 + (r1 - r0) * (cum[i] / total);
+            }
             final List<Vector3d> sec = sectionOffsets(
-                    new Vector3d(e1).negate(), new Vector3d(e2).negate(), radius);
+                    new Vector3d(e1).negate(), new Vector3d(e2).negate(), ri);
             if (sec.size() < 3) {
                 return out;
             }

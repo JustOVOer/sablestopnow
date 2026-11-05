@@ -1528,72 +1528,109 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     + ") phiDeg=" + String.format(java.util.Locale.ROOT, "%.2f",
                             Math.toDegrees(phi))
                     + " len=" + fmt(len) + " r=" + fmt(r) + " theory=" + fmt(theory));
-            List<Csg.Polygon> bestWedge = null;
-            boolean bestAdd = false;
-            double bestScore = Double.MAX_VALUE;
-            double bestIn = 0.0;
-            double bestOut = 0.0;
+            // ── 凸/凹判定：**体积法根本区分不了**，必须看材料占哪几个象限 ──────────
+            // 凸棱：材料只在 (−n1,−n2) 一个象限 ⇒ 楔块建在材料侧 ⇒ **减料**
+            // 凹棱：材料占三个象限（±n1,±n2 混着）⇒ 楔块建在外侧空腔 ⇒ **补料**
+            // 判据：两个"侧面象限" (+n1,−n2) 与 (−n1,+n2) 各一个探针点
+            //   都实心 ⇒ 凹；都空 ⇒ 凸；一实一空 ⇒ 平面/台阶（不是棱）⇒ 跳过
+            // 注意：两种情况的楔块体积都等于 theory（凸=切掉方角−四分之一圆，凹=补同一块）
+            //       ⇒ 之前用 inVol/outVol 挑"最像 theory"的那一支，凸凹各有一支命中，
+            //       结果**必然随机**（这也是"圆角有时切有时补"的来源）。
             final Vector3d dir = new Vector3d(b).sub(a).normalize();
-            for (int s1 = -1; s1 <= 1; s1 += 2) {
-                for (int s2 = -1; s2 <= 1; s2 += 2) {
-                    final Vector3d m1 = new Vector3d(n1).mul(s1);
-                    final Vector3d m2 = new Vector3d(n2).mul(s2);
-                    final List<Vector3d[]> tris = FilletCutter.prism(a, b, m1, m2, r);
-                    if (tris == null || tris.isEmpty()) {
-                        continue;
-                    }
-                    final List<Csg.Polygon> wedge =
-                            ensureOutward(triPolys(tris, dir, m1));
-                    if (wedge.isEmpty()) {
-                        continue;
-                    }
-                    final double wedgeVol = Math.abs(polysVolume(wedge));
-                    // ★ 保护：老存档的圆角**没有法线**（历史 bug），faceNormals 兜底可能给出
-                    //   几乎平行的两面 ⇒ φ≈0 ⇒ 截面半径爆炸（实测 wedgeVol=1.69 而理论值 0.027）
-                    //   ⇒ 这种楔块必须跳过，否则会乱切别的几何。
-                    if (wedgeVol > theory * 3.0 + 1.0e-4) {
-                        log.append(" [f").append(index).append(":big ")
-                                .append(String.format(java.util.Locale.ROOT, "%.3f", wedgeVol))
-                                .append(">").append(String.format(java.util.Locale.ROOT, "%.3f", theory))
-                                .append(']');
-                        continue;
-                    }
-                    final double inVol = Math.abs(polysVolume(intersectLocal(out, wedge)));
-                    final double outVol = Math.abs(wedgeVol - inVol);
-                    // 凸棱：楔块落在材料内
-                    if (Math.abs(inVol - theory) < bestScore) {
-                        bestScore = Math.abs(inVol - theory);
-                        bestWedge = wedge;
-                        bestAdd = false;
-                        bestIn = inVol;
-                        bestOut = outVol;
-                    }
-                    // 凹棱：楔块落在材料外（需要补料）
-                    if (Math.abs(outVol - theory) < bestScore) {
-                        bestScore = Math.abs(outVol - theory);
-                        bestWedge = wedge;
-                        bestAdd = true;
-                        bestIn = inVol;
-                        bestOut = outVol;
-                    }
-                }
+            final Vector3d mid = new Vector3d(a).add(b).mul(0.5);
+            final double probe = 0.5 * r;
+            final boolean side1;
+            final boolean side2;
+            {
+                final Vector3d d1 = new Vector3d(n1).sub(n2);
+                final Vector3d d2 = new Vector3d(n2).sub(n1);
+                side1 = d1.lengthSquared() < 1.0e-12 || containsPoint(out,
+                        new Vector3d(mid).fma(probe, d1.normalize()));
+                side2 = d2.lengthSquared() < 1.0e-12 || containsPoint(out,
+                        new Vector3d(mid).fma(probe, d2.normalize()));
             }
-            // ★ 判定放宽（用户实测：严格匹配理论值会让所有棱都被跳过）：
-            //   取"材料内体积/材料外体积"中**占理论值比例更大**的那一支，
-            //   并且只要求 ≥ 30% 理论体积 ⇒ 一定能选出一个方案，而不是全跳过。
-            if (bestWedge == null) {
+            if (side1 != side2) {
+                log.append(" [f").append(index).append(":flat ")
+                        .append(side1 ? '1' : '0').append(side2 ? '1' : '0').append(']');
+                continue;
+            }
+            final boolean concave = side1;
+            trace("fillet:  probe side=" + (side1 ? 1 : 0) + (side2 ? 1 : 0)
+                    + " -> " + (concave ? "concave(fill)" : "convex(cut)") + " idx=" + index);
+            List<Csg.Polygon> wedge = wedgePolys(a, b, n1, n2, r, !concave, dir);
+            if (wedge.isEmpty()) {
                 log.append(" [f").append(index).append(":empty-prism]");
                 continue;
             }
-            final double bestVol = Math.max(bestIn, bestOut);
-            if (bestVol < theory * 0.3) {
+            double wedgeVol = Math.abs(polysVolume(wedge));
+            // 安全网：截面/法线异常时楔块会明显偏离理论体积 ⇒ 宁可不倒角，也不产出垃圾
+            if (wedgeVol > theory * 6.0 + 1.0e-3 || wedgeVol < theory * 0.25) {
+                log.append(" [f").append(index).append(":size ")
+                        .append(String.format(java.util.Locale.ROOT, "%.3f", wedgeVol))
+                        .append('/').append(String.format(java.util.Locale.ROOT, "%.3f", theory))
+                        .append(']');
+                continue;
             }
-            out = bestAdd ? unionLocal(out, bestWedge) : subtractLocal(out, bestWedge);
-            log.append(" [f").append(index).append(':').append(bestAdd ? "add " : "sub ")
+            double inVol = Math.abs(polysVolume(intersectLocal(out, wedge)));
+            // ★ 法线符号兜底：若楔块落在**相反**侧（说明存档里的 n1/n2 是朝里的，
+            //   或者凸凹判定的探针被薄壁骗了），换到另一侧再试一次 —— 只在这时翻转，
+            //   所以不会重新引入"每侧都能自圆其说"的歧义 ✓
+            boolean flipped = false;
+            final boolean wrongSide = concave ? (inVol > 0.7 * wedgeVol)
+                    : (inVol < 0.3 * wedgeVol);
+            if (wrongSide) {
+                final List<Csg.Polygon> alt = wedgePolys(a, b, n1, n2, r, concave, dir);
+                if (!alt.isEmpty()) {
+                    final double altVol = Math.abs(polysVolume(alt));
+                    final double altIn = Math.abs(polysVolume(intersectLocal(out, alt)));
+                    final boolean altOk = concave ? (altIn < 0.3 * altVol)
+                            : (altIn > 0.7 * altVol);
+                    if (altOk) {
+                        wedge = alt;
+                        wedgeVol = altVol;
+                        inVol = altIn;
+                        flipped = true;
+                    }
+                }
+            }
+            final double outVol = Math.max(0.0, wedgeVol - inVol);
+            final boolean ok = concave ? (inVol < 0.35 * wedgeVol)
+                    : (inVol > 0.65 * wedgeVol);
+            final List<Csg.Polygon> applied = concave
+                    ? unionLocal(out, wedge) : subtractLocal(out, wedge);
+            if (applied.isEmpty() || applied == out) {
+                // subtractLocal/unionLocal 在操作数为空时原样返回 base ⇒ 不能再往下用
+                log.append(" [f").append(index).append(":csg-empty]");
+                continue;
+            }
+            out = applied;
+            log.append(" [f").append(index).append(concave ? ":fill " : ":cut ")
                     .append(String.format(java.util.Locale.ROOT, "%.4f/%.4f/%.4f",
-                            bestIn, bestOut, theory)).append(']');
+                            inVol, outVol, theory))
+                    .append(ok ? (flipped ? " ok*]" : " ok]") : " ?!]");
         }
         return out;
+    }
+
+    /**
+     * 造**某一侧**的圆角楔块 ✓
+     *
+     * @param materialSide true = 楔块建在**材料侧**（凸棱减料）；
+     *                     false = 建在外侧空腔（凹棱补料）
+     */
+    private static List<Csg.Polygon> wedgePolys(final Vector3d a, final Vector3d b,
+                                                final Vector3d n1, final Vector3d n2,
+                                                final double r, final boolean materialSide,
+                                                final Vector3d dir) {
+        // sectionOffsets 内部把"传入法线"取反当作材料侧方向 ⇒ 材料侧传 n1/n2，外侧传 −n1/−n2
+        final Vector3d m1 = materialSide ? new Vector3d(n1) : new Vector3d(n1).negate();
+        final Vector3d m2 = materialSide ? new Vector3d(n2) : new Vector3d(n2).negate();
+        final List<Vector3d[]> tris = FilletCutter.prism(a, b, m1, m2, r);
+        if (tris == null || tris.isEmpty()) {
+            return List.of();
+        }
+        // UV 一律用**朝外的 n1** 投影：翻转法线补料时贴图方向不能跟着翻 ✓
+        return ensureOutward(triPolys(tris, dir, n1));
     }
 
     /** 短 id（日志用）✓ */
@@ -1618,8 +1655,27 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         return sb.toString();
     }
 
-    /** 一组多边形的**有向体积**（诊断用）✓ */
+    /**
+     * 一组多边形的**有向体积** ✓（**必须在局部原点下算**）
+     *
+     * <h2>为什么不能直接用绝对坐标（这是圆角全线失效的真正根因，实测）</h2>
+     * 玩家的模型在 2.0e7 附近。三重积的每一项 ≈ 2e7·(2e7·130) ≈ 1e14~1e21，而结果只有 ~0.05，
+     * 差值的双精度抵消误差可达 **0.1~20**。实测：`theory=0.054` 的楔块被算成
+     * `18.463` / `2.792` / `0.787`（全是噪声）⇒ 一方面体积门把我们自己的正确楔块判成"big"跳过，
+     * 另一方面 {@link #ensureOutward} 靠这个符号翻面 ⇒ **符号随机 ⇒ 楔块一半是朝里的**
+     * ⇒ CSG 差集什么都剪不到（"圆角建了模型没变化"）或剪出垃圾。
+     *
+     * <p>三重积和对**闭合曲面**是平移不变量 ⇒ 平移到第一个顶点后再算，误差降到 1e-12 级别，
+     * 结果与理论值一致 ✓
+     */
     public static double polysVolume(final List<Csg.Polygon> polys) {
+        if (polys == null || polys.isEmpty()) {
+            return 0.0;
+        }
+        final Csg.V3 o = polys.get(0).vertices.get(0).pos();
+        final double ox = o.x();
+        final double oy = o.y();
+        final double oz = o.z();
         double sum = 0.0;
         for (final Csg.Polygon p : polys) {
             final List<Csg.Vertex> vs = p.vertices;
@@ -1627,12 +1683,108 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 final Csg.V3 a = vs.get(0).pos();
                 final Csg.V3 b = vs.get(i).pos();
                 final Csg.V3 c = vs.get(i + 1).pos();
-                sum += a.x() * (b.y() * c.z() - b.z() * c.y())
-                        - a.y() * (b.x() * c.z() - b.z() * c.x())
-                        + a.z() * (b.x() * c.y() - b.y() * c.x());
+                final double ax = a.x() - ox;
+                final double ay = a.y() - oy;
+                final double az = a.z() - oz;
+                final double bx = b.x() - ox;
+                final double by = b.y() - oy;
+                final double bz = b.z() - oz;
+                final double cx = c.x() - ox;
+                final double cy = c.y() - oy;
+                final double cz = c.z() - oz;
+                sum += ax * (by * cz - bz * cy)
+                        - ay * (bx * cz - bz * cx)
+                        + az * (bx * cy - by * cx);
             }
         }
         return sum / 6.0;
+    }
+
+    /**
+     * 点是否在**封闭实体内部** ✓（圆角凸/凹判定用）
+     *
+     * <p>射线奇偶法：三个互不平行的方向各打一条射线，**多数投票**。
+     * 边/顶点被射线擦过的概率用三方向投票压掉；坐标以 p 为原点展开，
+     * 避开 2e7 处相减丢精度 ✓
+     */
+    public static boolean containsPoint(final List<Csg.Polygon> polys, final Vector3d p) {
+        if (polys == null || polys.isEmpty() || p == null) {
+            return false;
+        }
+        final double[][] dirs = {
+            {0.57735, 0.61111, 0.54167},
+            {0.31220, -0.74010, 0.59430},
+            {-0.68330, 0.40210, 0.61130},
+        };
+        int votes = 0;
+        for (final double[] d : dirs) {
+            final Vector3d dir = new Vector3d(d[0], d[1], d[2]).normalize();
+            if (rayHitsOdd(polys, p, dir)) {
+                votes++;
+            }
+        }
+        return votes >= 2;
+    }
+
+    /** 射线从 p 出发（p 为原点）与实体相交次数是否为奇数 ✓ */
+    private static boolean rayHitsOdd(final List<Csg.Polygon> polys, final Vector3d p,
+                                      final Vector3d dir) {
+        int hits = 0;
+        for (final Csg.Polygon poly : polys) {
+            final List<Csg.Vertex> vs = poly.vertices;
+            for (int i = 1; i + 1 < vs.size(); i++) {
+                if (rayHitsTri(vs.get(0).pos(), vs.get(i).pos(),
+                        vs.get(i + 1).pos(), p, dir)) {
+                    hits++;
+                }
+            }
+        }
+        return (hits & 1) == 1;
+    }
+
+    /** Möller–Trumbore（p 平移到原点，t>0 才算命中）✓ */
+    private static boolean rayHitsTri(final Csg.V3 a, final Csg.V3 b, final Csg.V3 c,
+                                      final Vector3d p, final Vector3d dir) {
+        final double ax = a.x() - p.x;
+        final double ay = a.y() - p.y;
+        final double az = a.z() - p.z;
+        final double bx = b.x() - p.x;
+        final double by = b.y() - p.y;
+        final double bz = b.z() - p.z;
+        final double cx = c.x() - p.x;
+        final double cy = c.y() - p.y;
+        final double cz = c.z() - p.z;
+        final double e1x = bx - ax;
+        final double e1y = by - ay;
+        final double e1z = bz - az;
+        final double e2x = cx - ax;
+        final double e2y = cy - ay;
+        final double e2z = cz - az;
+        final double hx = dir.y * e2z - dir.z * e2y;
+        final double hy = dir.z * e2x - dir.x * e2z;
+        final double hz = dir.x * e2y - dir.y * e2x;
+        final double det = e1x * hx + e1y * hy + e1z * hz;
+        if (Math.abs(det) < 1.0e-14) {
+            return false;
+        }
+        final double inv = 1.0 / det;
+        // s = origin − a
+        final double sx = -ax;
+        final double sy = -ay;
+        final double sz = -az;
+        final double u = (sx * hx + sy * hy + sz * hz) * inv;
+        if (u < 0.0 || u > 1.0) {
+            return false;
+        }
+        final double qx = sy * e1z - sz * e1y;
+        final double qy = sz * e1x - sx * e1z;
+        final double qz = sx * e1y - sy * e1x;
+        final double v = (dir.x * qx + dir.y * qy + dir.z * qz) * inv;
+        if (v < 0.0 || u + v > 1.0) {
+            return false;
+        }
+        final double t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+        return t > 1.0e-9;
     }
 
     private static List<Csg.Polygon> subtractLocal(final List<Csg.Polygon> base,
@@ -1719,19 +1871,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         if (polys == null || polys.isEmpty()) {
             return polys;
         }
-        double sum = 0.0;
-        for (final Csg.Polygon poly : polys) {
-            final List<Csg.Vertex> vs = poly.vertices;
-            for (int i = 1; i + 1 < vs.size(); i++) {
-                final Csg.V3 p0 = vs.get(0).pos();
-                final Csg.V3 p1 = vs.get(i).pos();
-                final Csg.V3 p2 = vs.get(i + 1).pos();
-                sum += p0.x() * (p1.y() * p2.z() - p1.z() * p2.y())
-                        - p0.y() * (p1.x() * p2.z() - p1.z() * p2.x())
-                        + p0.z() * (p1.x() * p2.y() - p1.y() * p2.x());
-            }
-        }
-        if (sum >= 0.0) {
+        // ★ 一定要用**局部原点**下的体积（2e7 处的绝对坐标三重积符号是随机的，实测）
+        if (polysVolume(polys) >= 0.0) {
             return polys;
         }
         final List<Csg.Polygon> flipped = new ArrayList<>(polys.size());

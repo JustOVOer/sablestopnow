@@ -678,6 +678,175 @@ public final class SketchModelCheck {
                 "fillet-prism: 盒子−棱柱 应≈盒体积−棱柱体积（" + resVol + " vs " + expect + "）");
     }
 
+    /**
+     * **世界坐标（2.0e7）下的体积 / 朝外符号 / 圆角差集** —— 圆角全线失效的根因回归 ✓
+     *
+     * <p>绝对坐标下三重积每项 ≈1e15、结果只有 ~0.05 ⇒ 双精度抵消误差把 `polysVolume`
+     * 算成 0.7~18（纯噪声），`ensureOutward` 的符号也随之随机 ⇒ 楔块一半朝里，
+     * CSG 差集什么都剪不到（"圆角建了模型没变化"）。这里把同一套几何平移到实机坐标再验。
+     */
+    private static void worldScaleVolumes() {
+        final double ox = 20481032.0;
+        final double oy = 130.0;
+        final double oz = 20530186.0;
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh boxMesh =
+                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(
+                        java.util.List.of(new double[] {ox, oy, oz, ox + 2, oy + 1, oz + 2}));
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> base =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(boxMesh, null));
+        final double baseVol = com.ovo.sablestopnow.sketch.Solid.polysVolume(base);
+        pathlib_Diag("world-scale base vol=" + baseVol);
+        check(Math.abs(baseVol - 4.0) < 1.0e-3,
+                "world-scale: 2e7 处盒体积必须≈4（实际 " + baseVol + "）");
+        check(baseVol > 0.0, "world-scale: 盒朝向必须为正（实际 " + baseVol + "）");
+
+        // 反向绕序 ⇒ ensureOutward 必须翻成正值（大坐标下符号不能靠运气）
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> rev =
+                new java.util.ArrayList<>();
+        for (final com.ovo.sablestopnow.sketch.csg.Csg.Polygon p : base) {
+            rev.add(p.flipped());
+        }
+        final double revVol = com.ovo.sablestopnow.sketch.Solid.polysVolume(
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(rev));
+        pathlib_Diag("world-scale reversed-out vol=" + revVol);
+        check(revVol > 0.0,
+                "world-scale: 反向盒经 ensureOutward 后必须为正（实际 " + revVol + "）");
+
+        // 圆角楔块（竖直棱，两个面法线都朝外）
+        final double r = 0.25;
+        final java.util.List<org.joml.Vector3d[]> prism =
+                com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                        new org.joml.Vector3d(ox + 2, oy, oz),
+                        new org.joml.Vector3d(ox + 2, oy + 1, oz),
+                        new org.joml.Vector3d(1, 0, 0),
+                        new org.joml.Vector3d(0, 0, -1), r);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> poly =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.Solid.triPolys(prism));
+        final double prismVol = com.ovo.sablestopnow.sketch.Solid.polysVolume(poly);
+        final double theory = r * r - Math.PI * r * r / 4.0;
+        pathlib_Diag("world-scale prism vol=" + prismVol + " theory=" + theory);
+        check(Math.abs(prismVol - theory) < Math.max(1.0e-3, theory * 0.15),
+                "world-scale: 2e7 处楔块体积必须≈理论（" + prismVol + " vs " + theory + "）");
+
+        // 盒子 − 楔块：先在局部原点做 CSG（= subtractLocal 的数值处理），再平移回去量体积
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> localBase =
+                shiftPolys(base, -ox, -oy, -oz);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> localCut =
+                shiftPolys(poly, -ox, -oy, -oz);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> res =
+                com.ovo.sablestopnow.sketch.csg.Csg.subtract(localBase, localCut);
+        final double resVolAbs = com.ovo.sablestopnow.sketch.Solid.polysVolume(
+                shiftPolys(res, ox, oy, oz));
+        final double expect = 4.0 - prismVol;
+        pathlib_Diag("world-scale subtract vol=" + resVolAbs + " expect=" + expect);
+        check(Math.abs(resVolAbs - expect) < Math.max(2.0e-3, expect * 0.02),
+                "world-scale: 2e7 处 盒−楔块 必须≈盒体积−楔块体积（"
+                        + resVolAbs + " vs " + expect + "）");
+    }
+
+    /**
+     * **凸/凹判定靠的"点在实体内"测试**（圆角选减料还是补料的唯一依据）✓
+     *
+     * <p>盒子的凸棱：两个"侧面象限"探针都空；L 形凹棱：都实心。
+     * 之前的体积法对两者给出**完全一样**的签名 ⇒ 只能随机选 ⇒ 这次用几何探针。
+     */
+    private static void worldScalePointInside() {
+        final double ox = 20481032.0;
+        final double oy = 130.0;
+        final double oz = 20530186.0;
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> boxA =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(
+                                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(
+                                        java.util.List.of(new double[] {
+                                                ox, oy, oz, ox + 2, oy + 1, oz + 1})), null));
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> boxB =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(
+                                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(
+                                        java.util.List.of(new double[] {
+                                                ox, oy, oz, ox + 1, oy + 1, oz + 2})), null));
+        check(com.ovo.sablestopnow.sketch.Solid.containsPoint(boxA,
+                        new org.joml.Vector3d(ox + 1, oy + 0.5, oz + 0.5)),
+                "point-inside: 盒内点必须判内");
+        check(!com.ovo.sablestopnow.sketch.Solid.containsPoint(boxA,
+                        new org.joml.Vector3d(ox + 3, oy + 0.5, oz + 0.5)),
+                "point-inside: 盒外点必须判外");
+        check(!com.ovo.sablestopnow.sketch.Solid.containsPoint(boxA,
+                        new org.joml.Vector3d(ox + 2.05, oy + 0.5, oz + 0.5)),
+                "point-inside: 面外 0.05 必须判外");
+
+        // L 形（union，局部原点下做，与生产代码一致）
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> localA =
+                shiftPolys(boxA, -ox, -oy, -oz);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> localB =
+                shiftPolys(boxB, -ox, -oy, -oz);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> lShape =
+                shiftPolys(com.ovo.sablestopnow.sketch.csg.Csg.union(localA, localB),
+                        ox, oy, oz);
+        check(com.ovo.sablestopnow.sketch.Solid.containsPoint(lShape,
+                        new org.joml.Vector3d(ox + 1.5, oy + 0.5, oz + 0.5)),
+                "point-inside: L 的横臂必须判内");
+        check(com.ovo.sablestopnow.sketch.Solid.containsPoint(lShape,
+                        new org.joml.Vector3d(ox + 0.5, oy + 0.5, oz + 1.5)),
+                "point-inside: L 的竖臂必须判内");
+        check(!com.ovo.sablestopnow.sketch.Solid.containsPoint(lShape,
+                        new org.joml.Vector3d(ox + 1.5, oy + 0.5, oz + 1.5)),
+                "point-inside: L 的凹缺口必须判外");
+
+        // 凸棱（盒 A 的 x=+2 / z=0 棱）：两侧象限探针都必须空
+        final org.joml.Vector3d convexEdge = new org.joml.Vector3d(ox + 2, oy + 0.5, oz);
+        final org.joml.Vector3d n1 = new org.joml.Vector3d(1, 0, 0);
+        final org.joml.Vector3d n2 = new org.joml.Vector3d(0, 0, -1);
+        final org.joml.Vector3d d1 = new org.joml.Vector3d(n1).sub(n2).normalize();
+        final org.joml.Vector3d d2 = new org.joml.Vector3d(n2).sub(n1).normalize();
+        check(!com.ovo.sablestopnow.sketch.Solid.containsPoint(boxA,
+                        new org.joml.Vector3d(convexEdge).fma(0.125, d1)),
+                "point-inside: 凸棱侧面象限①必须判外");
+        check(!com.ovo.sablestopnow.sketch.Solid.containsPoint(boxA,
+                        new org.joml.Vector3d(convexEdge).fma(0.125, d2)),
+                "point-inside: 凸棱侧面象限②必须判外");
+
+        // 凹棱（L 的 x=1 / z=1 棱，外法线 +X 与 +Z）：两侧象限探针都必须实心
+        final org.joml.Vector3d concaveEdge = new org.joml.Vector3d(ox + 1, oy + 0.5, oz + 1);
+        final org.joml.Vector3d m1 = new org.joml.Vector3d(1, 0, 0);
+        final org.joml.Vector3d m2 = new org.joml.Vector3d(0, 0, 1);
+        final org.joml.Vector3d e1 = new org.joml.Vector3d(m1).sub(m2).normalize();
+        final org.joml.Vector3d e2 = new org.joml.Vector3d(m2).sub(m1).normalize();
+        check(com.ovo.sablestopnow.sketch.Solid.containsPoint(lShape,
+                        new org.joml.Vector3d(concaveEdge).fma(0.125, e1)),
+                "point-inside: 凹棱侧面象限①必须判内");
+        check(com.ovo.sablestopnow.sketch.Solid.containsPoint(lShape,
+                        new org.joml.Vector3d(concaveEdge).fma(0.125, e2)),
+                "point-inside: 凹棱侧面象限②必须判内");
+    }
+
+    private static java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> shiftPolys(
+            final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> in,
+            final double dx, final double dy, final double dz) {
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> out =
+                new java.util.ArrayList<>(in.size());
+        for (final com.ovo.sablestopnow.sketch.csg.Csg.Polygon p : in) {
+            final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Vertex> vs =
+                    new java.util.ArrayList<>(p.vertices.size());
+            for (final com.ovo.sablestopnow.sketch.csg.Csg.Vertex v : p.vertices) {
+                final com.ovo.sablestopnow.sketch.csg.Csg.V3 q = v.pos();
+                vs.add(new com.ovo.sablestopnow.sketch.csg.Csg.Vertex(
+                        new com.ovo.sablestopnow.sketch.csg.Csg.V3(
+                                q.x() + dx, q.y() + dy, q.z() + dz),
+                        v.normal(), v.uv()));
+            }
+            final com.ovo.sablestopnow.sketch.csg.Csg.Plane pl = p.plane;
+            final double w = pl.w + pl.normal.x() * dx + pl.normal.y() * dy
+                    + pl.normal.z() * dz;
+            out.add(new com.ovo.sablestopnow.sketch.csg.Csg.Polygon(vs,
+                    new com.ovo.sablestopnow.sketch.csg.Csg.Plane(pl.normal, w)));
+        }
+        return out;
+    }
+
     private static String key(final org.joml.Vector3d p) {
         return Math.round(p.x * 1e6) + "," + Math.round(p.y * 1e6) + ","
                 + Math.round(p.z * 1e6);
@@ -797,6 +966,8 @@ public final class SketchModelCheck {
         ensureOutwardSign();
         boxMeshWinding();
         filletPrismSolid();
+        worldScaleVolumes();
+        worldScalePointInside();
         topoRefsBasics();
         triPolysReal();
         filletGeom();

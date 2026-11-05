@@ -910,6 +910,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             for (final Shape.EdgeRef ref : f.edges()) {
                 final Solid src = byId.get(ref.solidId());
                 if (src == null) {
+                    lastFilletDiag = "skip idx=" + s2.index()
                             + " reason=src-null";
                     continue;
                 }
@@ -937,7 +938,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                             + " reason=no-normals";
                     continue;
                 }
-                    lastFilletDiag = "skip idx=" + s2.index()
+                final Vector3d fdir = new Vector3d(b).sub(a).normalize();
                 final List<Vector3d[]> prismTris =
                         FilletCutter.prism(a, b, nn[0], nn[1], f.radius());
                 if (prismTris == null || prismTris.isEmpty()) {

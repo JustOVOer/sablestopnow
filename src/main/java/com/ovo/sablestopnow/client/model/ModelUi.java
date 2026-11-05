@@ -2188,6 +2188,24 @@ public final class ModelUi {
         return true;
     }
 
+    /**
+     * 拾取一批棱到"已选"里 ✓（曲线棱会把整条弧的碎段一起加进来）
+     *
+     * <p>一个圆角特征只作用于**一个构件**：若这次点中的棱属于另一个体，
+     * 先把之前的选中作废，避免把两个体的棱写进同一个特征 ✓
+     */
+    private static boolean filletSwitchBody(final java.util.UUID body) {
+        if (filletSourceSolid != null && body != null && !filletSourceSolid.equals(body)) {
+            filletPicks.clear();
+            filletPickSeq = 0;
+            filletSolidId = null;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[fillet] body changed {} -> {} ⇒ 清空已选",
+                    shortId8(filletSourceSolid), shortId8(body));
+        }
+        return true;
+    }
+
     public static boolean filletPickEdge(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
         if (hit == null) {
@@ -2246,6 +2264,7 @@ public final class ModelUi {
                       String.format(java.util.Locale.ROOT, "%.2f", (seg[2] + seg[5]) * 0.5),
                       inside, hit.body() == null ? "?" : hit.body().toString().substring(0, 8));
           }
+            filletSwitchBody(bh.body());
             filletSourceSolid = bh.body();
             filletSolidId = null;
             // 盒棱沿某个世界轴 ⇒ **另外两个轴之一**当参考面法线；
@@ -2319,6 +2338,7 @@ public final class ModelUi {
         final java.util.List<double[]> picked = idx < curve.length && curve[idx]
                 ? com.ovo.sablestopnow.sketch.EdgeChains.chainAt(allSegs, curve, idx)
                 : java.util.List.of(copySeg(allSegs.get(idx)));
+        filletSwitchBody(hit.body());
         filletSourceSolid = hit.body();
         filletSolidId = hit.solidId();
         // 参考面法线：直线棱用命中面法线；曲线链用**链所在平面的法线**（盖面法线），
@@ -2443,8 +2463,22 @@ public final class ModelUi {
     private static void updateFilletPreview(final double radius) {
         if (filletSourceSolid == null || filletPicks.isEmpty()) {
             com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+            lastFilletPreviewSig = "";
             return;
         }
+        // ★ 缓存：选中几十段曲线棱时，每帧重建楔块线框会明显掉帧 ⇒ 只在"半径/选中"变了才重建
+        final StringBuilder sigBuilder = new StringBuilder(64);
+        sigBuilder.append(radius).append('|').append(filletPicks.size()).append('|');
+        for (final FilletPick pick : filletPicks) {
+            sigBuilder.append(Math.round(pick.seg()[0] * 1000)).append(',')
+                    .append(Math.round(pick.seg()[1] * 1000)).append(',')
+                    .append(Math.round(pick.seg()[2] * 1000)).append(';');
+        }
+        final String sig = sigBuilder.toString();
+        if (sig.equals(lastFilletPreviewSig)) {
+            return;
+        }
+        lastFilletPreviewSig = sig;
         final java.util.List<org.joml.Vector3d[]> segsRaw = new java.util.ArrayList<>();
         final java.util.Set<String> seenEdge = new java.util.HashSet<>();
         int cut = 0;
@@ -2776,6 +2810,8 @@ public final class ModelUi {
     /** 当前在树里选中的实体（左栏据此显示"特征操作"：上移/下移/删除/贴图）✓ */
     private static java.util.UUID selectedSolidId;
     private static long lastFilletPreviewLog;
+    /** 预览缓存签名（半径 + 已选段）⇒ 每帧重算几十段楔块会卡，只在变化时重建 ✓ */
+    private static String lastFilletPreviewSig = "";
     private static String lastHoverLogged;
     private static String lastTreeItemsSig;
     private static long lastPlanePreviewLog;

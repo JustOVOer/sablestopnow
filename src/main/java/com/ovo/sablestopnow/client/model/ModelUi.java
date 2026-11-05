@@ -2521,6 +2521,11 @@ public final class ModelUi {
     }
 
     /** 真正创建圆角特征 ✓ */
+    /** 日志用短 id ✓ */
+    private static String shortId8(final java.util.UUID id) {
+        return id == null ? "-" : id.toString().substring(0, 8);
+    }
+
     private static void createFilletFeature(final double radius) {
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
@@ -2591,7 +2596,16 @@ public final class ModelUi {
                         filletNormal2 == null ? 0 : filletNormal2.x,
                         filletNormal2 == null ? 0 : filletNormal2.y,
                         filletNormal2 == null ? 0 : filletNormal2.z);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[fillet-step] EdgeRef body={} solidId={} a=({},{},{}) b=({},{},{})"
+                        + " n1=({},{},{}) n2=({},{},{}) r={}",
+                shortId8(filletSourceSolid), shortId8(ref.solidId()),
+                ref.ax(), ref.ay(), ref.az(), ref.bx(), ref.by(), ref.bz(),
+                ref.n1x(), ref.n1y(), ref.n1z(), ref.n2x(), ref.n2y(), ref.n2z(), radius);
         final java.util.UUID filletSketchId = sketchFor(filletSolidId, filletSourceSolid);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[fillet-step] sketchId={} sourceSolid={}", shortId8(filletSketchId),
+                shortId8(filletSourceSolid));
         if (filletSketchId == null) {
             ModelMode.prompt("model.order.missing_sketch");
             return;

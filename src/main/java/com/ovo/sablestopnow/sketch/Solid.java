@@ -806,6 +806,17 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     /** 上一次切割 CSG 的诊断（客户端打日志用 ✓；本包被离线编译 ⇒ 不能直接用 LOGGER ✓）。 */
     public static String lastCsgDiag = "none";
 
+    /** 全链路追踪（客户端每帧取走并打成日志）✓ sketch 包不能直接用 LOGGER */
+    public static final java.util.List<String> TRACE = new java.util.ArrayList<>();
+
+    /** 追加一条追踪（有上限，避免刷爆）✓ */
+    public static void trace(final String line) {
+        if (line == null || TRACE.size() > 400) {
+            return;
+        }
+        TRACE.add(line);
+    }
+
     /** 最近一次圆角 CSG 的诊断（不含 idx 以外信息，供 dump 拼装）✓ */
     private static String lastFilletDiag = "";
 
@@ -906,9 +917,18 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             if (!(s2.shape() instanceof final Shape.Fillet f)) {
                 continue;
             }
+            trace("fillet: feature idx=" + s2.index() + " id=" + shortId(s2.id())
+                    + " body=" + shortId(s2.body()) + " radius=" + f.radius()
+                    + " edges=" + f.edges().size());
             final java.util.Map<UUID, List<Csg.Polygon>> polysBySrc =
                     new java.util.HashMap<>();
             for (final Shape.EdgeRef ref : f.edges()) {
+                trace("fillet:  ref solidId=" + shortId(ref.solidId())
+                        + " a=(" + fmt(ref.ax()) + "," + fmt(ref.ay()) + "," + fmt(ref.az())
+                        + ") b=(" + fmt(ref.bx()) + "," + fmt(ref.by()) + "," + fmt(ref.bz())
+                        + ") n1=(" + fmt(ref.n1x()) + "," + fmt(ref.n1y()) + "," + fmt(ref.n1z())
+                        + ") n2=(" + fmt(ref.n2x()) + "," + fmt(ref.n2y()) + "," + fmt(ref.n2z())
+                        + ")");
                 Solid src = byId.get(ref.solidId());
                 String srcNote = "";
                 if (src == null) {
@@ -973,6 +993,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 final Vector3d fdir = new Vector3d(b).sub(a).normalize();
                 final List<Vector3d[]> prismTris =
                         FilletCutter.prism(a, b, nn[0], nn[1], f.radius());
+                trace("fillet:  prism tris=" + (prismTris == null ? -1 : prismTris.size())
+                        + " src=" + shortId(src.id()) + " srcBody=" + shortId(src.body())
+                        + srcNote);
                 if (prismTris == null || prismTris.isEmpty()) {
                     filletLog.append(" [f").append(s2.index()).append(":prism-empty]");
                     continue;
@@ -1138,6 +1161,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 // ★ 几何验证式圆角求值（凸棱减料 / 凹棱补料，四象限择优）✓
                 final List<double[]> filletEdgeData =
                         filletEdgeByBody.getOrDefault(solid.body(), List.of());
+                trace("fillet: solid idx=" + solid.index() + " body=" + shortId(solid.body())
+                        + " edgeData=" + filletEdgeData.size()
+                        + " byBodyKeys=[" + bodyKeys(filletEdgeByBody) + "]");
                 if (!filletEdgeData.isEmpty()) {
                     if (filletLog.length() < 400) {
                         filletLog.append(" [s").append(solid.index()).append(']');
@@ -1559,6 +1585,28 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                             bestIn, bestOut, theory)).append(']');
         }
         return out;
+    }
+
+    /** 短 id（日志用）✓ */
+    public static String shortId(final UUID id) {
+        return id == null ? "-" : id.toString().substring(0, 8);
+    }
+
+    /** 数值格式化（日志用）✓ */
+    public static String fmt(final double v) {
+        return String.format(java.util.Locale.ROOT, "%.3f", v);
+    }
+
+    /** 键集合（日志用）✓ */
+    private static String bodyKeys(final java.util.Map<UUID, List<double[]>> map) {
+        final StringBuilder sb = new StringBuilder();
+        for (final UUID k : map.keySet()) {
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(shortId(k));
+        }
+        return sb.toString();
     }
 
     /** 一组多边形的**有向体积**（诊断用）✓ */

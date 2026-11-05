@@ -182,6 +182,13 @@ public final class SketchRenderer {
     @SubscribeEvent
     public static void onRenderLevel(final RenderLevelStageEvent event) {
         closeFrameBuffers(); // 兜底：万一上一帧异常没关 ✓
+        // ★ 全链路追踪：sketch 包不能直接用 LOGGER，统一在这里打出来 ✓
+        if (!com.ovo.sablestopnow.sketch.Solid.TRACE.isEmpty()) {
+            for (final String line : com.ovo.sablestopnow.sketch.Solid.TRACE) {
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info("[trace] {}", line);
+            }
+            com.ovo.sablestopnow.sketch.Solid.TRACE.clear();
+        }
         pendingTexts.clear();
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_ENTITIES) {
             return;

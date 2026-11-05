@@ -76,6 +76,12 @@ public final class SolidNetworking {
             }
             final Solid solid = SolidData.readSolid(this.solid);
             if (solid == null) {
+              com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                      "[srv] save recv id={} idx={} body={} sketch={} shape={}",
+                      solid.id().toString().substring(0, 8), solid.index(),
+                      solid.body().toString().substring(0, 8),
+                      solid.sketchId().toString().substring(0, 8),
+                      solid.shape().getClass().getSimpleName());
                 com.ovo.sablestopnow.SablestopNow.LOGGER.warn(
                         "[solid-reject] solid-null (decode failed)");
                 return;
@@ -95,6 +101,9 @@ public final class SolidNetworking {
                 return;
             }
             data.put(solid);
+              com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                      "[srv] save ACCEPTED id={} total={}",
+                      solid.id().toString().substring(0, 8), data.all().size());
             // ★ 拓扑引用：**圆角 → 棱** 的依赖链在服务端落盘 ✓
             //   逻辑集中在 TopoRebuild（客户端会用同一份逻辑重建，保证 id 一致）
             try {

@@ -1528,41 +1528,34 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     + ") phiDeg=" + String.format(java.util.Locale.ROOT, "%.2f",
                             Math.toDegrees(phi))
                     + " len=" + fmt(len) + " r=" + fmt(r) + " theory=" + fmt(theory));
-            // ── 凸/凹判定：**体积法根本区分不了**，必须看材料占哪几个象限 ──────────
-            // 凸棱：材料只在 (−n1,−n2) 一个象限 ⇒ 楔块建在材料侧 ⇒ **减料**
-            // 凹棱：材料占三个象限（±n1,±n2 混着）⇒ 楔块建在外侧空腔 ⇒ **补料**
-            // 判据：两个"侧面象限" (+n1,−n2) 与 (−n1,+n2) 各一个探针点
-            //   都实心 ⇒ 凹；都空 ⇒ 凸；一实一空 ⇒ 平面/台阶（不是棱）⇒ 跳过
-            // 注意：两种情况的楔块体积都等于 theory（凸=切掉方角−四分之一圆，凹=补同一块）
-            //       ⇒ 之前用 inVol/outVol 挑"最像 theory"的那一支，凸凹各有一支命中，
-            //       结果**必然随机**（这也是"圆角有时切有时补"的来源）。
+            // ── 凸/凹 + 楔块象限：**四象限探针** ✓（与 n1/n2 的符号无关）─────────
+            // 在棱中点沿四条角平分线、距离 0.5r 各取一个探针，数材料占几个象限：
+            //   1 个实心 ⇒ 凸棱：楔块就建在那个实心象限里 ⇒ **减料**
+            //   3 个实心 ⇒ 凹棱：楔块建在唯一空着的象限（缺口）⇒ **补料**
+            //   2 / 0 / 4 ⇒ 平面、台阶、或者根本不是棱 ⇒ 跳过（宁可不倒角）
+            // 这样就不依赖"n1/n2 必须都朝外"：象限是实测出来的，法线符号写反也能选对 ✓
             final Vector3d dir = new Vector3d(b).sub(a).normalize();
-            final Vector3d mid = new Vector3d(a).add(b).mul(0.5);
-            final double probe = 0.5 * r;
-            final boolean side1;
-            final boolean side2;
-            {
-                final Vector3d d1 = new Vector3d(n1).sub(n2);
-                final Vector3d d2 = new Vector3d(n2).sub(n1);
-                side1 = d1.lengthSquared() < 1.0e-12 || containsPoint(out,
-                        new Vector3d(mid).fma(probe, d1.normalize()));
-                side2 = d2.lengthSquared() < 1.0e-12 || containsPoint(out,
-                        new Vector3d(mid).fma(probe, d2.normalize()));
-            }
-            if (side1 != side2) {
-                log.append(" [f").append(index).append(":flat ")
-                        .append(side1 ? '1' : '0').append(side2 ? '1' : '0').append(']');
+            final double[] qd = new double[4];
+            final List<Csg.Polygon> material = out; // lambda 只能捕获 effectively-final
+            final int quads = filletQuadrant(pt -> containsPoint(material, pt),
+                    a, b, n1, n2, r, qd);
+            if (quads != 1 && quads != 3) {
+                log.append(" [f").append(index).append(":quads ").append(quads).append("/4]");
                 continue;
             }
-            final boolean concave = side1;
-            trace("fillet:  probe side=" + (side1 ? 1 : 0) + (side2 ? 1 : 0)
+            final boolean concave = quads == 3;
+            trace("fillet:  quads=" + quads + "/4 pattern=" + (int) qd[3]
                     + " -> " + (concave ? "concave(fill)" : "convex(cut)") + " idx=" + index);
-            List<Csg.Polygon> wedge = wedgePolys(a, b, n1, n2, r, !concave, dir);
+            // prism 内部把"传入法线"取反当作楔块的延伸方向 ⇒ 传 −q1·n1、−q2·n2
+            // 才能得到沿 (q1·n1, q2·n2) 那个象限的楔块 ✓
+            final Vector3d m1 = new Vector3d(n1).mul(-qd[0]);
+            final Vector3d m2 = new Vector3d(n2).mul(-qd[1]);
+            List<Csg.Polygon> wedge = wedgePolys(a, b, m1, m2, r, dir, n1);
             if (wedge.isEmpty()) {
                 log.append(" [f").append(index).append(":empty-prism]");
                 continue;
             }
-            double wedgeVol = Math.abs(polysVolume(wedge));
+            final double wedgeVol = Math.abs(polysVolume(wedge));
             // 安全网：截面/法线异常时楔块会明显偏离理论体积 ⇒ 宁可不倒角，也不产出垃圾
             if (wedgeVol > theory * 6.0 + 1.0e-3 || wedgeVol < theory * 0.25) {
                 log.append(" [f").append(index).append(":size ")
@@ -1571,31 +1564,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         .append(']');
                 continue;
             }
-            double inVol = Math.abs(polysVolume(intersectLocal(out, wedge)));
-            // ★ 法线符号兜底：若楔块落在**相反**侧（说明存档里的 n1/n2 是朝里的，
-            //   或者凸凹判定的探针被薄壁骗了），换到另一侧再试一次 —— 只在这时翻转，
-            //   所以不会重新引入"每侧都能自圆其说"的歧义 ✓
-            boolean flipped = false;
-            final boolean wrongSide = concave ? (inVol > 0.7 * wedgeVol)
-                    : (inVol < 0.3 * wedgeVol);
-            if (wrongSide) {
-                final List<Csg.Polygon> alt = wedgePolys(a, b, n1, n2, r, concave, dir);
-                if (!alt.isEmpty()) {
-                    final double altVol = Math.abs(polysVolume(alt));
-                    final double altIn = Math.abs(polysVolume(intersectLocal(out, alt)));
-                    final boolean altOk = concave ? (altIn < 0.3 * altVol)
-                            : (altIn > 0.7 * altVol);
-                    if (altOk) {
-                        wedge = alt;
-                        wedgeVol = altVol;
-                        inVol = altIn;
-                        flipped = true;
-                    }
-                }
-            }
+            final double inVol = Math.abs(polysVolume(intersectLocal(out, wedge)));
             final double outVol = Math.max(0.0, wedgeVol - inVol);
-            final boolean ok = concave ? (inVol < 0.35 * wedgeVol)
-                    : (inVol > 0.65 * wedgeVol);
+            // 方向自检：凸棱的楔块应该几乎全在材料内；凹棱的应该几乎全在材料外。
+            // 完全反过来 ⇒ 探针被薄壁骗了 ⇒ 跳过，绝不把本体剪成补集
+            if (concave ? (inVol > 0.95 * wedgeVol) : (inVol < 0.05 * wedgeVol)) {
+                log.append(" [f").append(index).append(":side ")
+                        .append(String.format(java.util.Locale.ROOT, "%.4f/%.4f",
+                                inVol, wedgeVol)).append(']');
+                continue;
+            }
             final List<Csg.Polygon> applied = concave
                     ? unionLocal(out, wedge) : subtractLocal(out, wedge);
             if (applied.isEmpty() || applied == out) {
@@ -1604,33 +1582,96 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 continue;
             }
             out = applied;
+            final boolean ok = concave ? (inVol < 0.35 * wedgeVol)
+                    : (inVol > 0.65 * wedgeVol);
             log.append(" [f").append(index).append(concave ? ":fill " : ":cut ")
                     .append(String.format(java.util.Locale.ROOT, "%.4f/%.4f/%.4f",
                             inVol, outVol, theory))
-                    .append(ok ? (flipped ? " ok*]" : " ok]") : " ?!]");
+                    .append(ok ? " ok]" : " ?!]");
         }
         return out;
     }
 
     /**
-     * 造**某一侧**的圆角楔块 ✓
+     * 造圆角楔块（**指定象限**）✓
      *
-     * @param materialSide true = 楔块建在**材料侧**（凸棱减料）；
-     *                     false = 建在外侧空腔（凹棱补料）
+     * <p>{@link FilletCutter#prism} 内部把传入法线取反作为楔块的延伸方向：
+     * 所以传 {@code m1 = −q1·n1, m2 = −q2·n2}，得到的楔块沿 {@code (q1·n1, q2·n2)} 象限延伸 ✓
      */
     private static List<Csg.Polygon> wedgePolys(final Vector3d a, final Vector3d b,
-                                                final Vector3d n1, final Vector3d n2,
-                                                final double r, final boolean materialSide,
-                                                final Vector3d dir) {
-        // sectionOffsets 内部把"传入法线"取反当作材料侧方向 ⇒ 材料侧传 n1/n2，外侧传 −n1/−n2
-        final Vector3d m1 = materialSide ? new Vector3d(n1) : new Vector3d(n1).negate();
-        final Vector3d m2 = materialSide ? new Vector3d(n2) : new Vector3d(n2).negate();
+                                                final Vector3d m1, final Vector3d m2,
+                                                final double r, final Vector3d dir,
+                                                final Vector3d uvNormal) {
         final List<Vector3d[]> tris = FilletCutter.prism(a, b, m1, m2, r);
         if (tris == null || tris.isEmpty()) {
             return List.of();
         }
-        // UV 一律用**朝外的 n1** 投影：翻转法线补料时贴图方向不能跟着翻 ✓
-        return ensureOutward(triPolys(tris, dir, n1));
+        // UV 一律用**同一个**参考法线投影：换象限时贴图方向不能跟着乱翻 ✓
+        return ensureOutward(triPolys(tris, dir, uvNormal));
+    }
+
+    /**
+     * **圆角象限判定**（凸/凹 + 楔块该建在哪一象限）✓ —— 减料/补料都靠它
+     *
+     * <p>在棱中点沿四条角平分线、距离 {@code 0.5r} 各取一个探针，数材料占几个象限：
+     * <ul>
+     *   <li>**1 个实心** ⇒ 凸棱：楔块建在这个实心象限里（削掉锐角）</li>
+     *   <li>**3 个实心** ⇒ 凹棱：楔块建在唯一空着的象限（填缺口）</li>
+     *   <li>0 / 2 / 4 ⇒ 不是可用棱（平面、台阶、或点在体外）⇒ 调用方跳过</li>
+     * </ul>
+     * 关键在于「几实几空」和「哪一个空」都是**实测**的 ⇒ 与 n1/n2 的符号无关，
+     * 存档里的法线朝里朝外都能选对象限（之前靠体积签名，凸凹同签名 ⇒ 必然随机）✓
+     *
+     * @param inside 点是否在材料内的判定（求值用 CSG 点测试；预览用体素盒）
+     * @param out    输出 {q1, q2, concave?1:0, 象限位图}；q1/q2 是 ±1 的象限符号
+     * @return 实心象限个数（0..4）
+     */
+    public static int filletQuadrant(final java.util.function.Predicate<Vector3d> inside,
+                                     final Vector3d a, final Vector3d b,
+                                     final Vector3d n1, final Vector3d n2,
+                                     final double r, final double[] out) {
+        final Vector3d mid = new Vector3d(a).add(b).mul(0.5);
+        final double probe = 0.5 * r;
+        final int[] s1s = new int[4];
+        final int[] s2s = new int[4];
+        final boolean[] filled = new boolean[4];
+        int pattern = 0;
+        int k = 0;
+        for (int s1 = -1; s1 <= 1; s1 += 2) {
+            for (int s2 = -1; s2 <= 1; s2 += 2) {
+                s1s[k] = s1;
+                s2s[k] = s2;
+                final Vector3d d = new Vector3d(n1).mul(s1).add(new Vector3d(n2).mul(s2));
+                final boolean in = d.lengthSquared() >= 1.0e-12
+                        && inside.test(new Vector3d(mid).fma(probe, d.normalize()));
+                filled[k] = in;
+                if (in) {
+                    pattern |= 1 << k;
+                }
+                k++;
+            }
+        }
+        if (out != null && out.length >= 4) {
+            out[3] = pattern;
+        }
+        int cnt = 0;
+        int onlyFilled = -1;
+        int onlyEmpty = -1;
+        for (int i = 0; i < 4; i++) {
+            if (filled[i]) {
+                cnt++;
+                onlyFilled = i;
+            } else {
+                onlyEmpty = i;
+            }
+        }
+        if (out != null && out.length >= 3 && (cnt == 1 || cnt == 3)) {
+            final int pick = cnt == 1 ? onlyFilled : onlyEmpty;
+            out[0] = s1s[pick];
+            out[1] = s2s[pick];
+            out[2] = cnt == 3 ? 1.0 : 0.0;
+        }
+        return cnt;
     }
 
     /** 短 id（日志用）✓ */

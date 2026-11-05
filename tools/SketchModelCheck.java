@@ -821,6 +821,41 @@ public final class SketchModelCheck {
         check(com.ovo.sablestopnow.sketch.Solid.containsPoint(lShape,
                         new org.joml.Vector3d(concaveEdge).fma(0.125, e2)),
                 "point-inside: 凹棱侧面象限②必须判内");
+
+        // ── 圆角象限判定（减料/补料的唯一依据）✓ ──────────────────────────────
+        final double[] qd = new double[4];
+        // 凸棱：盒 A 的 x=+2 / z=0 棱（外法线 +X 与 −Z）⇒ 只有材料那个象限实心
+        final int convexQuads = com.ovo.sablestopnow.sketch.Solid.filletQuadrant(
+                p -> com.ovo.sablestopnow.sketch.Solid.containsPoint(boxA, p),
+                new org.joml.Vector3d(ox + 2, oy, oz),
+                new org.joml.Vector3d(ox + 2, oy + 1, oz),
+                new org.joml.Vector3d(1, 0, 0), new org.joml.Vector3d(0, 0, -1),
+                0.25, qd);
+        pathlib_Diag("fillet-quadrant convex quads=" + convexQuads + " pattern=" + (int) qd[3]
+                + " q=(" + qd[0] + "," + qd[1] + ")");
+        check(convexQuads == 1, "fillet-quadrant: 盒角必须判成 1 个实心象限（实际 "
+                + convexQuads + "）");
+        check(qd[2] < 0.5, "fillet-quadrant: 盒角必须判成**凸**棱");
+        check(qd[0] < 0 && qd[1] < 0,
+                "fillet-quadrant: 凸角楔块必须落在材料象限 (−n1,−n2)（实际 "
+                        + qd[0] + "," + qd[1] + "）");
+
+        // 凹棱：L 的 x=1 / z=1 棱（外法线 +X 与 +Z）⇒ 三个象限实心，空的那个是缺口
+        final double[] qd2 = new double[4];
+        final int concaveQuads = com.ovo.sablestopnow.sketch.Solid.filletQuadrant(
+                p -> com.ovo.sablestopnow.sketch.Solid.containsPoint(lShape, p),
+                new org.joml.Vector3d(ox + 1, oy, oz + 1),
+                new org.joml.Vector3d(ox + 1, oy + 1, oz + 1),
+                new org.joml.Vector3d(1, 0, 0), new org.joml.Vector3d(0, 0, 1),
+                0.25, qd2);
+        pathlib_Diag("fillet-quadrant concave quads=" + concaveQuads + " pattern="
+                + (int) qd2[3] + " q=(" + qd2[0] + "," + qd2[1] + ")");
+        check(concaveQuads == 3, "fillet-quadrant: L 内角必须判成 3 个实心象限（实际 "
+                + concaveQuads + "）");
+        check(qd2[2] > 0.5, "fillet-quadrant: L 内角必须判成**凹**棱");
+        check(qd2[0] > 0 && qd2[1] > 0,
+                "fillet-quadrant: 凹角楔块必须落在缺口象限 (+n1,+n2)（实际 "
+                        + qd2[0] + "," + qd2[1] + "）");
     }
 
     private static java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> shiftPolys(

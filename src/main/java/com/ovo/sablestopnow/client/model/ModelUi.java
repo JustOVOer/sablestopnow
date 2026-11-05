@@ -2356,9 +2356,24 @@ public final class ModelUi {
         // ★ 预览直接画**实际参与布尔的那个楔块体的线框** ✓
         //   用 FilletCutter.prism（与 CSG 完全同一个函数）⇒ 预览永远不会和结果不一致。
         //   去重：按量化后的端点对取唯一棱，得到"两端截面环 + 侧棱"的体块线框。
-        final java.util.List<org.joml.Vector3d[]> tris =
-                com.ovo.sablestopnow.sketch.FilletCutter.prism(
-                        filletEdgeA, filletEdgeB, n1, n2, radius);
+        //
+        // ★★ 但**象限**必须和求值用同一套判定（Solid.filletQuadrant）：
+        //    之前预览固定画"材料侧"的楔块 ⇒ 凸角看着对、凹角正好画在结果的反面
+        //    （用户实测"凹角方向不对"）。这里对四个象限各打一个探针：
+        //    1 个实心=凸（楔块在那个实心象限）／3 个实心=凹（楔块在唯一空的象限）。
+        final double[] qd = new double[4];
+        final int quads = com.ovo.sablestopnow.sketch.Solid.filletQuadrant(
+                p -> insideAnyBox(p), filletEdgeA, filletEdgeB, n1, n2, radius, qd);
+        final java.util.List<org.joml.Vector3d[]> tris;
+        if (quads == 1 || quads == 3) {
+            // prism 内部把"传入法线"取反当楔块的延伸方向 ⇒ 传 −q1·n1、−q2·n2
+            final org.joml.Vector3d m1 = new org.joml.Vector3d(n1).mul(-qd[0]);
+            final org.joml.Vector3d m2 = new org.joml.Vector3d(n2).mul(-qd[1]);
+            tris = com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                    filletEdgeA, filletEdgeB, m1, m2, radius);
+        } else {
+            tris = java.util.List.of();
+        }
         final java.util.List<org.joml.Vector3d[]> segsRaw = new java.util.ArrayList<>();
         final java.util.Set<String> seenEdge = new java.util.HashSet<>();
         for (final org.joml.Vector3d[] t : tris) {
@@ -2388,8 +2403,9 @@ public final class ModelUi {
                 new org.joml.Vector3d(n1).cross(n2), segs);
         if (System.currentTimeMillis() - lastFilletPreviewLog > 2000L) {
             lastFilletPreviewLog = System.currentTimeMillis();
-            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[fillet] preview segs={} r={}",
-                    segs.size(), radius);
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[fillet] preview quads={}/4 pattern={} segs={} r={}",
+                    quads, (int) qd[3], segs.size(), radius);
         }
     }
 

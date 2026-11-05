@@ -2317,9 +2317,29 @@ public final class ModelUi {
                 ? new org.joml.Vector3d(0, 1, 0) : filletNormal1;
         final org.joml.Vector3d n2 = filletNormal2 == null
                 ? new org.joml.Vector3d(1, 0, 0) : filletNormal2;
-        final java.util.List<org.joml.Vector3d[]> segsRaw =
-                com.ovo.sablestopnow.sketch.FilletCutter.outline(filletEdgeA, filletEdgeB,
-                        n1, n2, radius);
+        // ★ 预览直接画**实际参与布尔的那个楔块体的线框** ✓
+        //   用 FilletCutter.prism（与 CSG 完全同一个函数）⇒ 预览永远不会和结果不一致。
+        //   去重：按量化后的端点对取唯一棱，得到"两端截面环 + 侧棱"的体块线框。
+        final java.util.List<org.joml.Vector3d[]> tris =
+                com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                        filletEdgeA, filletEdgeB, n1, n2, radius);
+        final java.util.List<org.joml.Vector3d[]> segsRaw = new java.util.ArrayList<>();
+        final java.util.Set<String> seenEdge = new java.util.HashSet<>();
+        for (final org.joml.Vector3d[] t : tris) {
+            for (int k = 0; k < 3; k++) {
+                final org.joml.Vector3d p = t[k];
+                final org.joml.Vector3d q = t[(k + 1) % 3];
+                final String ka = Math.round(p.x * 1e4) + "," + Math.round(p.y * 1e4)
+                        + "," + Math.round(p.z * 1e4);
+                final String kb = Math.round(q.x * 1e4) + "," + Math.round(q.y * 1e4)
+                        + "," + Math.round(q.z * 1e4);
+                final String key = ka.compareTo(kb) <= 0 ? ka + "|" + kb : kb + "|" + ka;
+                if (seenEdge.add(key)) {
+                    segsRaw.add(new org.joml.Vector3d[] {
+                        new org.joml.Vector3d(p), new org.joml.Vector3d(q)});
+                }
+            }
+        }
         final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
                 new java.util.ArrayList<>(segsRaw.size() + 1);
         // ★ 把**选中的那条棱**本身也画出来（参考棱高亮 ✓）

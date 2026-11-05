@@ -965,22 +965,6 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     cy /= cn;
                     cz /= cn;
                 }
-                boolean inside = false;
-                final List<double[]> rawOfSrc = src.boxes(srcSketch);
-                for (final double[] box : rawOfSrc) {
-                    // 余量 = 半径 + 0.1：圆角棱柱重心本来就贴在 AABB 边界上 ✓
-                    final double mg = f.radius() + 0.1;
-                    if (cx >= box[0] - mg && cx <= box[3] + mg
-                            && cy >= box[1] - mg && cy <= box[4] + mg
-                            && cz >= box[2] - mg && cz <= box[5] + mg) {
-                        inside = true;
-                        break;
-                    }
-                }
-                if (!rawOfSrc.isEmpty() && !inside) {
-                    lastFilletDiag = "skip idx=" + s2.index() + " reason=prism-outside";
-                    continue;
-                }
                 // ★ 按**被引用的实体**归集：圆角只作用于它指向的那个实体 ✓
                 //   （圆角是"拉伸之后的后处理"，不能溢出到镜像/阵列产物上）
                 // ★ 与**切割**完全一致：按 body 作用（不再按单个实体区分对待）✓

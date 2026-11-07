@@ -1781,8 +1781,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             int knownConvex = -1;
             for (int i = rg[0]; i < rg[1] && knownConvex < 0; i++) {
                 final double[] t = edges.get(i);
-                if (t.length > 15 && ((int) t[15]) >= 0) {
-                    knownConvex = (int) t[15];
+                if (t.length > 14 && ((int) t[14]) >= 0) {
+                    knownConvex = (int) t[14];
                 }
             }
             // ★ 直线棱**没有网格依据时**：先用**当前材料多边形**再判一次（切割产生的棱
@@ -1803,7 +1803,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     ee[9] = info2[3];
                     ee[10] = info2[4];
                     ee[11] = info2[5];
-                    ee[15] = knownConvex;
+                    ee[14] = knownConvex;
                     trace("fillet:  edgeInfo(material) convex=" + knownConvex
                             + " f1=(" + fmt(info2[0]) + "," + fmt(info2[1]) + ","
                             + fmt(info2[2]) + ")");
@@ -2166,14 +2166,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
     }
 
-    /** 平移一条圆角边元组（阵列副本用）✓ */
+    /** 平移一条圆角边元组（阵列副本用）✓ —— 15 项：坐标6+法线6+r+curveGroup+凸凹 */
     private static double[] translateEdgeTuple(final double[] e, final double[] off) {
-        final double[] out = new double[] {e[0] + off[0], e[1] + off[1], e[2] + off[2],
+        return new double[] {e[0] + off[0], e[1] + off[1], e[2] + off[2],
             e[3] + off[0], e[4] + off[1], e[5] + off[2],
             e[6], e[7], e[8], e[9], e[10], e[11], e[12],
-            e.length > 13 ? e[13] : -1, e.length > 14 ? e[14] : 0,
-            e.length > 15 ? e[15] : -1};
-        return out;
+            e.length > 13 ? e[13] : -1, e.length > 14 ? e[14] : -1};
     }
 
     /**

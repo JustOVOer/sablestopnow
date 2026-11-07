@@ -1276,6 +1276,46 @@ public final class SketchModelCheck {
         check(gap.get(1)[13] < 0, "merge-runs: 有间隙的段不能合并");
     }
 
+    /**
+     * **从网格精确判定直线棱的凸凹 + 两个相邻面** ✓（不用探针）
+     *
+     * <p>探针只能回答"某方向有没有材料"，无法保证材料属于哪个面（盒子里混进别的实体
+     * 就会选错象限 ⇒ 楔块被建到错的二面角上）。这里直接读网格三角形。
+     */
+    private static void filletEdgeInfo() {
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh mesh =
+                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(
+                        java.util.List.of(new double[] {0, 0, 0, 2, 1, 2}));
+        final double[] info = com.ovo.sablestopnow.sketch.FilletCutter.edgeInfo(mesh,
+                new org.joml.Vector3d(2, 0, 0), new org.joml.Vector3d(2, 1, 0));
+        check(info != null, "edge-info: 盒棱必须能判定");
+        if (info != null) {
+            pathlib_Diag("edge-info f1=(" + info[0] + "," + info[1] + "," + info[2]
+                    + ") f2=(" + info[3] + "," + info[4] + "," + info[5]
+                    + ") convex=" + info[6]);
+            check(info[6] > 0.5, "edge-info: 盒棱必须判成**凸**棱");
+            final org.joml.Vector3d f1 = new org.joml.Vector3d(info[0], info[1], info[2]);
+            final org.joml.Vector3d f2 = new org.joml.Vector3d(info[3], info[4], info[5]);
+            check(Math.abs(Math.abs(f1.x()) + Math.abs(f1.y()) + Math.abs(f1.z()) - 1.0) < 1.0e-6
+                            && Math.abs(f1.lengthSquared() - 1.0) < 1.0e-6,
+                    "edge-info: 面法线必须是单位轴向量（实际 " + f1 + "）");
+            // 这条棱的两个面必须是 +X 与 −Z（符号无关，取绝对值比较）
+            final double ax = Math.abs(f1.x());
+            final double az = Math.abs(f1.z());
+            final double bx = Math.abs(f2.x());
+            final double bz = Math.abs(f2.z());
+            check((ax > 0.99 && bz > 0.99) || (az > 0.99 && bx > 0.99),
+                    "edge-info: 相邻两面应是 X 面与 Z 面（实际 " + f1 + " / " + f2 + "）");
+            check(Math.abs(f1.dot(f2)) < 1.0e-6,
+                    "edge-info: 盒棱两面法线应垂直（实际 dot=" + f1.dot(f2) + "）");
+        }
+        // 不在棱上的点对：找不到两个面 ⇒ null（不能瞎给）
+        check(com.ovo.sablestopnow.sketch.FilletCutter.edgeInfo(mesh,
+                        new org.joml.Vector3d(0.4, 0, 0.4), new org.joml.Vector3d(0.6, 0, 0.6))
+                        == null,
+                "edge-info: 不在棱上的线段必须返回 null");
+    }
+
     private static void near(final double actual, final double expected, final String label) {
         check(Math.abs(actual - expected) < 1e-6,
                 label + ": 期望 " + expected + "，实际 " + actual);
@@ -1314,6 +1354,7 @@ public final class SketchModelCheck {
         filletSweepCurved();
         filletSetbackTrim();
         filletMergeRunsLegacy();
+        filletEdgeInfo();
         ensureOutwardSign();
         boxMeshWinding();
         filletPrismSolid();

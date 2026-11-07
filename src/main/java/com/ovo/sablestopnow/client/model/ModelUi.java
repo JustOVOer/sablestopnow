@@ -2011,9 +2011,9 @@ public final class ModelUi {
     private static int filletPickSeq;
     private static java.util.UUID filletSourceSolid;
 
-    /** 一次拾取的单位：{group, 段, 参考法线 n1, 参考法线 n2} ✓ */
+    /** 一次拾取的单位：{group, 段, 参考法线 n1, 参考法线 n2, 凸凹(1凸/0凹/-1未知)} ✓ */
     private record FilletPick(int group, double[] seg,
-                              org.joml.Vector3d n1, org.joml.Vector3d n2) {
+                              org.joml.Vector3d n1, org.joml.Vector3d n2, int convex) {
     }
 
     /** 圆角工具：点到一条棱 ⇒ 记录并弹半径输入框（带黄色预览）✓ */
@@ -2281,7 +2281,7 @@ public final class ModelUi {
                 fn.zero();
                 fn.setComponent((edgeAxis + 1) % 3, 1.0);
             }
-            filletTogglePicks(java.util.List.of(seg), fn, null, filletRadius.get());
+            filletTogglePicks(java.util.List.of(seg), fn, null, -1, filletRadius.get());
             updateFilletPreview(filletRadius.get());
             lastLeftSignature = null;
             refreshLeftPanel();
@@ -2346,6 +2346,7 @@ public final class ModelUi {
         // 曲线链用**链所在平面的法线**（盖面），每段的第二法线 = dir × 盖面 ✓
         org.joml.Vector3d faceN1 = null;
         org.joml.Vector3d faceN2 = null;
+        int convexKnown = -1;
         if (!isCurve) {
             final net.minecraft.client.Minecraft mc2 =
                     net.minecraft.client.Minecraft.getInstance();
@@ -2358,13 +2359,24 @@ public final class ModelUi {
                 if (sk2 != null) {
                     final com.ovo.sablestopnow.sketch.SolidMesh.Mesh m2 = srcS.mesh(sk2);
                     final double[] seg0 = picked.get(0);
-                    final org.joml.Vector3d[] fn =
-                            com.ovo.sablestopnow.sketch.FilletCutter.faceNormals(m2,
-                                    new org.joml.Vector3d(seg0[0], seg0[1], seg0[2]),
-                                    new org.joml.Vector3d(seg0[3], seg0[4], seg0[5]));
-                    if (fn != null) {
-                        faceN1 = fn[0];
-                        faceN2 = fn[1];
+                    final org.joml.Vector3d sa0 =
+                            new org.joml.Vector3d(seg0[0], seg0[1], seg0[2]);
+                    final org.joml.Vector3d sb0 =
+                            new org.joml.Vector3d(seg0[3], seg0[4], seg0[5]);
+                    // ★ 网格直接给"两个相邻面 + 凸凹" ⇒ 楔块方向可以解析算出，不靠探针 ✓
+                    final double[] info =
+                            com.ovo.sablestopnow.sketch.FilletCutter.edgeInfo(m2, sa0, sb0);
+                    if (info != null) {
+                        faceN1 = new org.joml.Vector3d(info[0], info[1], info[2]);
+                        faceN2 = new org.joml.Vector3d(info[3], info[4], info[5]);
+                        convexKnown = info[6] > 0.5 ? 1 : 0;
+                    } else {
+                        final org.joml.Vector3d[] fn =
+                                com.ovo.sablestopnow.sketch.FilletCutter.faceNormals(m2, sa0, sb0);
+                        if (fn != null) {
+                            faceN1 = fn[0];
+                            faceN2 = fn[1];
+                        }
                     }
                 }
             }
@@ -2373,7 +2385,8 @@ public final class ModelUi {
                 ? com.ovo.sablestopnow.sketch.EdgeChains.planeNormal(picked,
                         new org.joml.Vector3d(hit.localNormal()))
                 : (faceN1 != null ? faceN1 : new org.joml.Vector3d(hit.localNormal()));
-        filletTogglePicks(picked, basisNormal, isCurve ? null : faceN2, filletRadius.get());
+        filletTogglePicks(picked, basisNormal, isCurve ? null : faceN2, convexKnown,
+                filletRadius.get());
         updateFilletPreview(filletRadius.get());
         lastLeftSignature = null;
         refreshLeftPanel();
@@ -2381,11 +2394,12 @@ public final class ModelUi {
                 : filletPicks.get(filletPicks.size() - 1).n2();
         com.ovo.sablestopnow.SablestopNow.LOGGER.info(
                 "[fillet] edge picked body={} curve={} segs={} picks={} groups={}"
-                        + " basis={} n1={} n2={} phiDeg={}",
+                        + " basis={} convex={} n1={} n2={} phiDeg={}",
                 filletSourceSolid, isCurve, allSegs.size(), picked.size(),
                 filletPicks.size(), filletGroupCount(),
-                isCurve ? "plane" : (faceN1 != null ? "mesh-faces" : "hit-normal"),
-                basisNormal, showN2, String.format(java.util.Locale.ROOT, "%.1f",
+                isCurve ? "plane" : (convexKnown >= 0 ? "mesh-edgeInfo"
+                        : (faceN1 != null ? "mesh-faces" : "hit-normal")),
+                convexKnown, basisNormal, showN2, String.format(java.util.Locale.ROOT, "%.1f",
                         Math.toDegrees(Math.acos(Math.max(-1.0, Math.min(1.0,
                                 basisNormal.dot(showN2 == null ? basisNormal : showN2)))))));
         return true;
@@ -2444,7 +2458,7 @@ public final class ModelUi {
     private static void filletTogglePicks(final java.util.List<double[]> segs,
                                           final org.joml.Vector3d basisNormal,
                                           final org.joml.Vector3d secondNormal,
-                                          final double radius) {
+                                          final int convex, final double radius) {
         if (segs == null || segs.isEmpty()) {
             return;
         }
@@ -2465,7 +2479,7 @@ public final class ModelUi {
         for (final double[] s : segs) {
             filletRemovePick(s);
             final org.joml.Vector3d[] basis = filletBasis(s, basisNormal, secondNormal);
-            filletPicks.add(new FilletPick(group, copySeg(s), basis[0], basis[1]));
+            filletPicks.add(new FilletPick(group, copySeg(s), basis[0], basis[1], convex));
         }
     }
 
@@ -2566,13 +2580,23 @@ public final class ModelUi {
                     ? new org.joml.Vector3d(1, 0, 0) : mid.n2();
             final double[] qd = new double[4];
             gqd[i] = qd;
-            gq[i] = com.ovo.sablestopnow.sketch.Solid.filletQuadrant(
-                    pt -> insideAnyBox(pt),
-                    new org.joml.Vector3d(mid.seg()[0], mid.seg()[1], mid.seg()[2]),
-                    new org.joml.Vector3d(mid.seg()[3], mid.seg()[4], mid.seg()[5]),
-                    mn1, mn2, radius, qd);
-            // ★ 与求值一致：首段结论必须与中间段一致，否则视为不可判定（不画/不建）✓
-            if (gq[i] == 1 || gq[i] == 3) {
+            if (mid.convex() >= 0) {
+                // ★ 网格已给出精确凸凹（直线棱）⇒ 与求值侧同一解析解 ✓
+                final int cv = mid.convex();
+                qd[0] = cv == 1 ? -1.0 : 1.0;
+                qd[1] = qd[0];
+                qd[2] = cv == 1 ? 0.0 : 1.0;
+                qd[3] = 0.0;
+                gq[i] = cv == 1 ? 1 : 3;
+            } else {
+                gq[i] = com.ovo.sablestopnow.sketch.Solid.filletQuadrant(
+                        pt -> insideAnyBox(pt),
+                        new org.joml.Vector3d(mid.seg()[0], mid.seg()[1], mid.seg()[2]),
+                        new org.joml.Vector3d(mid.seg()[3], mid.seg()[4], mid.seg()[5]),
+                        mn1, mn2, radius, qd);
+            }
+            // ★ 与求值一致：探针路径下首段结论必须与中间段一致，否则视为不可判定 ✓
+            if (mid.convex() < 0 && (gq[i] == 1 || gq[i] == 3)) {
                 final FilletPick f0 = g.get(0);
                 final double[] qdF = new double[4];
                 final int qF = com.ovo.sablestopnow.sketch.Solid.filletQuadrant(

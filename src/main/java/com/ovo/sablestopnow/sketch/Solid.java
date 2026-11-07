@@ -1099,7 +1099,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     final int cg = ref.isCurve() ? (++curveGroupSeq) : -1;
                     final boolean isMirror = src.shape instanceof Shape.Mirror;
                     expandRef(isMirror ? featMirror : featPattern,
-                            src.id(), ref, mn1, mn2, f.radius(), cg, null);
+                            src.id(), ref, mn1, mn2, f.radius(), cg, null, -1);
                     trace("fillet:  target=" + (isMirror ? "mirror " : "pattern ")
                             + shortId(src.id()) + " segs=" + (ref.isCurve()
                                     ? ref.curveSegs().size() : 1));
@@ -1176,19 +1176,24 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     filletLog.append(" [f").append(s2.index()).append(":no-normals]");
                     continue;
                 }
-                // ★ 用**网格里的两个真实面法线**校正（直线棱）：存储的法线可能是
-                //   hover 到的面法线，但那个面**未必是这条棱相邻的面** ⇒ 楔块会被
-                //   建到"错的二面角"上（实测预览里切割体像被转了个角度）✓
+                int edgeConvex = -1;
                 if (!ref.isCurve() && srcMesh != null && !srcMesh.isEmpty()) {
-                    final Vector3d[] tn = FilletCutter.faceNormals(srcMesh, a, b);
-                    if (tn != null) {
-                        trace("fillet:  basis align stored1·true=(" + fmt(nn[0].dot(tn[0]))
-                                + "," + fmt(nn[0].dot(tn[1])) + ") stored2·true=("
-                                + fmt(nn[1].dot(tn[0])) + "," + fmt(nn[1].dot(tn[1]))
-                                + ") -> 用网格真值");
-                        nn = new Vector3d[] {tn[0], tn[1]};
+                    final double[] info = FilletCutter.edgeInfo(srcMesh, a, b);
+                    if (info != null) {
+                        nn = new Vector3d[] {
+                            new Vector3d(info[0], info[1], info[2]),
+                            new Vector3d(info[3], info[4], info[5])};
+                        edgeConvex = info[6] > 0.5 ? 1 : 0;
+                        trace("fillet:  edgeInfo convex=" + edgeConvex
+                                + " f1=(" + fmt(info[0]) + "," + fmt(info[1]) + ","
+                                + fmt(info[2]) + ") f2=(" + fmt(info[3]) + ","
+                                + fmt(info[4]) + "," + fmt(info[5]) + ")");
                     } else {
-                        trace("fillet:  basis align: 网格里找不到这条棱相邻的两个面（沿用存储法线）");
+                        final Vector3d[] tn = FilletCutter.faceNormals(srcMesh, a, b);
+                        if (tn != null) {
+                            nn = new Vector3d[] {tn[0], tn[1]};
+                            trace("fillet:  edgeInfo: 凸凹未知，用网格面法线校正");
+                        }
                     }
                 }
                 // ★ 曲线棱（一条弧 = 一个 EdgeRef + 折线）⇒ 逐段展开 ✓
@@ -1196,7 +1201,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 //   同一条曲线的所有段共享 **curveGroup**（求值时合成一个扫掠体）。
                 final java.util.List<Csg.Polygon> prismPolys = new ArrayList<>();
                 expandRef(featSolid, src.id(), ref, nn[0], nn[1], f.radius(),
-                        ref.isCurve() ? (++curveGroupSeq) : -1, prismPolys);
+                        ref.isCurve() ? (++curveGroupSeq) : -1, prismPolys, edgeConvex);
                 trace("fillet:  prism polys=" + prismPolys.size()
                         + " src=" + shortId(src.id()) + " srcBody="
                         + shortId(src.body()) + srcNote
@@ -1770,6 +1775,20 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             itemTheory[it] = theory;
             final double[] e = edges.get(mid);
+            // ★ 网格已经给出**精确凸凹**（直线棱）⇒ 象限直接解析求出，不用探针 ✓
+            if (e.length > 15 && ((int) e[15]) >= 0) {
+                final int cv = (int) e[15];
+                final double[] qdz = new double[4];
+                qdz[0] = cv == 1 ? -1.0 : 1.0;
+                qdz[1] = qdz[0];
+                qdz[2] = cv == 1 ? 0.0 : 1.0;
+                qdz[3] = 0.0;
+                itemQd[it] = qdz;
+                itemQuads[it] = cv == 1 ? 1 : 3;
+                trace("fillet:  known convex=" + cv + " q=(" + (int) qdz[0] + ","
+                        + (int) qdz[1] + ")");
+                continue;
+            }
             final double[] qd = new double[4];
             itemQd[it] = qd;
             itemQuads[it] = filletQuadrant(probe,
@@ -2058,7 +2077,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     private static void expandRef(final java.util.Map<UUID, List<double[]>> map, final UUID key,
                                   final Shape.EdgeRef ref, final Vector3d n1v,
                                   final Vector3d n2v, final double rr, final int curveGroup,
-                                  final java.util.List<Csg.Polygon> polysOut) {
+                                  final java.util.List<Csg.Polygon> polysOut,
+                                  final int convexKnown) {
         if (map == null || key == null || ref == null) {
             return;
         }
@@ -2098,7 +2118,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 segN2.normalize();
             }
             out.add(new double[] {sa.x, sa.y, sa.z, sb.x, sb.y, sb.z,
-                segN1.x, segN1.y, segN1.z, segN2.x, segN2.y, segN2.z, rr, curveGroup});
+                segN1.x, segN1.y, segN1.z, segN2.x, segN2.y, segN2.z, rr, curveGroup,
+                convexKnown});
             if (polysOut != null) {
                 final List<Vector3d[]> tris =
                         FilletCutter.prism(sa, sb, segN1, segN2, rr);
@@ -2111,10 +2132,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
 
     /** 平移一条圆角边元组（阵列副本用）✓ */
     private static double[] translateEdgeTuple(final double[] e, final double[] off) {
-        return new double[] {e[0] + off[0], e[1] + off[1], e[2] + off[2],
+        final double[] out = new double[] {e[0] + off[0], e[1] + off[1], e[2] + off[2],
             e[3] + off[0], e[4] + off[1], e[5] + off[2],
             e[6], e[7], e[8], e[9], e[10], e[11], e[12],
-            e.length > 13 ? e[13] : -1};
+            e.length > 13 ? e[13] : -1, e.length > 14 ? e[14] : 0,
+            e.length > 15 ? e[15] : -1};
+        return out;
     }
 
     /**

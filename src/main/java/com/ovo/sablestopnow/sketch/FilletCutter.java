@@ -414,6 +414,87 @@ public final class FilletCutter {
     }
 
     /**
+     * **从网格精确判定一条直线棱**：相邻两个面法线 + 凸/凹 ✓
+     *
+     * <p>为什么不用探针：探针只能说"某个方向有没有材料"，无法区分"材料属于哪个面"，
+     * 一旦盒子里混进别的实体/薄壁，象限就会选错（实测把楔块建到错的二面角上）。
+     * 这里直接用网格：
+     * <ul>
+     *   <li>找出"两个顶点都落在这条棱上"的三角形 ⇒ 相邻面</li>
+     *   <li>取互相最不平行的两个面 f1,f2</li>
+     *   <li>凸凹判据：另一个面里**不在棱上**的那个顶点，落在 f1 平面的哪一侧
+     *       —— 在材料侧（{@code f1·(w2−a) < 0}）⇒ 凸棱；在空侧 ⇒ 凹棱 ✓</li>
+     * </ul>
+     *
+     * @return {@code {f1x,f1y,f1z, f2x,f2y,f2z, convex?1:0}}；找不到返回 null
+     */
+    public static double[] edgeInfo(final SolidMesh.Mesh mesh, final Vector3dc a,
+                                    final Vector3dc b) {
+        if (mesh == null || mesh.isEmpty() || a == null || b == null) {
+            return null;
+        }
+        final int[] idx = mesh.indices();
+        final java.util.List<Vector3d> ns = new ArrayList<>();
+        final java.util.List<Vector3d> far = new ArrayList<>();
+        for (int i = 0; i + 2 < idx.length; i += 3) {
+            final Vector3d v0 = mesh.vertices().get(idx[i]).position();
+            final Vector3d v1 = mesh.vertices().get(idx[i + 1]).position();
+            final Vector3d v2 = mesh.vertices().get(idx[i + 2]).position();
+            final boolean o0 = onEdge(v0, a, b, 1.0e-3);
+            final boolean o1 = onEdge(v1, a, b, 1.0e-3);
+            final boolean o2 = onEdge(v2, a, b, 1.0e-3);
+            if ((o0 ? 1 : 0) + (o1 ? 1 : 0) + (o2 ? 1 : 0) != 2) {
+                continue;
+            }
+            final Vector3d n = new Vector3d(v1).sub(v0)
+                    .cross(new Vector3d(v2).sub(v0));
+            if (n.lengthSquared() < 1.0e-14) {
+                continue;
+            }
+            n.normalize();
+            boolean dup = false;
+            for (final Vector3d o : ns) {
+                if (Math.abs(o.dot(n)) > 0.999) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) {
+                continue;
+            }
+            ns.add(n);
+            far.add(!o0 ? v0 : (!o1 ? v1 : v2));
+            if (ns.size() >= 4) {
+                break;
+            }
+        }
+        if (ns.size() < 2) {
+            return null;
+        }
+        int bi = -1;
+        int bj = -1;
+        double best = -2.0;
+        for (int i = 0; i < ns.size(); i++) {
+            for (int j = i + 1; j < ns.size(); j++) {
+                final double d = Math.abs(ns.get(i).dot(ns.get(j)));
+                if (d < 0.95 && d > best) {
+                    best = d;
+                    bi = i;
+                    bj = j;
+                }
+            }
+        }
+        if (bi < 0) {
+            return null;
+        }
+        final Vector3d f1 = ns.get(bi);
+        final Vector3d f2 = ns.get(bj);
+        final Vector3d w2 = far.get(bj);
+        final boolean convex = f1.dot(new Vector3d(w2).sub(a)) < 0.0;
+        return new double[] {f1.x, f1.y, f1.z, f2.x, f2.y, f2.z, convex ? 1.0 : 0.0};
+    }
+
+    /**
      * 从网格里找出与某条棱相邻的**两个面法线** ✓
      *
      * @return {n1, n2}；找不到返回 null

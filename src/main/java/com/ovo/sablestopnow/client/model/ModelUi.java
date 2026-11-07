@@ -2281,7 +2281,7 @@ public final class ModelUi {
                 fn.zero();
                 fn.setComponent((edgeAxis + 1) % 3, 1.0);
             }
-            filletTogglePicks(java.util.List.of(seg), fn, filletRadius.get());
+            filletTogglePicks(java.util.List.of(seg), fn, null, filletRadius.get());
             updateFilletPreview(filletRadius.get());
             lastLeftSignature = null;
             refreshLeftPanel();
@@ -2341,20 +2341,53 @@ public final class ModelUi {
         filletSwitchBody(hit.body());
         filletSourceSolid = hit.body();
         filletSolidId = hit.solidId();
-        // 参考面法线：直线棱用命中面法线；曲线链用**链所在平面的法线**（盖面法线），
-        // 这样每段的第二个法线 = dir × 盖面 = 该段自己的侧壁法线（弧面会逐段变化）✓
-        final org.joml.Vector3d basisNormal = idx < curve.length && curve[idx]
+        final boolean isCurve = idx < curve.length && curve[idx];
+        // 参考面法线：直线棱用**网格里的两个真实面法线**（支持非 90° 棱）；
+        // 曲线链用**链所在平面的法线**（盖面），每段的第二法线 = dir × 盖面 ✓
+        org.joml.Vector3d faceN1 = null;
+        org.joml.Vector3d faceN2 = null;
+        if (!isCurve) {
+            final net.minecraft.client.Minecraft mc2 =
+                    net.minecraft.client.Minecraft.getInstance();
+            final net.minecraft.world.level.Level lv2 = mc2 == null ? null : mc2.level;
+            final com.ovo.sablestopnow.sketch.Solid srcS = lv2 == null ? null
+                    : com.ovo.sablestopnow.sketch.SolidClientState.byId(lv2, filletSolidId);
+            if (srcS != null) {
+                final com.ovo.sablestopnow.sketch.Sketch sk2 = srcS.resolve(
+                        com.ovo.sablestopnow.sketch.SketchClientState.current(lv2));
+                if (sk2 != null) {
+                    final com.ovo.sablestopnow.sketch.SolidMesh.Mesh m2 = srcS.mesh(sk2);
+                    final double[] seg0 = picked.get(0);
+                    final org.joml.Vector3d[] fn =
+                            com.ovo.sablestopnow.sketch.FilletCutter.faceNormals(m2,
+                                    new org.joml.Vector3d(seg0[0], seg0[1], seg0[2]),
+                                    new org.joml.Vector3d(seg0[3], seg0[4], seg0[5]));
+                    if (fn != null) {
+                        faceN1 = fn[0];
+                        faceN2 = fn[1];
+                    }
+                }
+            }
+        }
+        final org.joml.Vector3d basisNormal = isCurve
                 ? com.ovo.sablestopnow.sketch.EdgeChains.planeNormal(picked,
                         new org.joml.Vector3d(hit.localNormal()))
-                : new org.joml.Vector3d(hit.localNormal());
-        filletTogglePicks(picked, basisNormal, filletRadius.get());
+                : (faceN1 != null ? faceN1 : new org.joml.Vector3d(hit.localNormal()));
+        filletTogglePicks(picked, basisNormal, isCurve ? null : faceN2, filletRadius.get());
         updateFilletPreview(filletRadius.get());
         lastLeftSignature = null;
         refreshLeftPanel();
+        final org.joml.Vector3d showN2 = filletPicks.isEmpty() ? basisNormal
+                : filletPicks.get(filletPicks.size() - 1).n2();
         com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                "[fillet] edge picked body={} curve={} segs={} picks={} groups={} n={} n1={}",
-                filletSourceSolid, idx < curve.length && curve[idx], allSegs.size(),
-                picked.size(), filletPicks.size(), filletGroupCount(), basisNormal);
+                "[fillet] edge picked body={} curve={} segs={} picks={} groups={}"
+                        + " basis={} n1={} n2={} phiDeg={}",
+                filletSourceSolid, isCurve, allSegs.size(), picked.size(),
+                filletPicks.size(), filletGroupCount(),
+                isCurve ? "plane" : (faceN1 != null ? "mesh-faces" : "hit-normal"),
+                basisNormal, showN2, String.format(java.util.Locale.ROOT, "%.1f",
+                        Math.toDegrees(Math.acos(Math.max(-1.0, Math.min(1.0,
+                                basisNormal.dot(showN2 == null ? basisNormal : showN2)))))));
         return true;
     }
 
@@ -2410,6 +2443,7 @@ public final class ModelUi {
      */
     private static void filletTogglePicks(final java.util.List<double[]> segs,
                                           final org.joml.Vector3d basisNormal,
+                                          final org.joml.Vector3d secondNormal,
                                           final double radius) {
         if (segs == null || segs.isEmpty()) {
             return;
@@ -2430,19 +2464,23 @@ public final class ModelUi {
         final int group = ++filletPickSeq;
         for (final double[] s : segs) {
             filletRemovePick(s);
-            final org.joml.Vector3d[] basis = filletBasis(s, basisNormal);
+            final org.joml.Vector3d[] basis = filletBasis(s, basisNormal, secondNormal);
             filletPicks.add(new FilletPick(group, copySeg(s), basis[0], basis[1]));
         }
     }
 
     /**
      * 一段棱的**正交参考基**（都 ⟂ 棱）✓
+     * 一段棱的参考基（都 ⟂ 棱）✓
      *
-     * <p>n1 = 参考面法线投影；n2 = dir × n1。对"盖面 + 侧壁"的挤出棱，这两个正好是
-     * 两个真实面法线（盖面恒定、侧壁逐段变化）⇒ 圆弧棱也能逐段建出正确的楔块 ✓
+     * <p>n1 = 第一个真实面法线投影；n2 = **第二个真实面法线**投影。
+     * ★ 以前 n2 硬用 {@code dir × n1}：那只有在**两个面互相垂直**时才等于第二个面法线，
+     * 非 90° 棱（斜面/倒角）会把楔块**转一个角度**（实测"切割体被向外旋转 45°"）⇒
+     * 现在优先用从网格里找到的真实面法线，只有拿不到时才退回 dir × n1。
      */
     private static org.joml.Vector3d[] filletBasis(final double[] seg,
-                                                   final org.joml.Vector3d basisNormal) {
+                                                   final org.joml.Vector3d basisNormal,
+                                                   final org.joml.Vector3d secondNormal) {
         final org.joml.Vector3d d = new org.joml.Vector3d(
                 seg[3] - seg[0], seg[4] - seg[1], seg[5] - seg[2]);
         if (d.lengthSquared() < 1.0e-12) {
@@ -2461,7 +2499,21 @@ public final class ModelUi {
             n1.fma(-n1.dot(d), d);
         }
         n1.normalize();
-        final org.joml.Vector3d n2 = new org.joml.Vector3d(d).cross(n1).normalize();
+        org.joml.Vector3d n2 = null;
+        if (secondNormal != null && secondNormal.lengthSquared() > 1.0e-12) {
+            n2 = new org.joml.Vector3d(secondNormal);
+            n2.fma(-n2.dot(d), d);
+            // ★ 只投影到 ⟂ 棱的平面里，**不做**对 n1 的正交化：
+            //   非 90° 棱的两个面法线本来就不垂直，正交化会改掉夹角 ⇒ 楔块又转回去 ✗
+            if (n2.lengthSquared() < 1.0e-9) {
+                n2 = null;
+            } else {
+                n2.normalize();
+            }
+        }
+        if (n2 == null) {
+            n2 = new org.joml.Vector3d(d).cross(n1).normalize();
+        }
         return new org.joml.Vector3d[] {n1, n2};
     }
 

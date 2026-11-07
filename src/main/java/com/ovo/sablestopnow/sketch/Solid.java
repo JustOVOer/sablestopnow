@@ -1176,6 +1176,21 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     filletLog.append(" [f").append(s2.index()).append(":no-normals]");
                     continue;
                 }
+                // ★ 用**网格里的两个真实面法线**校正（直线棱）：存储的法线可能是
+                //   hover 到的面法线，但那个面**未必是这条棱相邻的面** ⇒ 楔块会被
+                //   建到"错的二面角"上（实测预览里切割体像被转了个角度）✓
+                if (!ref.isCurve() && srcMesh != null && !srcMesh.isEmpty()) {
+                    final Vector3d[] tn = FilletCutter.faceNormals(srcMesh, a, b);
+                    if (tn != null) {
+                        trace("fillet:  basis align stored1·true=(" + fmt(nn[0].dot(tn[0]))
+                                + "," + fmt(nn[0].dot(tn[1])) + ") stored2·true=("
+                                + fmt(nn[1].dot(tn[0])) + "," + fmt(nn[1].dot(tn[1]))
+                                + ") -> 用网格真值");
+                        nn = new Vector3d[] {tn[0], tn[1]};
+                    } else {
+                        trace("fillet:  basis align: 网格里找不到这条棱相邻的两个面（沿用存储法线）");
+                    }
+                }
                 // ★ 曲线棱（一条弧 = 一个 EdgeRef + 折线）⇒ 逐段展开 ✓
                 //   直线棱只有一段，行为与以前完全一致。
                 //   同一条曲线的所有段共享 **curveGroup**（求值时合成一个扫掠体）。
@@ -2060,8 +2075,21 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             final Vector3d sd = new Vector3d(sb).sub(sa).normalize();
             final Vector3d segN1 = new Vector3d(n1v).normalize();
-            final Vector3d segN2 = new Vector3d(sd).cross(segN1);
-            if (segN2.lengthSquared() < 1.0e-9) {
+            Vector3d segN2 = new Vector3d(sd).cross(segN1);
+            if (!ref.isCurve() && n2v != null && n2v.lengthSquared() > 1.0e-9) {
+                // ★ 直线棱：用**存下来的第二个真实面法线**（支持非 90° 棱）✓
+                //   dir × n1 只有两个面互相垂直时才等于第二个面法线；
+                //   非 90° 棱会因此把楔块转一个角度（实测"切割体被向外旋转 45°"）✗
+                final Vector3d t2 = new Vector3d(n2v);
+                t2.fma(-t2.dot(sd), sd);
+                if (t2.lengthSquared() > 1.0e-9) {
+                    segN2 = t2.normalize();
+                } else if (segN2.lengthSquared() < 1.0e-9) {
+                    continue;
+                } else {
+                    segN2.normalize();
+                }
+            } else if (segN2.lengthSquared() < 1.0e-9) {
                 if (n2v == null || n2v.lengthSquared() < 1.0e-9) {
                     continue;
                 }

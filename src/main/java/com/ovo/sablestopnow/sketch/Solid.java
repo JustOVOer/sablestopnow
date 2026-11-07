@@ -1760,6 +1760,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         final int[] itemQuads = new int[ni];
         final double[][] itemQd = new double[ni][];
         final double[] itemTheory = new double[ni];
+        final SolidMesh.Mesh[] baseMesh = new SolidMesh.Mesh[1];
         for (int it = 0; it < ni; it++) {
             final int[] rg = items.get(it);
             final int mid = (rg[0] + rg[1] - 1) / 2;
@@ -1776,16 +1777,51 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             itemTheory[it] = theory;
             final double[] e = edges.get(mid);
             // ★ 网格已经给出**精确凸凹**（直线棱）⇒ 象限直接解析求出，不用探针 ✓
-            if (e.length > 15 && ((int) e[15]) >= 0) {
-                final int cv = (int) e[15];
+            //   同一条链里只要有一段带"已知"标记就整条沿用 ✓
+            int knownConvex = -1;
+            for (int i = rg[0]; i < rg[1] && knownConvex < 0; i++) {
+                final double[] t = edges.get(i);
+                if (t.length > 15 && ((int) t[15]) >= 0) {
+                    knownConvex = (int) t[15];
+                }
+            }
+            // ★ 直线棱**没有网格依据时**：先用**当前材料多边形**再判一次（切割产生的棱
+            //   不在源网格里）⇒ 仍判不出才跳过 ✓ 绝不靠探针猜（判反会把补料糊到外面）
+            if (knownConvex < 0 && rg[1] - rg[0] <= 1) {
+                if (baseMesh[0] == null) {
+                    baseMesh[0] = CsgMesh.toMesh(base);
+                }
+                final double[] ee = edges.get(rg[0]);
+                final double[] info2 = FilletCutter.edgeInfo(baseMesh[0],
+                        new Vector3d(ee[0], ee[1], ee[2]),
+                        new Vector3d(ee[3], ee[4], ee[5]));
+                if (info2 != null) {
+                    knownConvex = info2[6] > 0.5 ? 1 : 0;
+                    ee[6] = info2[0];
+                    ee[7] = info2[1];
+                    ee[8] = info2[2];
+                    ee[9] = info2[3];
+                    ee[10] = info2[4];
+                    ee[11] = info2[5];
+                    ee[15] = knownConvex;
+                    trace("fillet:  edgeInfo(material) convex=" + knownConvex
+                            + " f1=(" + fmt(info2[0]) + "," + fmt(info2[1]) + ","
+                            + fmt(info2[2]) + ")");
+                } else {
+                    itemQuads[it] = -3;
+                    log.append(" [f").append(index).append(":no-edgeinfo]");
+                    continue;
+                }
+            }
+            if (knownConvex >= 0) {
                 final double[] qdz = new double[4];
-                qdz[0] = cv == 1 ? -1.0 : 1.0;
+                qdz[0] = knownConvex == 1 ? -1.0 : 1.0;
                 qdz[1] = qdz[0];
-                qdz[2] = cv == 1 ? 0.0 : 1.0;
+                qdz[2] = knownConvex == 1 ? 0.0 : 1.0;
                 qdz[3] = 0.0;
                 itemQd[it] = qdz;
-                itemQuads[it] = cv == 1 ? 1 : 3;
-                trace("fillet:  known convex=" + cv + " q=(" + (int) qdz[0] + ","
+                itemQuads[it] = knownConvex == 1 ? 1 : 3;
+                trace("fillet:  known convex=" + knownConvex + " q=(" + (int) qdz[0] + ","
                         + (int) qdz[1] + ")");
                 continue;
             }
@@ -1814,8 +1850,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             if (itemQuads[it] == 1 || itemQuads[it] == 3) {
                 continue;
             }
-            if (itemQuads[it] == -2) {
-                continue; // 明确不可判定（首段/中间段结论相反）⇒ 不继承、不应用
+            if (itemQuads[it] == -2 || itemQuads[it] == -3) {
+                continue; // 明确不可判定/没有网格依据 ⇒ 不继承、不应用
             }
             boolean inherited = false;
             for (int jt = 0; jt < ni; jt++) {

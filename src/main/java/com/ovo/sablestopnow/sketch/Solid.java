@@ -1052,6 +1052,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     s.body(), k -> new ArrayList<>());
             agg.addAll(bx);
         }
+        for (final java.util.Map.Entry<UUID, List<double[]>> en : bodyProbeBoxes.entrySet()) {
+            trace("fillet: bodyProbe body=" + shortId(en.getKey())
+                    + " boxes=" + en.getValue().size());
+        }
         for (final Solid s2 : solids) {
             if (!(s2.shape() instanceof final Shape.Fillet f)) {
                 continue;
@@ -1338,6 +1342,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     final List<double[]> probeAgg = bodyProbeBoxes.get(solid.body());
                     acc = applyFillets(acc, filletEdgeData, solid.index(), "solid", filletLog,
                             probeAgg != null && !probeAgg.isEmpty() ? probeAgg : probeBoxes);
+                    trace("fillet: applied idx=" + solid.index() + " id=" + shortId(solid.id())
+                            + " polys=" + acc.size() + " " + meshHealth(acc));
                 }
                 if (!filletCuts.isEmpty()) {
                     final List<Csg.Polygon> fb = CsgMesh.fromMesh(
@@ -1413,10 +1419,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         && mesh != null && !mesh.isEmpty()) {
                     List<Csg.Polygon> mp = ensureOutward(CsgMesh.fromMesh(mesh, null));
                     if (!mp.isEmpty()) {
+                        trace("fillet: mirror=" + shortId(mirror.id())
+                                + " edges=" + mirEdges.size()
+                                + " probeBoxes=" + finalBoxes.size());
                         mp = applyFillets(mp, mirEdges, mirror.index(), "mirror", filletLog,
                                 finalBoxes);
                         if (!mp.isEmpty()) {
                             mesh = CsgMesh.toMesh(mp);
+                            trace("fillet: mirror=" + shortId(mirror.id())
+                                    + " polys=" + mp.size() + " " + meshHealth(mp));
                         }
                     }
                 }
@@ -1513,10 +1524,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         }
                         List<Csg.Polygon> pp = ensureOutward(CsgMesh.fromMesh(mesh, null));
                         if (!pp.isEmpty()) {
+                            trace("fillet: pattern=" + shortId(pat.id())
+                                    + " edges=" + moved.size()
+                                    + " probeBoxes=" + finalBoxes.size());
                             pp = applyFillets(pp, moved, pat.index(), "pattern", filletLog,
                                     finalBoxes);
                             if (!pp.isEmpty()) {
                                 mesh = CsgMesh.toMesh(pp);
+                                trace("fillet: pattern=" + shortId(pat.id())
+                                        + " polys=" + pp.size() + " " + meshHealth(pp));
                             }
                         }
                     }
@@ -1718,6 +1734,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
         // ② 每项分类（曲线用中间那段探针）+ 理论体积
         final int ni = items.size();
+        trace("fillet: apply idx=" + index + " edges=" + en + " items=" + ni
+                + " probeBoxes=" + (materialBoxes == null ? 0 : materialBoxes.size())
+                + " useBoxes=" + useBoxes);
         final int[] itemQuads = new int[ni];
         final double[][] itemQd = new double[ni][];
         final double[] itemTheory = new double[ni];
@@ -1838,6 +1857,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 final double sb = Math.max(1.0e-3, Math.min(r, 0.35 * total));
                 pts = FilletCutter.trimPolyline(pts0,
                         taperStart[it] ? sb : 0.0, taperEnd[it] ? sb : 0.0);
+                trace("fillet:  setback idx=" + index + " sb=" + fmt(sb)
+                        + " len=" + fmt(total) + " start=" + taperStart[it]
+                        + " end=" + taperEnd[it] + " trimmed=" + fmt(polylineLength(pts)));
                 if (pts.size() < 2) {
                     log.append(" [f").append(index).append(":cc-short]");
                     continue;
@@ -1938,6 +1960,51 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             log.append(" [fill n=").append(fillWedges.size()).append(']');
         }
         return out;
+    }
+
+    /**
+     * 网格健康度（诊断）✓ —— CSG 之后最值钱的一条：
+     * {@code nan} = 顶点坐标非有限；{@code deg} = 没有平面/退化的多边形。
+     * 这两个数一旦非 0，渲染就会出"贴图消失/破面"。
+     */
+    public static String meshHealth(final List<Csg.Polygon> polys) {
+        int nan = 0;
+        int deg = 0;
+        int zero = 0;
+        if (polys != null) {
+            for (final Csg.Polygon p : polys) {
+                boolean bad = false;
+                for (final Csg.Vertex v : p.vertices) {
+                    final Csg.V3 q = v.pos();
+                    if (!Double.isFinite(q.x()) || !Double.isFinite(q.y())
+                            || !Double.isFinite(q.z())) {
+                        bad = true;
+                        break;
+                    }
+                }
+                if (bad) {
+                    nan++;
+                    continue;
+                }
+                if (p.plane == null) {
+                    deg++;
+                    continue;
+                }
+                final Csg.V3 nn = p.plane.normal;
+                final double nx = nn.x();
+                final double ny = nn.y();
+                final double nz = nn.z();
+                final double len2 = nx * nx + ny * ny + nz * nz;
+                if (!Double.isFinite(nx) || !Double.isFinite(ny) || !Double.isFinite(nz)
+                        || Math.abs(len2 - 1.0) > 0.5) {
+                    deg++;
+                }
+                if (p.vertices.size() < 3) {
+                    zero++;
+                }
+            }
+        }
+        return "nan=" + nan + " deg=" + deg + " lt3=" + zero;
     }
 
     /** 折线总长 ✓（setback/体积估算用） */
@@ -2080,7 +2147,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         return seq;
     }
 
-    /** 合并 + 追加到目标表 ✓ */
+    /** 合并 + 追加到目标表 ✓（同时打诊断：多少段被并成了一条链） */
     private static int mergeInto(final java.util.Map<UUID, List<double[]>> into,
                                  final java.util.Map<UUID, List<double[]>> from,
                                  final int seqIn) {
@@ -2089,10 +2156,32 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             return seq;
         }
         for (final java.util.Map.Entry<UUID, List<double[]>> en : from.entrySet()) {
+            final int before = en.getValue().size();
+            final int gBefore = countGroups(en.getValue());
             seq = mergeRuns(en.getValue(), seq);
+            final int gAfter = countGroups(en.getValue());
+            if (gAfter != gBefore) {
+                trace("fillet:  merge solid=" + shortId(en.getKey())
+                        + " segs=" + before + " groups " + gBefore + "->" + gAfter);
+            }
             into.computeIfAbsent(en.getKey(), k -> new ArrayList<>()).addAll(en.getValue());
         }
         return seq;
+    }
+
+    /** 一组边元组里有多少个"组"（直线棱各算一组）✓ */
+    private static int countGroups(final List<double[]> edges) {
+        int single = 0;
+        final java.util.HashSet<Integer> g = new java.util.HashSet<>();
+        for (final double[] e : edges) {
+            final int gi = curveGroupOf(e);
+            if (gi < 0) {
+                single++;
+            } else {
+                g.add(gi);
+            }
+        }
+        return single + g.size();
     }
 
     /** 边元组的曲线组号（-1 = 直线棱）✓ */

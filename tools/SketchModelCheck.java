@@ -1245,6 +1245,37 @@ public final class SketchModelCheck {
         near(vol, area * len2, "setback: 缩进后扫掠体体积≈截面×长度", 0.2);
     }
 
+    /**
+     * **相邻段合并成链**：旧存档里的曲线棱是"一段一个引用"（48 段 = 48 个小棱柱），
+     * 逐段切既慢又容易在合并互不相交的切割体时把网格弄坏。合并后应共享一个 curveGroup ✓
+     */
+    private static void filletMergeRunsLegacy() {
+        // 三段共线（曲线碎段的典型形态）
+        final java.util.List<double[]> chain = new java.util.ArrayList<>();
+        chain.add(new double[] {0, 0, 0, 0.1, 0, 0, 0, 1, 0, 1, 0, 0, 0.25, -1});
+        chain.add(new double[] {0.1, 0, 0, 0.2, 0, 0.02, 0, 1, 0, 1, 0, 0, 0.25, -1});
+        chain.add(new double[] {0.2, 0, 0.02, 0.3, 0, 0.04, 0, 1, 0, 1, 0, 0, 0.25, -1});
+        com.ovo.sablestopnow.sketch.Solid.mergeRuns(chain, 0);
+        check(chain.get(0)[13] >= 0 && chain.get(0)[13] == chain.get(1)[13]
+                        && chain.get(1)[13] == chain.get(2)[13],
+                "merge-runs: 平滑相接的三段必须共享一个 curveGroup（实际 "
+                        + chain.get(0)[13] + "," + chain.get(1)[13] + ","
+                        + chain.get(2)[13] + "）");
+        // 尖角（90°）不相连
+        final java.util.List<double[]> corner = new java.util.ArrayList<>();
+        corner.add(new double[] {0, 0, 0, 0.1, 0, 0, 0, 1, 0, 1, 0, 0, 0.25, -1});
+        corner.add(new double[] {0.1, 0, 0, 0.1, 0.1, 0, 0, 1, 0, 1, 0, 0, 0.25, -1});
+        com.ovo.sablestopnow.sketch.Solid.mergeRuns(corner, 0);
+        check(corner.get(1)[13] < 0,
+                "merge-runs: 90° 转角处不能并成一条链（实际 " + corner.get(1)[13] + "）");
+        // 不相接（有间隙）也不并
+        final java.util.List<double[]> gap = new java.util.ArrayList<>();
+        gap.add(new double[] {0, 0, 0, 0.1, 0, 0, 0, 1, 0, 1, 0, 0, 0.25, -1});
+        gap.add(new double[] {0.2, 0, 0, 0.3, 0, 0, 0, 1, 0, 1, 0, 0, 0.25, -1});
+        com.ovo.sablestopnow.sketch.Solid.mergeRuns(gap, 0);
+        check(gap.get(1)[13] < 0, "merge-runs: 有间隙的段不能合并");
+    }
+
     private static void near(final double actual, final double expected, final String label) {
         check(Math.abs(actual - expected) < 1e-6,
                 label + ": 期望 " + expected + "，实际 " + actual);
@@ -1282,6 +1313,7 @@ public final class SketchModelCheck {
         cornerBlendGeometry();
         filletSweepCurved();
         filletSetbackTrim();
+        filletMergeRunsLegacy();
         ensureOutwardSign();
         boxMeshWinding();
         filletPrismSolid();

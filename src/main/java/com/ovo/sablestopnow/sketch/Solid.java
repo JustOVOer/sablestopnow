@@ -1061,6 +1061,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     + " edges=" + f.edges().size());
             final java.util.Map<UUID, List<Csg.Polygon>> polysBySrc =
                     new java.util.HashMap<>();
+            // ★ 先按"这个特征自己的引用"收集，再**把首尾相接的相邻段并成一条链** ✓
+            //   旧存档里的曲线棱是"一段一个引用"（48 段 = 48 个楔块）⇒ 逐段切会既慢又
+            //   容易在合并多个互不相交的切割体时把网格弄坏（实测贴图消失/连接处破面）
+            final java.util.Map<UUID, List<double[]>> featSolid = new java.util.HashMap<>();
+            final java.util.Map<UUID, List<double[]>> featMirror = new java.util.HashMap<>();
+            final java.util.Map<UUID, List<double[]>> featPattern = new java.util.HashMap<>();
             for (final Shape.EdgeRef ref : f.edges()) {
                 trace("fillet:  ref solidId=" + shortId(ref.solidId())
                         + " a=(" + fmt(ref.ax()) + "," + fmt(ref.ay()) + "," + fmt(ref.az())
@@ -1088,7 +1094,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                     final int cg = ref.isCurve() ? (++curveGroupSeq) : -1;
                     final boolean isMirror = src.shape instanceof Shape.Mirror;
-                    expandRef(isMirror ? filletEdgeByMirror : filletEdgeByPattern,
+                    expandRef(isMirror ? featMirror : featPattern,
                             src.id(), ref, mn1, mn2, f.radius(), cg, null);
                     trace("fillet:  target=" + (isMirror ? "mirror " : "pattern ")
                             + shortId(src.id()) + " segs=" + (ref.isCurve()
@@ -1170,7 +1176,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 //   直线棱只有一段，行为与以前完全一致。
                 //   同一条曲线的所有段共享 **curveGroup**（求值时合成一个扫掠体）。
                 final java.util.List<Csg.Polygon> prismPolys = new ArrayList<>();
-                expandRef(filletEdgeBySolid, src.id(), ref, nn[0], nn[1], f.radius(),
+                expandRef(featSolid, src.id(), ref, nn[0], nn[1], f.radius(),
                         ref.isCurve() ? (++curveGroupSeq) : -1, prismPolys);
                 trace("fillet:  prism polys=" + prismPolys.size()
                         + " src=" + shortId(src.id()) + " srcBody="
@@ -1179,6 +1185,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 polysBySrc.computeIfAbsent(s2.body(), k -> new ArrayList<>())
                         .addAll(prismPolys);
             }
+            // ★ 把首尾相接、转角平滑的相邻段并成一条链（兼容"一段一个引用"的旧存档）✓
+            curveGroupSeq = mergeInto(filletEdgeBySolid, featSolid, curveGroupSeq);
+            curveGroupSeq = mergeInto(filletEdgeByMirror, featMirror, curveGroupSeq);
+            curveGroupSeq = mergeInto(filletEdgeByPattern, featPattern, curveGroupSeq);
             for (final java.util.Map.Entry<UUID, List<Csg.Polygon>> en : polysBySrc.entrySet()) {
                 filletPolyByBody.computeIfAbsent(en.getKey(), k2 -> new ArrayList<>())
                         .addAll(en.getValue());
@@ -1908,7 +1918,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         // ⑤ 顶点混合 + 统一应用（同类先合并成一个操作数，只做一次布尔）✓
         final List<List<Csg.Polygon>> corners = cornerBlends(cutEdges, log, index);
         if (!cutWedges.isEmpty()) {
-            out = subtractLocal(out, mergeWedges(cutWedges));
+            if (cutWedges.size() <= 4) {
+                out = subtractLocal(out, mergeWedges(cutWedges));
+            } else {
+                // ★ 多个互不相交的切割体先并集再减，BSP 容易出破面/贴图丢失
+                //   （实测"连接处和圆角平行处贴图消失"）⇒ 逐个减更稳 ✓
+                for (final List<Csg.Polygon> w : cutWedges) {
+                    out = subtractLocal(out, w);
+                }
+            }
             log.append(" [cut n=").append(cutWedges.size()).append(']');
         }
         if (!corners.isEmpty()) {
@@ -2002,6 +2020,79 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             e[3] + off[0], e[4] + off[1], e[5] + off[2],
             e[6], e[7], e[8], e[9], e[10], e[11], e[12],
             e.length > 13 ? e[13] : -1};
+    }
+
+    /**
+     * 把一组边元组里**首尾相接且转角平滑**的相邻段并到同一个 curveGroup ✓
+     *
+     * <p>兼容旧存档：那时曲线棱是"一段一个引用"（48 段 = 48 个独立的小棱柱），
+     * 逐段切既慢又容易在合并一堆互不相交的切割体时把网格弄坏（贴图消失/破面）。
+     * 合并后它们变成**一个扫掠体**，和新建的曲线棱完全一致。
+     *
+     * @return 更新后的 curveGroup 计数
+     */
+    public static int mergeRuns(final List<double[]> edges, final int seqIn) {
+        int seq = seqIn;
+        if (edges == null || edges.size() < 2) {
+            return seq;
+        }
+        int group = -1;
+        for (int i = 1; i < edges.size(); i++) {
+            final double[] a = edges.get(i - 1);
+            final double[] b = edges.get(i);
+            final int ga = curveGroupOf(a);
+            final int gb = curveGroupOf(b);
+            // a 必须"还没分组"或"已经在当前这条链里"；b 必须还没分组
+            if ((ga >= 0 && ga != group) || gb >= 0 || !samePoint(a, 3, b, 0)) {
+                group = -1;
+                continue;
+            }
+            final double ax = a[3] - a[0];
+            final double ay = a[4] - a[1];
+            final double az = a[5] - a[2];
+            final double bx = b[3] - b[0];
+            final double by = b[4] - b[1];
+            final double bz = b[5] - b[2];
+            final double la = Math.sqrt(ax * ax + ay * ay + az * az);
+            final double lb = Math.sqrt(bx * bx + by * by + bz * bz);
+            if (la < 1.0e-9 || lb < 1.0e-9) {
+                group = -1;
+                continue;
+            }
+            final double cx = ay * bz - az * by;
+            final double cy = az * bx - ax * bz;
+            final double cz = ax * by - ay * bx;
+            final double sin = Math.sqrt(cx * cx + cy * cy + cz * cz) / (la * lb);
+            if (sin > 0.5) {
+                group = -1;
+                continue;
+            }
+            if (group < 0) {
+                group = ++seq;
+                if (a.length > 13) {
+                    a[13] = group;
+                }
+            }
+            if (b.length > 13) {
+                b[13] = group;
+            }
+        }
+        return seq;
+    }
+
+    /** 合并 + 追加到目标表 ✓ */
+    private static int mergeInto(final java.util.Map<UUID, List<double[]>> into,
+                                 final java.util.Map<UUID, List<double[]>> from,
+                                 final int seqIn) {
+        int seq = seqIn;
+        if (from == null || from.isEmpty()) {
+            return seq;
+        }
+        for (final java.util.Map.Entry<UUID, List<double[]>> en : from.entrySet()) {
+            seq = mergeRuns(en.getValue(), seq);
+            into.computeIfAbsent(en.getKey(), k -> new ArrayList<>()).addAll(en.getValue());
+        }
+        return seq;
     }
 
     /** 边元组的曲线组号（-1 = 直线棱）✓ */

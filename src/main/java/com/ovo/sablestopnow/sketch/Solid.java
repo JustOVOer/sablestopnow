@@ -1805,12 +1805,6 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             if (quads != 1 && quads != 3) {
                 continue;
             }
-            // ★ 凸/凹共顶点的过渡体目前**先跳过**：扫掠锥体在极小半径端会退化，
-            //   接进 CSG 会把网格弄坏（实测"模型崩坏"）。宁可暂时不倒，也不产出垃圾。
-            if (taperStart[it] || taperEnd[it]) {
-                log.append(" [f").append(index).append(":cc-skip]");
-                continue;
-            }
             final int[] rg = items.get(it);
             final double[] qd = itemQd[it];
             final boolean concave = quads == 3;
@@ -1818,27 +1812,32 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final double[] e0 = edges.get(rg[0]);
             final double r = e0[12];
             final Vector3d cap = new Vector3d(e0[6], e0[7], e0[8]).normalize();
-            final boolean tapered = taperStart[it] || taperEnd[it];
-            final double rStart = taperStart[it] ? r * 0.06 : r;
-            final double rEnd = taperEnd[it] ? r * 0.06 : r;
-            double theory = itemTheory[it];
-            if (tapered) {
-                // 半径沿链线性变化 ⇒ ∫r²dt/L = (r0² + r0·r1 + r1²)/3 ✓
-                theory = (r * r - Math.PI * r * r / 4.0) * curveLength(edges, rg)
-                        * ((rStart * rStart + rStart * rEnd + rEnd * rEnd)
-                        / (3.0 * r * r));
+            // ★ 凸/凹共顶点 ⇒ **setback（让位）**：两条圆角都停在离顶点 r 处
+            //   （不超过链长的 35%）⇒ 中间留一段原棱，不再有锥形极小半径端，
+            //   也不会有两个方向相反的圆角面硬接（SolidWorks 默认就是这样处理的）✓
+            final boolean cc = taperStart[it] || taperEnd[it];
+            final List<Vector3d> pts0 = new ArrayList<>(rg[1] - rg[0] + 1);
+            pts0.add(new Vector3d(e0[0], e0[1], e0[2]));
+            for (int i = rg[0]; i < rg[1]; i++) {
+                final double[] ei = edges.get(i);
+                pts0.add(new Vector3d(ei[3], ei[4], ei[5]));
             }
-            final List<Csg.Polygon> wedge;
-            if (curve || tapered) {
-                // 扫掠：整条弧一个封闭楔块（过渡时半径沿链线性变化）✓
-                final List<Vector3d> pts = new ArrayList<>(rg[1] - rg[0] + 1);
-                pts.add(new Vector3d(e0[0], e0[1], e0[2]));
-                for (int i = rg[0]; i < rg[1]; i++) {
-                    final double[] ei = edges.get(i);
-                    pts.add(new Vector3d(ei[3], ei[4], ei[5]));
+            List<Vector3d> pts = pts0;
+            if (cc) {
+                final double total = polylineLength(pts0);
+                final double sb = Math.max(1.0e-3, Math.min(r, 0.35 * total));
+                pts = FilletCutter.trimPolyline(pts0,
+                        taperStart[it] ? sb : 0.0, taperEnd[it] ? sb : 0.0);
+                if (pts.size() < 2) {
+                    log.append(" [f").append(index).append(":cc-short]");
+                    continue;
                 }
+            }
+            final double theory = (r * r - Math.PI * r * r / 4.0) * polylineLength(pts);
+            final List<Csg.Polygon> wedge;
+            if (curve || cc) {
                 final double[] eMid = edges.get((rg[0] + rg[1] - 1) / 2);
-                final List<Vector3d[]> tris = FilletCutter.sweep(pts, cap, rStart, rEnd,
+                final List<Vector3d[]> tris = FilletCutter.sweep(pts, cap, r,
                         (int) Math.round(qd[0]), (int) Math.round(qd[1]));
                 if (tris == null || tris.isEmpty()) {
                     log.append(" [f").append(index).append(":sweep-empty]");
@@ -1863,7 +1862,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             trace("fillet:  quads=" + quads + "/4 pattern=" + (int) qd[3]
                     + " -> " + (concave ? "concave(fill)" : "convex(cut)")
                     + " idx=" + index + (curve ? " sweepSegs=" + (rg[1] - rg[0]) : "")
-                    + (tapered ? " taper" : ""));
+                    + (cc ? " setback" : ""));
             final double wedgeVol = Math.abs(polysVolume(wedge));
             if (wedgeVol > theory * 6.0 + 1.0e-3 || wedgeVol < theory * 0.25) {
                 log.append(" [f").append(index).append(":size ")
@@ -1892,9 +1891,14 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             } else {
                 cutWedges.add(wedge);
                 // 顶点混合的候选：曲线只取**两端**的段（内部关节是平滑的，不需要角球）
+                // ★ 与相反分类共顶点的那一端**不做角球**：那里改用 setback 过渡 ✓
                 final int[] ends = curve
                         ? new int[] {rg[0], rg[1] - 1} : new int[] {rg[0]};
                 for (final int ei : ends) {
+                    final boolean isStart = ei == rg[0];
+                    if ((isStart && taperStart[it]) || (!isStart && taperEnd[it])) {
+                        continue;
+                    }
                     final double[] e = edges.get(ei);
                     cutEdges.add(new double[] {e[0], e[1], e[2], e[3], e[4], e[5],
                         e[6], e[7], e[8], e[9], e[10], e[11], e[12]});
@@ -1916,6 +1920,18 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             log.append(" [fill n=").append(fillWedges.size()).append(']');
         }
         return out;
+    }
+
+    /** 折线总长 ✓（setback/体积估算用） */
+    private static double polylineLength(final List<Vector3d> pts) {
+        double total = 0.0;
+        if (pts == null) {
+            return total;
+        }
+        for (int i = 1; i < pts.size(); i++) {
+            total += pts.get(i).distance(pts.get(i - 1));
+        }
+        return total;
     }
 
     /** 一组边元组的总长度 ✓（过渡半径的体积估算用） */

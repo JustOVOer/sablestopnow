@@ -2580,20 +2580,32 @@ public final class ModelUi {
             final org.joml.Vector3d n2 = first.n2() == null
                     ? new org.joml.Vector3d(1, 0, 0) : first.n2();
             final double[] qd = gqd[i];
-            final boolean tapered = tStart[i] || tEnd[i];
-            final double r0 = tStart[i] ? radius * 0.06 : radius;
-            final double r1 = tEnd[i] ? radius * 0.06 : radius;
-            final java.util.List<org.joml.Vector3d[]> tris;
-            if (g.size() > 1 || tapered) {
-                final java.util.List<org.joml.Vector3d> pts =
-                        new java.util.ArrayList<>(g.size() + 1);
+            // ★ 凸/凹共顶点 ⇒ setback：与求值侧完全同一套缩进 ✓
+            final boolean cc = tStart[i] || tEnd[i];
+            java.util.List<org.joml.Vector3d> pts =
+                    new java.util.ArrayList<>(g.size() + 1);
+            pts.add(new org.joml.Vector3d(
+                    first.seg()[0], first.seg()[1], first.seg()[2]));
+            for (final FilletPick pick : g) {
                 pts.add(new org.joml.Vector3d(
-                        first.seg()[0], first.seg()[1], first.seg()[2]));
-                for (final FilletPick pick : g) {
-                    pts.add(new org.joml.Vector3d(
-                            pick.seg()[3], pick.seg()[4], pick.seg()[5]));
+                        pick.seg()[3], pick.seg()[4], pick.seg()[5]));
+            }
+            if (cc) {
+                double total = 0.0;
+                for (int kk2 = 1; kk2 < pts.size(); kk2++) {
+                    total += pts.get(kk2).distance(pts.get(kk2 - 1));
                 }
-                tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts, n1, r0, r1,
+                final double sb = Math.max(1.0e-3, Math.min(radius, 0.35 * total));
+                pts = com.ovo.sablestopnow.sketch.FilletCutter.trimPolyline(pts,
+                        tStart[i] ? sb : 0.0, tEnd[i] ? sb : 0.0);
+                if (pts.size() < 2) {
+                    skipped++;
+                    continue;
+                }
+            }
+            final java.util.List<org.joml.Vector3d[]> tris;
+            if (g.size() > 1 || cc) {
+                tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts, n1, radius,
                         (int) Math.round(qd[0]), (int) Math.round(qd[1]));
             } else {
                 final org.joml.Vector3d m1 = new org.joml.Vector3d(n1).mul(-qd[0]);

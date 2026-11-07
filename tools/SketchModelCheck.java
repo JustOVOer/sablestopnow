@@ -1198,6 +1198,53 @@ public final class SketchModelCheck {
         }
     }
 
+    /**
+     * **setback（让位）**：凸/凹共顶点时两条圆角各缩进一段 ✓（SolidWorks 的默认处理）
+     *
+     * <p>缩进必须按**弧长**插值，且缩太多（≥80%）时返回空 ⇒ 调用方跳过，不产出垃圾。
+     */
+    private static void filletSetbackTrim() {
+        final java.util.List<org.joml.Vector3d> line = java.util.List.of(
+                new org.joml.Vector3d(0, 0, 0), new org.joml.Vector3d(2, 0, 0));
+        final java.util.List<org.joml.Vector3d> t1 =
+                com.ovo.sablestopnow.sketch.FilletCutter.trimPolyline(line, 0.3, 0.5);
+        check(t1.size() == 2, "setback: 直线缩进后仍是 2 点（实际 " + t1.size() + "）");
+        if (t1.size() == 2) {
+            near(t1.get(0).x, 0.3, "setback: 起点缩进 0.3");
+            near(t1.get(1).x, 1.5, "setback: 终点缩进 0.5（2−0.5）");
+        }
+        // 弧链：按弧长缩进后长度 = 原长 − 两端缩进
+        final java.util.List<org.joml.Vector3d> arc = new java.util.ArrayList<>();
+        final double radius = 1.0;
+        for (int i = 0; i <= 20; i++) {
+            final double th = 0.5 * Math.PI * i / 20.0;
+            arc.add(new org.joml.Vector3d(radius * Math.cos(th), radius * Math.sin(th), 0));
+        }
+        final double arcLen = Math.PI * 0.5 * radius;
+        final java.util.List<org.joml.Vector3d> t2 =
+                com.ovo.sablestopnow.sketch.FilletCutter.trimPolyline(arc, 0.2, 0.2);
+        check(t2.size() >= 2, "setback: 弧缩进后仍有点（实际 " + t2.size() + "）");
+        double len2 = 0.0;
+        for (int i = 1; i < t2.size(); i++) {
+            len2 += t2.get(i).distance(t2.get(i - 1));
+        }
+        near(len2, arcLen - 0.4, "setback: 弧缩进后长度 = 原长 − 两端缩进", 0.02);
+        // 缩太多 ⇒ 空表（调用方跳过）
+        final java.util.List<org.joml.Vector3d> t3 =
+                com.ovo.sablestopnow.sketch.FilletCutter.trimPolyline(line, 0.9, 0.9);
+        check(t3.isEmpty(), "setback: 两端缩进超过 80% 必须返回空（实际 " + t3.size() + "）");
+        // 缩进后的扫掠体仍是封闭流形
+        final java.util.List<org.joml.Vector3d[]> tris =
+                com.ovo.sablestopnow.sketch.FilletCutter.sweep(t2,
+                        new org.joml.Vector3d(0, 0, 1), 0.15, 1, 1);
+        check(tris != null && !tris.isEmpty(), "setback: 缩进后的扫掠体非空");
+        check(!hasNonManifoldEdge(tris), "setback: 缩进后的扫掠体必须封闭");
+        final double vol = Math.abs(volume(
+                com.ovo.sablestopnow.sketch.Solid.triPolys(tris)));
+        final double area = 0.15 * 0.15 - Math.PI * 0.15 * 0.15 / 4.0;
+        near(vol, area * len2, "setback: 缩进后扫掠体体积≈截面×长度", 0.2);
+    }
+
     private static void near(final double actual, final double expected, final String label) {
         check(Math.abs(actual - expected) < 1e-6,
                 label + ": 期望 " + expected + "，实际 " + actual);
@@ -1234,6 +1281,7 @@ public final class SketchModelCheck {
         curveChainMerging();
         cornerBlendGeometry();
         filletSweepCurved();
+        filletSetbackTrim();
         ensureOutwardSign();
         boxMeshWinding();
         filletPrismSolid();

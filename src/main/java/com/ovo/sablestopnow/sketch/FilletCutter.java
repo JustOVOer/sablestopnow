@@ -321,6 +321,73 @@ public final class FilletCutter {
     }
 
     /**
+     * 把折线两端各**缩进**一段弧长 ✓（SolidWorks 的 setback/让位做法）
+     *
+     * <p>凸/凹圆角在一个顶点相交时，让两条圆角都**停在离顶点 setback 距离处**，
+     * 中间留出一段不处理的原棱 —— 这样不会产生锥形的极小半径端（会退化、弄坏 CSG），
+     * 也不需要两个方向相反的圆角面在顶点处硬接。
+     *
+     * @param startInset 起点缩进（格）；0 = 不缩
+     * @param endInset   终点缩进（格）
+     * @return 缩进后的折线；缩完不足两点时返回空表（调用方跳过该棱）
+     */
+    public static List<Vector3d> trimPolyline(final List<Vector3d> pts,
+                                              final double startInset, final double endInset) {
+        final List<Vector3d> out = new ArrayList<>();
+        if (pts == null || pts.size() < 2) {
+            return out;
+        }
+        if (startInset <= 1.0e-9 && endInset <= 1.0e-9) {
+            for (final Vector3d p : pts) {
+                out.add(new Vector3d(p));
+            }
+            return out;
+        }
+        final int n = pts.size();
+        final double[] cum = new double[n];
+        for (int i = 1; i < n; i++) {
+            cum[i] = cum[i - 1] + pts.get(i).distance(pts.get(i - 1));
+        }
+        final double total = cum[n - 1];
+        if (total <= 1.0e-9) {
+            return out;
+        }
+        final double s = Math.max(0.0, startInset);
+        final double e = Math.max(0.0, endInset);
+        if (s + e >= total * 0.8) {
+            return out;
+        }
+        out.add(pointAt(pts, cum, s));
+        for (int i = 0; i < n; i++) {
+            if (cum[i] > s + 1.0e-9 && cum[i] < total - e - 1.0e-9) {
+                out.add(new Vector3d(pts.get(i)));
+            }
+        }
+        out.add(pointAt(pts, cum, total - e));
+        return out;
+    }
+
+    /** 折线上的点（按累计弧长）✓ */
+    private static Vector3d pointAt(final List<Vector3d> pts, final double[] cum,
+                                    final double dist) {
+        if (dist <= 0.0) {
+            return new Vector3d(pts.get(0));
+        }
+        final int n = pts.size();
+        if (dist >= cum[n - 1]) {
+            return new Vector3d(pts.get(n - 1));
+        }
+        for (int i = 1; i < n; i++) {
+            if (dist <= cum[i]) {
+                final double seg = cum[i] - cum[i - 1];
+                final double t = seg <= 1.0e-12 ? 0.0 : (dist - cum[i - 1]) / seg;
+                return new Vector3d(pts.get(i - 1)).lerp(pts.get(i), t);
+            }
+        }
+        return new Vector3d(pts.get(n - 1));
+    }
+
+    /**
      * **预览用**：圆角的两条切线与圆弧折线 ✓（与 {@link #section} 同一套数学，保证预览不骗人）
      */
     public static List<Vector3d[]> outline(final Vector3dc a, final Vector3dc b,

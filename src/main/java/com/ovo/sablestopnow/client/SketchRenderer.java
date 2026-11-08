@@ -205,6 +205,11 @@ public final class SketchRenderer {
         final List<Solid.Placed> solids = SolidClientState.placed(level);
         // ★ 只有**真的在编辑草图**才虚化模型、关掉模型面拾取 ✓（选基准面阶段不虚化 ✓）
         final boolean sketching = SketchClient.editing();
+        // ★ bug 15 自愈：退出草图后 editingId 若还留着（工具切换等路径漏清），
+        //   这张草图会一直被当成“工作草图” ⇒ 完全定义绿/辅助线虚线常驻 ✗
+        if (!sketching && editingId != null) {
+            editingId = null;
+        }
         // ★ item 2：每帧从配置刷新颜色（8 次解析，开销可忽略）✓
         reloadColors();
         // ★ 模型视图：每帧更新"面/棱/点"的悬停拾取 ✓（画草图时不拾取模型面 ✓）
@@ -742,7 +747,10 @@ public final class SketchRenderer {
         // 被选中的图元用另一个颜色画，否则"选中了但看不出选中了"。
         // ⚠ 要按**整个选择集**判断，不能只比"是不是那一个" —— 多选之后
         // 只有第一个会变色，玩家会以为 Ctrl 没生效。
-        final boolean isWorking = editingId != null && editingId.equals(sketch.id());
+        // ★ bug 15：只看「真的在编辑」，不看可能残留的 editingId ——
+        //   否则退出草图后这张草图仍按“工作草图”上色（完全定义绿）✗
+        final boolean isWorking = SketchClient.editing()
+                && editingId != null && editingId.equals(sketch.id());
         final var session = isWorking ? SketchClient.mode().session() : null;
         // 鼠标指到的图元：高亮它，并在它的关键点（端点/中点/圆心）上打标识。
         // 这两种反馈是玩家"确认自己对到哪里"的唯一依据 —— 没有它，画线时完全是盲的。
@@ -874,7 +882,8 @@ public final class SketchRenderer {
         //   以前这里是 `continue` 跳过、全靠 HUD 那层屏幕空间虚线 ✗
         //   ⇒ 那层没画（投影失败/被裁/被别的层盖住）时，辅助线就"看不见"或"看着是实线" ✓
         //   ⇒ 现在改在世界空间画虚线段 ✓ 与实体线同一套投影 ⇒ 必然对齐 ✓
-        lines += drawConstruction(vc, pose, cameraPos, renderPose, sketch, session, hovered);
+        lines += drawConstruction(vc, pose, cameraPos, renderPose, sketch, session, hovered,
+                isWorking);
         return lines;
     }
 
@@ -888,7 +897,8 @@ public final class SketchRenderer {
                                         final Vec3 cameraPos, final Pose3dc renderPose,
                                         final Sketch sketch,
                                         final SketchSession session,
-                                        final Sketch.Entity hovered) {
+                                        final Sketch.Entity hovered,
+                                        final boolean dashed) {
         int drawn = 0;
         for (final Sketch.Entity entity : sketch.entities()) {
             if (!sketch.isConstruction(entity)) {
@@ -923,8 +933,9 @@ public final class SketchRenderer {
                     // ★ 修实测"辅助线还是实线" ✗ —— 原来虚线段只有 0.10 格（≈几像素），
                     //   空隙 0.07 格 ⇒ 肉眼基本连成一条实线 ✓
                     //   ⇒ 改成与推理虚线同一档（0.35 实 / 0.25 空）✓
-                    final double dash = 0.35;
-                    final double gap = 0.25;
+                    // ★ bug 15：只有「正在编辑」才是虚线；退出草图后画**实线** ✓
+                    final double dash = dashed ? 0.35 : 1.0e9;
+                    final double gap = dashed ? 0.25 : 0.0;
                     double at = 0.0;
                     while (at < len) {
                         final double end = Math.min(len, at + dash);
@@ -945,7 +956,7 @@ public final class SketchRenderer {
                     if (r < 1.0e-9) {
                         continue;
                     }
-                    for (int i = 0; i < CIRCLE_SEGMENTS; i += 2) {
+                    for (int i = 0; i < CIRCLE_SEGMENTS; i += dashed ? 2 : 1) {
                         final double a0 = 2.0 * Math.PI * i / CIRCLE_SEGMENTS;
                         final double a1 = 2.0 * Math.PI * (i + 1) / CIRCLE_SEGMENTS;
                         line(vc, pose,
@@ -961,7 +972,7 @@ public final class SketchRenderer {
                     final double sweep = sketch.arcSweep(entity);
                     final int segs = Math.max(4,
                             (int) Math.ceil(CIRCLE_SEGMENTS * Math.abs(sweep) / (2.0 * Math.PI)));
-                    for (int i = 0; i < segs; i += 2) {
+                    for (int i = 0; i < segs; i += dashed ? 2 : 1) {
                         final double[] p0 = sketch.arcPoint(entity, (double) i / segs);
                         final double[] p1 = sketch.arcPoint(entity, (double) (i + 1) / segs);
                         if (p0 == null || p1 == null) {

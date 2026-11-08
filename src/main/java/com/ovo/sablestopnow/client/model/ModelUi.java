@@ -5286,6 +5286,13 @@ public final class ModelUi {
     }
 
     public static void startTool(final String toolId) {
+        // ★ bug 15：切到**非草图**工具时，把还开着的草图会话收尾。
+        //   以前只有 PLANE/FILLET/MIRROR/PATTERN 会退出草图；切到别的工具时会话还活着
+        //   ⇒ 那张草图一直被当成“工作草图”渲染：完全定义绿 + 辅助线虚线常驻（用户实测）✗
+        if (!ModelTools.SKETCH.equals(toolId)
+                && com.ovo.sablestopnow.client.SketchClient.active()) {
+            com.ovo.sablestopnow.client.SketchClient.finish();
+        }
         // ★ 进任何工具都先退出“编辑已有特征”的上下文：
         //   否则在编辑拉伸A时点“圆角”，新建的圆角会被当成“更新拉伸A”（灾难性串味）。
         editingSolidId = null;

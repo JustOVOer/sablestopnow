@@ -177,57 +177,132 @@ public final class FilletCutter {
     }
 
     /**
-     * 链上每个关节的半径表 = 常数 r，**凸/凹相交的那一端做 runout**（半径线性收到 ~8%）✓
+     * runout 的**链 + 半径表** ✓（半径收小必须只占端点附近 r 的一小段）
      *
-     * <p>为什么必须收：凸/凹混合顶点上，两条圆角面其实**相切于同一张面**（凸棱的球在面下、
-     * 凹棱的球在面上，两个圆柱在面上那一点相切）。所以正确的收尾不是"让位"（会留一段原棱，
-     * 用户实测"什么都没做"），也不是平切一刀（会留一个可见的端面台阶），
-     * 而是**圆角面平顺地跑出到那张面上** —— 半径沿链收到接近 0，面自然贴合 ✓
+     * <h2>为什么不能只给"原始点"配半径（实测事故）</h2>
+     * 直线棱只有 2 个点 ⇒ 半径表只有 [rMin, r] 两项 ⇒ 扫掠体是**整条棱的锥体**，
+     * 用户看到的就是"整个圆角都是斜的"。必须在**离端点 tl 处插一个分段点**，
+     * 让"锥形收尾"只占 tl 那一小段，其余整段仍是等半径圆角 ✓
      *
-     * <p>闭合链没有端点，不做 runout（那要用角补面，不是一回事）。
+     * <p>tl = min(r, 50% 链长)：正常就是 r 的范围（用户要求）；棱太短时才退化成整条锥形。
+     * 闭合链没有端点，不做 runout。
+     */
+    public static final class Runout {
+        public final List<Vector3d> points;
+        public final double[] radii;
+        public final double taperLen;
+
+        Runout(final List<Vector3d> points, final double[] radii, final double taperLen) {
+            this.points = points;
+            this.radii = radii;
+            this.taperLen = taperLen;
+        }
+    }
+
+    /**
+     * 生成 runout 的链与半径表（见类注释）✓
      *
-     * @param pts        链点
+     * @param pts        原始链点
      * @param r          全半径
      * @param taperStart 起点做 runout（起点 = 凸/凹公共顶点）
      * @param taperEnd   终点做 runout
-     * @return 与 pts 一一对应的半径
      */
-    public static double[] radiusProfile(final List<Vector3d> pts, final double r,
-                                         final boolean taperStart, final boolean taperEnd) {
-        if (pts == null || pts.isEmpty()) {
-            return new double[0];
+    public static Runout runoutProfile(final List<Vector3d> pts, final double r,
+                                       final boolean taperStart, final boolean taperEnd) {
+        final List<Vector3d> base = new ArrayList<>();
+        if (pts != null) {
+            for (final Vector3d p : pts) {
+                if (base.isEmpty()
+                        || base.get(base.size() - 1).distanceSquared(p) > 1.0e-12) {
+                    base.add(new Vector3d(p));
+                }
+            }
         }
-        final int n = pts.size();
-        final double[] out = new double[n];
-        java.util.Arrays.fill(out, r);
-        if (n < 2 || (!taperStart && !taperEnd)) {
-            return out;
+        if (base.size() < 2) {
+            final double[] rr = new double[base.size()];
+            java.util.Arrays.fill(rr, r);
+            return new Runout(base, rr, 0.0);
         }
-        // 闭合链 = 没有端点 ⇒ 不跑出
-        if (n > 2 && pts.get(0).distanceSquared(pts.get(n - 1)) < 1.0e-10) {
-            return out;
+        final boolean closed = base.size() > 2
+                && base.get(0).distanceSquared(base.get(base.size() - 1)) < 1.0e-10;
+        if (closed || (!taperStart && !taperEnd)) {
+            final double[] rr = new double[base.size()];
+            java.util.Arrays.fill(rr, r);
+            return new Runout(base, rr, 0.0);
         }
-        final double[] cum = new double[n];
-        for (int i = 1; i < n; i++) {
-            cum[i] = cum[i - 1] + pts.get(i).distance(pts.get(i - 1));
-        }
-        final double total = cum[n - 1];
+        final double total = polyLength(base);
         if (total < 1.0e-9) {
-            return out;
+            final double[] rr = new double[base.size()];
+            java.util.Arrays.fill(rr, r);
+            return new Runout(base, rr, 0.0);
         }
-        final double tl = Math.min(r, 0.40 * total);
+        final double tl = Math.min(r, 0.5 * total);
         final double rMin = Math.max(0.01, 0.08 * r);
-        for (int i = 0; i < n; i++) {
+        List<Vector3d> out = base;
+        // ★ 关键：把"全半径开始的位置"插成真正的点，锥形才不会占满整条棱
+        if (taperStart) {
+            out = insertAtDistance(out, tl);
+        }
+        if (taperEnd && total - tl > tl + 1.0e-9) {
+            out = insertAtDistance(out, total - tl);
+        }
+        final double[] cum = new double[out.size()];
+        for (int i = 1; i < out.size(); i++) {
+            cum[i] = cum[i - 1] + out.get(i).distance(out.get(i - 1));
+        }
+        final double tot = cum[cum.length - 1];
+        final double[] radii = new double[out.size()];
+        for (int i = 0; i < out.size(); i++) {
             double radius = r;
             if (taperStart) {
                 radius = Math.min(radius, runoutRadius(cum[i], tl, r, rMin));
             }
             if (taperEnd) {
-                radius = Math.min(radius, runoutRadius(total - cum[i], tl, r, rMin));
+                radius = Math.min(radius, runoutRadius(tot - cum[i], tl, r, rMin));
             }
-            out[i] = radius;
+            radii[i] = radius;
         }
-        return out;
+        return new Runout(out, radii, tl);
+    }
+
+    /** 只要半径表（原始点上的值；测试/诊断用，实际求值请用 {@link #runoutProfile}）✓ */
+    public static double[] radiusProfile(final List<Vector3d> pts, final double r,
+                                         final boolean taperStart, final boolean taperEnd) {
+        return runoutProfile(pts, r, taperStart, taperEnd).radii;
+    }
+
+    /** 在距起点 d 的弧长处插一个点（已存在则原样返回）✓ */
+    private static List<Vector3d> insertAtDistance(final List<Vector3d> pts, final double d) {
+        if (pts == null || pts.size() < 2 || d <= 1.0e-9) {
+            return pts;
+        }
+        final List<Vector3d> res = new ArrayList<>(pts.size() + 1);
+        double acc = 0.0;
+        boolean inserted = false;
+        for (int i = 0; i < pts.size(); i++) {
+            if (i > 0) {
+                final Vector3d a = pts.get(i - 1);
+                final Vector3d b = pts.get(i);
+                final double seg = a.distance(b);
+                if (!inserted && seg > 1.0e-12 && acc + seg > d + 1.0e-9) {
+                    final double t = Math.max(0.0, Math.min(1.0, (d - acc) / seg));
+                    res.add(new Vector3d(a).lerp(b, t));
+                    inserted = true;
+                }
+                acc += seg;
+            }
+            res.add(pts.get(i));
+        }
+        return res;
+    }
+
+    /** 折线总长 ✓ */
+    private static double polyLength(final List<Vector3d> pts) {
+        double total = 0.0;
+        for (int i = 1; i < pts.size(); i++) {
+            total += pts.get(i).distance(pts.get(i - 1));
+        }
+        return total;
     }
 
     /** runout：距离端点 d 处的半径（d ≥ tl ⇒ 全半径）✓ */

@@ -2678,11 +2678,13 @@ public final class ModelUi {
                                 first.seg()[4] - first.seg()[1],
                                 first.seg()[5] - first.seg()[2]),
                         (int) Math.round(qd[1]));
-                // ★ runout 与求值侧同一套：cc 端半径收到 ~8% ✓
-                final double[] radii = com.ovo.sablestopnow.sketch.FilletCutter
-                        .radiusProfile(pts, radius, tStart[i], tEnd[i]);
-                tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts, n1, radii,
-                        q1i, q2i);
+                // ★ runout 与求值侧同一套：cc 端半径收到 ~8%，并且在离顶点 tl 处
+                //   **插分段点**（否则直线棱整条都成锥形 ⇒ "整个圆角都是斜的"）✓
+                final com.ovo.sablestopnow.sketch.FilletCutter.Runout runout =
+                        com.ovo.sablestopnow.sketch.FilletCutter.runoutProfile(
+                                pts, radius, tStart[i], tEnd[i]);
+                tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(
+                        runout.points, n1, runout.radii, q1i, q2i);
             } else {
                 final org.joml.Vector3d m1 = new org.joml.Vector3d(n1).mul(-qd[0]);
                 final org.joml.Vector3d m2 = new org.joml.Vector3d(n2).mul(-qd[1]);

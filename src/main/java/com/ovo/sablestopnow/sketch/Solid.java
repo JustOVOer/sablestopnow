@@ -1935,17 +1935,20 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 final double[] ei = edges.get(i);
                 pts0.add(new Vector3d(ei[3], ei[4], ei[5]));
             }
-            final List<Vector3d> pts = pts0;
-            // ★ runout：凸/凹相交的那一端把半径沿链收到 ~8%
-            //   （不是"让位"——那会留一段原棱；也不是平切——那会留端面台阶）
-            final double[] radii = FilletCutter.radiusProfile(pts, r,
+            // ★ runout 的链 + 半径表：**在离顶点 tl 处插分段点**，让锥形收尾只占 tl 那一小段
+            //   （不插点的话直线棱只有 2 个点 ⇒ 整条棱都变成锥体，用户实测"整个圆角都是斜的"）
+            final FilletCutter.Runout runout = FilletCutter.runoutProfile(pts0, r,
                     taperStart[it], taperEnd[it]);
+            final List<Vector3d> pts = runout.points;
+            final double[] radii = runout.radii;
             if (cc) {
                 double rMin = r;
                 for (final double rr : radii) {
                     rMin = Math.min(rMin, rr);
                 }
-                trace("fillet:  cc-runout idx=" + index + " len=" + fmt(polylineLength(pts0))
+                trace("fillet:  cc-runout idx=" + index + " pts=" + pts.size()
+                        + " len=" + fmt(polylineLength(pts0))
+                        + " tl=" + fmt(runout.taperLen)
                         + " start=" + taperStart[it] + " end=" + taperEnd[it]
                         + " rMin=" + fmt(rMin));
             }

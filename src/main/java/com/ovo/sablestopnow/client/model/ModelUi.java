@@ -4482,14 +4482,19 @@ public final class ModelUi {
                   }
               }
               // ★ 已有**基准面特征**可直接作镜像面 ✓
+              // ⚠ 必须**只列当前结构自己的基准面**：以前遍历的是整个维度的实体
+              //   ⇒ 别的结构上的基准面也会出现在列表里（序号还会重名，出现两个"基准面5"），
+              //   点下去把 mirrorBody 改成另一条结构 ⇒ 选了没用（用户实测）。
               {
                   final net.minecraft.client.Minecraft mc0 =
                           net.minecraft.client.Minecraft.getInstance();
                   final net.minecraft.world.level.Level lv = mc0 == null ? null : mc0.level;
-                  if (lv != null) {
+                  final java.util.UUID planeBody = mirrorBody != null ? mirrorBody
+                          : ModelMode.selectedModel();
+                  if (lv != null && planeBody != null) {
                       for (final com.ovo.sablestopnow.sketch.Solid sd
-                              : com.ovo.sablestopnow.sketch.SolidClientState.in(
-                                      lv.dimension().location())) {
+                              : com.ovo.sablestopnow.sketch.SolidClientState
+                                      .ofBody(lv, planeBody)) {
                           if (!(sd.shape()
                                   instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane pl)) {
                               continue;

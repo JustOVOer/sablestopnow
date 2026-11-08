@@ -111,6 +111,23 @@ public final class CsgMesh {
         if (polys == null) {
             return new SolidMesh.Mesh(vs, new int[0]);
         }
+        // ★★ UV 回退必须用**相对原点**：
+        //   模型局部坐标在 2e7 量级，直接拿 px/py/pz 当 UV（方块量纲）会得到 ~2e7 的 UV。
+        //   顶点 UV 最终传给显卡是 float（~7 位有效数字）⇒ 2e7 处**小数部分全丢**！
+        //   采样时 UV 的小数部分恒定 ⇒ 整面是**一个 texel 的纯色**（用户实测
+        //   "贴图变成纯色，像是被错误拉伸"）。用第一个顶点做原点后 UV 只剩 ~0..100 ✓
+        double uvOx = 0.0;
+        double uvOy = 0.0;
+        double uvOz = 0.0;
+        for (final Csg.Polygon p0 : polys) {
+            if (p0.vertices.size() >= 3) {
+                final Csg.V3 q = p0.vertices.get(0).pos();
+                uvOx = q.x();
+                uvOy = q.y();
+                uvOz = q.z();
+                break;
+            }
+        }
         for (final Csg.Polygon p : polys) {
             final List<Csg.Vertex> verts = p.vertices;
             if (verts.size() < 3) {
@@ -153,14 +170,14 @@ public final class CsgMesh {
                     u = v.uv().x();
                     vv = v.uv().y();
                 } else if (axis == 0) {
-                    u = pz;
-                    vv = py;
+                    u = pz - uvOz;
+                    vv = py - uvOy;
                 } else if (axis == 1) {
-                    u = px;
-                    vv = pz;
+                    u = px - uvOx;
+                    vv = pz - uvOz;
                 } else {
-                    u = px;
-                    vv = py;
+                    u = px - uvOx;
+                    vv = py - uvOy;
                 }
                 vs.add(new SolidMesh.Vertex(
                         new Vector3d(px, py, pz), new Vector3d(n), u, vv));

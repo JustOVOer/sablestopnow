@@ -248,6 +248,24 @@ public final class SolidMesh {
         if (boxes == null) {
             return new Mesh(vs, new int[0]);
         }
+        // ★★ UV 原点必须在**局部**（所有盒子的最小角）：
+        //   模型局部坐标在 2e7 量级，直接把 pos 当 UV ⇒ 顶点 UV ≈ 2e7，
+        //   传给显卡是 float（~7 位有效数字）⇒ 小数位全丢 ⇒ 整面采样到**同一个 texel**
+        //   ⇒ 贴图变成纯色/被错误拉伸（用户实测）。相对原点后 UV 只有 0..尺寸 ✓
+        final double[] uvOrigin = {Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE};
+        for (final double[] b : boxes) {
+            if (b == null || b.length < 6) {
+                continue;
+            }
+            for (int k = 0; k < 3; k++) {
+                uvOrigin[k] = Math.min(uvOrigin[k], b[k]);
+            }
+        }
+        for (int k = 0; k < 3; k++) {
+            if (!Double.isFinite(uvOrigin[k])) {
+                uvOrigin[k] = 0.0;
+            }
+        }
         for (final double[] b : boxes) {
             if (b == null || b.length < 6
                     || b[3] - b[0] < 1.0e-9 || b[4] - b[1] < 1.0e-9 || b[5] - b[2] < 1.0e-9) {
@@ -273,7 +291,8 @@ public final class SolidMesh {
                         pos[a1] = o[0] == 0 ? b[a1] : b[a1 + 3];
                         pos[a2] = o[1] == 0 ? b[a2] : b[a2 + 3];
                         vs.add(new Vertex(new Vector3d(pos[0], pos[1], pos[2]),
-                                new Vector3d(n[0], n[1], n[2]), pos[a1], pos[a2]));
+                                new Vector3d(n[0], n[1], n[2]),
+                                pos[a1] - uvOrigin[a1], pos[a2] - uvOrigin[a2]));
                     }
                     idx.add(base);
                     idx.add(base + 1);

@@ -1965,6 +1965,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     + " -> " + (concave ? "concave(fill)" : "convex(cut)")
                     + " idx=" + index + (curve ? " sweepSegs=" + (rg[1] - rg[0]) : "")
                     + (cc ? " setback" : ""));
+            // ★ 楔块必须**封闭**：扫掠/棱柱一旦出现裂口/自交，CSG 会把它当成"内部"
+            //   ⇒ 减出来就是"把整行都切掉"、贴图坏（实测）。不封闭 ⇒ 宁可不倒 ✓
+            if (!isClosed(wedge)) {
+                log.append(" [f").append(index).append(":not-closed]");
+                continue;
+            }
             final double wedgeVol = Math.abs(polysVolume(wedge));
             if (wedgeVol > theory * 6.0 + 1.0e-3 || wedgeVol < theory * 0.25) {
                 log.append(" [f").append(index).append(":size ")
@@ -2075,6 +2081,37 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
         }
         return "nan=" + nan + " deg=" + deg + " lt3=" + zero;
+    }
+
+    /** 一组多边形是否**封闭**（每条无向边恰好被两个多边形共用）✓ —— 圆角楔块的入场券 */
+    public static boolean isClosed(final List<Csg.Polygon> polys) {
+        if (polys == null || polys.size() < 4) {
+            return false;
+        }
+        final java.util.HashMap<String, Integer> ec = new java.util.HashMap<>();
+        for (final Csg.Polygon p : polys) {
+            final List<Csg.Vertex> vs = p.vertices;
+            if (vs.size() < 3) {
+                return false;
+            }
+            for (int i = 0; i < vs.size(); i++) {
+                final String a = vkey(vs.get(i).pos());
+                final String b = vkey(vs.get((i + 1) % vs.size()).pos());
+                final String k = a.compareTo(b) <= 0 ? a + "|" + b : b + "|" + a;
+                ec.merge(k, 1, Integer::sum);
+            }
+        }
+        for (final int c : ec.values()) {
+            if (c != 2) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String vkey(final Csg.V3 v) {
+        return Math.round(v.x() * 1000.0) + "," + Math.round(v.y() * 1000.0) + ","
+                + Math.round(v.z() * 1000.0);
     }
 
     /** 折线总长 ✓（setback/体积估算用） */

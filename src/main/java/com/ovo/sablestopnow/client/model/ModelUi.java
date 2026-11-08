@@ -2681,8 +2681,23 @@ public final class ModelUi {
             }
             final java.util.List<org.joml.Vector3d[]> tris;
             if (g.size() > 1 || cc) {
+                // ★ 与求值侧**同一套** q2 归一：q2 是相对存档里的 n2，而扫掠的第二轴是
+                //   (tan×cap) ⇒ 两者反向时取负，否则预览的楔块会落到另一个象限 ✓
+                int q1i = (int) Math.round(qd[0]);
+                int q2i = (int) Math.round(qd[1]);
+                final org.joml.Vector3d tan0 = new org.joml.Vector3d(
+                        first.seg()[3] - first.seg()[0],
+                        first.seg()[4] - first.seg()[1],
+                        first.seg()[5] - first.seg()[2]);
+                if (tan0.lengthSquared() > 1.0e-12) {
+                    final org.joml.Vector3d side0 =
+                            tan0.cross(n1, new org.joml.Vector3d());
+                    if (side0.dot(n2) < 0.0) {
+                        q2i = -q2i;
+                    }
+                }
                 tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts, n1, radius,
-                        (int) Math.round(qd[0]), (int) Math.round(qd[1]));
+                        q1i, q2i);
             } else {
                 final org.joml.Vector3d m1 = new org.joml.Vector3d(n1).mul(-qd[0]);
                 final org.joml.Vector3d m2 = new org.joml.Vector3d(n2).mul(-qd[1]);

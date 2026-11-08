@@ -609,6 +609,56 @@ public final class SketchModelCheck {
     }
 
     /**
+     * **开链扫掠体（有端盖）：闭合 + 绕序一致 + 体积≈理论** —— "圆角切掉整行"回归 ✓
+     *
+     * <p>实测事故：`sweep` 两端封口写成**朝内** ⇒ 有向体积只剩 AL/3
+     * （0.008008 vs 0.024023），而它拓扑上仍然闭合（`isClosed` 通过）⇒ CSG 拿到
+     * "一半面朝里"的壳 ⇒ 减出来把整行材料吃掉、贴图崩坏。
+     * 这里用日志里真实的一条**凸/凹相交处的直线棱**（本体上的那条）复现。
+     */
+    private static void filletSweepOpenCaps() {
+        final double ox = 20481033.381;
+        final double oy = 129.545;
+        final double oz = 20530186.000;
+        final double r = 0.25;
+        final double len = 1.75; // setback 之后剩下的长度
+        final java.util.List<org.joml.Vector3d> pts = new java.util.ArrayList<>();
+        pts.add(new org.joml.Vector3d(ox, oy, oz));
+        pts.add(new org.joml.Vector3d(ox, oy, oz - len));
+        final double theory = (r * r - Math.PI * r * r / 4.0) * len;
+        for (final int[] q : new int[][] {{1, 1}, {-1, -1}}) {
+            final java.util.List<org.joml.Vector3d[]> tris =
+                    com.ovo.sablestopnow.sketch.FilletCutter.sweep(
+                            pts, new org.joml.Vector3d(0, 1, 0), r, q[0], q[1]);
+            check(tris != null && !tris.isEmpty(),
+                    "sweep-open: 三角面不能为空 q=(" + q[0] + "," + q[1] + ")");
+            final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> poly =
+                    com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                            com.ovo.sablestopnow.sketch.Solid.triPolys(tris));
+            check(com.ovo.sablestopnow.sketch.Solid.isClosed(poly),
+                    "sweep-open: 楔块必须封闭 q=(" + q[0] + "," + q[1] + ")");
+            check(com.ovo.sablestopnow.sketch.Solid.isOriented(poly),
+                    "sweep-open: 绕序必须一致朝外 q=(" + q[0] + "," + q[1] + ")");
+            final double vol = Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(poly));
+            pathlib_Diag("sweep-open q=(" + q[0] + "," + q[1] + ") vol=" + vol
+                    + " theory=" + theory);
+            check(Math.abs(vol - theory) < theory * 0.15,
+                    "sweep-open: 体积必须≈理论（" + vol + " vs " + theory + "）q=("
+                            + q[0] + "," + q[1] + ")");
+        }
+        // 对照：同一条棱用 prism（直线棱的老做法）⇒ 两条构造路径必须对得上
+        final java.util.List<org.joml.Vector3d[]> pr =
+                com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                        pts.get(0), pts.get(1), new org.joml.Vector3d(0, -1, 0),
+                        new org.joml.Vector3d(-1, 0, 0), r);
+        final double pv = Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.Solid.triPolys(pr))));
+        check(Math.abs(pv - theory) < theory * 0.15,
+                "sweep-open: prism 对照体积必须≈理论（" + pv + " vs " + theory + "）");
+    }
+
+    /**
      * **曲线棱的扫掠体** ✓（曲线棱 = 整条弧一个楔块，不是逐段棱柱）
      *
      * <p>逐段棱柱在弧的关节处会留楔形空隙（用户实测"每个小圆角之间有间隙"）。
@@ -977,6 +1027,82 @@ public final class SketchModelCheck {
         check(Math.abs(resVolAbs - expect) < Math.max(2.0e-3, expect * 0.02),
                 "world-scale: 2e7 处 盒−楔块 必须≈盒体积−楔块体积（"
                         + resVolAbs + " vs " + expect + "）");
+    }
+
+    /**
+     * **多块楔块：逐个减 vs 先并集再减** —— "圆角把整行材料吃掉"的回归 ✓
+     *
+     * <p>用户实测：本体上一条**直线凸棱**在凸/凹棱相交的顶点处倒圆后，整行材料消失。
+     * 那一组刚好 4 块楔块 ⇒ 走 `mergeWedges`（先 CSG 并集再减）分支；5 块以上反而
+     * 逐个减 ⇒ 没坏。这里用"三条共顶点的凸棱"把两种做法量出体积对比。
+     */
+    private static void filletMultiEdgeUnion() {
+        final double ox = 20481032.0;
+        final double oy = 130.0;
+        final double oz = 20530186.0;
+        final double r = 0.25;
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> base =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(
+                                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(
+                                        java.util.List.of(new double[] {ox, oy, oz,
+                                                ox + 2, oy + 1, oz + 2})), null));
+        final double boxVol = Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(base));
+        // 三条凸棱共顶点 (ox+2, oy, oz+2)；法线 = 各自的**朝外**面法线
+        final java.util.List<java.util.List<org.joml.Vector3d[]>> tris =
+                new java.util.ArrayList<>();
+        tris.add(com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                new org.joml.Vector3d(ox + 2, oy, oz + 2),
+                new org.joml.Vector3d(ox + 2, oy + 1, oz + 2),
+                new org.joml.Vector3d(1, 0, 0), new org.joml.Vector3d(0, 0, 1), r));
+        tris.add(com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                new org.joml.Vector3d(ox + 2, oy, oz + 2),
+                new org.joml.Vector3d(ox, oy, oz + 2),
+                new org.joml.Vector3d(0, -1, 0), new org.joml.Vector3d(0, 0, 1), r));
+        tris.add(com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                new org.joml.Vector3d(ox + 2, oy, oz + 2),
+                new org.joml.Vector3d(ox + 2, oy, oz),
+                new org.joml.Vector3d(1, 0, 0), new org.joml.Vector3d(0, -1, 0), r));
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> lb =
+                shiftPolys(base, -ox, -oy, -oz);
+        final java.util.List<java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon>> ws =
+                new java.util.ArrayList<>();
+        double wedgeSum = 0.0;
+        for (final java.util.List<org.joml.Vector3d[]> t : tris) {
+            final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> w =
+                    shiftPolys(com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                            com.ovo.sablestopnow.sketch.Solid.triPolys(t)), -ox, -oy, -oz);
+            check(!w.isEmpty(), "多棱圆角: 楔块三角面不能为空");
+            wedgeSum += Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(w));
+            ws.add(w);
+        }
+        // ① 逐个减（现在 >4 块时的做法，也是我们想统一采用的做法）
+        java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> seq = lb;
+        for (final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> w : ws) {
+            seq = com.ovo.sablestopnow.sketch.csg.Csg.subtract(seq, w);
+        }
+        final double seqRemoved = boxVol - Math.abs(
+                com.ovo.sablestopnow.sketch.Solid.polysVolume(shiftPolys(seq, ox, oy, oz)));
+        // ② 先并集再减（旧 mergeWedges 路径）
+        java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> merged = ws.get(0);
+        for (int i = 1; i < ws.size(); i++) {
+            merged = com.ovo.sablestopnow.sketch.csg.Csg.union(merged, ws.get(i));
+        }
+        final double mergedWedgeVol = Math.abs(
+                com.ovo.sablestopnow.sketch.Solid.polysVolume(merged));
+        final double mergedRemoved = boxVol - Math.abs(
+                com.ovo.sablestopnow.sketch.Solid.polysVolume(
+                        shiftPolys(com.ovo.sablestopnow.sketch.csg.Csg.subtract(lb, merged),
+                                ox, oy, oz)));
+        pathlib_Diag("multi-edge union: box=" + boxVol + " wedgeSum=" + wedgeSum
+                + " seqRemoved=" + seqRemoved + " mergedWedgeVol=" + mergedWedgeVol
+                + " mergedRemoved=" + mergedRemoved);
+        check(seqRemoved > wedgeSum * 0.5 && seqRemoved < wedgeSum * 1.2,
+                "多棱圆角: 逐个减的去除量必须≈楔块总体积（" + seqRemoved
+                        + " vs " + wedgeSum + "）");
+        check(Math.abs(mergedRemoved - seqRemoved) < 0.02,
+                "多棱圆角: 并集再减的去除量必须与逐个减一致（" + mergedRemoved
+                        + " vs " + seqRemoved + "）");
     }
 
     /**
@@ -1352,6 +1478,7 @@ public final class SketchModelCheck {
         curveChainMerging();
         cornerBlendGeometry();
         filletSweepCurved();
+        filletSweepOpenCaps();
         filletSetbackTrim();
         filletMergeRunsLegacy();
         filletEdgeInfo();
@@ -1359,6 +1486,7 @@ public final class SketchModelCheck {
         boxMeshWinding();
         filletPrismSolid();
         worldScaleVolumes();
+        filletMultiEdgeUnion();
         worldScalePointInside();
         topoRefsBasics();
         triPolysReal();

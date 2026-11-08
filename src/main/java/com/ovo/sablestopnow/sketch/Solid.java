@@ -1899,6 +1899,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         final List<List<Csg.Polygon>> cutWedges = new ArrayList<>();
         final List<List<Csg.Polygon>> fillWedges = new ArrayList<>();
         final List<double[]> cutEdges = new ArrayList<>();
+        // ★ 每块操作数的**理论体积 + 起点**（逐个应用时要量"实际去除量"，超了立刻退回）
+        final List<Double> cutTh = new ArrayList<>();
+        final List<Double> fillTh = new ArrayList<>();
+        final List<double[]> cutDbg = new ArrayList<>();
+        final List<double[]> fillDbg = new ArrayList<>();
         for (int it = 0; it < ni; it++) {
             final int quads = itemQuads[it];
             if (quads != 1 && quads != 3) {
@@ -1935,12 +1940,47 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     continue;
                 }
             }
-            final double theory = (r * r - Math.PI * r * r / 4.0) * polylineLength(pts);
+            final double lenPts = polylineLength(pts);
+            final double theory = (r * r - Math.PI * r * r / 4.0) * lenPts;
+            // ★ 折痕指标：2·r·sin(θ/2)/最短相邻段 ⇒ >1 说明"局部曲率半径 < r"，
+            //   扫掠体必然自交（SolidWorks 这时会判"半径过大"）。只记日志，最后一道
+            //   体积门会把它拦下来 ✓
+            double fold = 0.0;
+            for (int i2 = 1; i2 + 1 < pts.size(); i2++) {
+                final Vector3d d0 = new Vector3d(pts.get(i2)).sub(pts.get(i2 - 1));
+                final Vector3d d1 = new Vector3d(pts.get(i2 + 1)).sub(pts.get(i2));
+                final double l0 = d0.length();
+                final double l1 = d1.length();
+                if (l0 < 1.0e-9 || l1 < 1.0e-9) {
+                    continue;
+                }
+                final double c2 = Math.max(-1.0, Math.min(1.0, d0.dot(d1) / (l0 * l1)));
+                fold = Math.max(fold, 2.0 * r * Math.sqrt(Math.max(0.0, (1.0 - c2) * 0.5))
+                        / Math.min(l0, l1));
+            }
+            trace("fillet:  item=" + it + " segs=" + (rg[1] - rg[0]) + " pts=" + pts.size()
+                    + " curve=" + curve + " cc=" + cc + " len=" + fmt(lenPts)
+                    + " fold=" + fmt(fold)
+                    + " q=(" + (int) Math.round(qd[0]) + "," + (int) Math.round(qd[1]) + ")"
+                    + " a=(" + fmt(e0[0]) + "," + fmt(e0[1]) + "," + fmt(e0[2]) + ")"
+                    + " b=(" + fmt(e0[3]) + "," + fmt(e0[4]) + "," + fmt(e0[5]) + ")");
             final List<Csg.Polygon> wedge;
             if (curve || cc) {
                 final double[] eMid = edges.get((rg[0] + rg[1] - 1) / 2);
-                final List<Vector3d[]> tris = FilletCutter.sweep(pts, cap, r,
-                        (int) Math.round(qd[0]), (int) Math.round(qd[1]));
+                // ★ q2 是相对**存档里的 n2**，而扫掠的第二轴是 (tan×cap) ⇒ 两者可能反向
+                //   （n2 的顺序来自网格三角形的遍历顺序，不是由我们定的）。
+                //   不归一就会把楔块建到"另一个象限"⇒ 切掉相邻那一行材料 ✗
+                int q1i = (int) Math.round(qd[0]);
+                int q2i = (int) Math.round(qd[1]);
+                final Vector3d tan0 = new Vector3d(e0[3] - e0[0], e0[4] - e0[1],
+                        e0[5] - e0[2]);
+                if (tan0.lengthSquared() > 1.0e-12) {
+                    final Vector3d side0 = tan0.cross(cap, new Vector3d());
+                    if (side0.dot(new Vector3d(e0[9], e0[10], e0[11])) < 0.0) {
+                        q2i = -q2i;
+                    }
+                }
+                final List<Vector3d[]> tris = FilletCutter.sweep(pts, cap, r, q1i, q2i);
                 if (tris == null || tris.isEmpty()) {
                     log.append(" [f").append(index).append(":sweep-empty]");
                     continue;
@@ -1971,14 +2011,26 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 log.append(" [f").append(index).append(":not-closed]");
                 continue;
             }
-            final double wedgeVol = Math.abs(polysVolume(wedge));
-            if (wedgeVol > theory * 6.0 + 1.0e-3 || wedgeVol < theory * 0.25) {
-                log.append(" [f").append(index).append(":size ")
-                        .append(String.format(java.util.Locale.ROOT, "%.3f", wedgeVol))
-                        .append('/').append(String.format(java.util.Locale.ROOT, "%.3f", theory))
-                        .append(']');
+            // ★ 闭合还不够：**绕序必须一致朝外**。实测事故：端盖绕序写反 ⇒ 拓扑闭合
+            //   但有向体积只剩 1/3 ⇒ CSG 把整行吃掉（`isClosed` 拦不住，见 isOriented）
+            if (!isOriented(wedge)) {
+                log.append(" [f").append(index).append(":wind]");
                 continue;
             }
+            final double wedgeVol = Math.abs(polysVolume(wedge));
+            final double volRatio = wedgeVol / Math.max(1.0e-12, theory);
+            // ★ 体积门要紧：实测正确楔块在 1.02~1.12×理论（8 段圆弧内接的差），
+            //   一旦明显偏离就是自交/退化，绝不能让它进 CSG ✓
+            if (volRatio > 1.8 || volRatio < 0.7) {
+                log.append(" [f").append(index).append(":size ")
+                        .append(String.format(java.util.Locale.ROOT, "%.4f", wedgeVol))
+                        .append('/').append(String.format(java.util.Locale.ROOT, "%.4f", theory))
+                        .append(" r=").append(fmt(volRatio)).append(']');
+                continue;
+            }
+            trace("fillet:  wedge it=" + it + " vol=" + fmt(wedgeVol) + " th=" + fmt(theory)
+                    + " ratio=" + fmt(volRatio) + " in=" + fmt(
+                            Math.abs(polysVolume(intersectLocal(out, wedge)))));
             final List<Csg.Polygon> material = out;
             final double inVol = Math.abs(polysVolume(intersectLocal(material, wedge)));
             final double outVol = Math.max(0.0, wedgeVol - inVol);
@@ -1994,10 +2046,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     .append(String.format(java.util.Locale.ROOT, "%.4f/%.4f/%.4f",
                             inVol, outVol, theory))
                     .append(curve ? " c" : "").append(ok ? " ok]" : " ?!]");
+            final double[] dbg = new double[] {e0[0], e0[1], e0[2], e0[3], e0[4], e0[5]};
             if (concave) {
                 fillWedges.add(wedge);
+                fillTh.add(theory);
+                fillDbg.add(dbg);
             } else {
                 cutWedges.add(wedge);
+                cutTh.add(theory);
+                cutDbg.add(dbg);
                 // 顶点混合的候选：曲线只取**两端**的段（内部关节是平滑的，不需要角球）
                 // ★ 与相反分类共顶点的那一端**不做角球**：那里改用 setback 过渡 ✓
                 final int[] ends = curve
@@ -2013,27 +2070,87 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
             }
         }
-        // ⑤ 顶点混合 + 统一应用（同类先合并成一个操作数，只做一次布尔）✓
-        final List<List<Csg.Polygon>> corners = cornerBlends(cutEdges, log, index);
+        // ⑤ 顶点混合 + **逐个**应用（永不先把多块并成一个操作数）
+        //
+        //   ✗ 旧做法 `mergeWedges`（CSG 并集再减）：多条棱共顶点时并集会产生共面/相切
+        //     的碎片，BSP 判内外出错 ⇒ 减出来把整行吃掉（用户实测"直线棱在凸凹相交处
+        //     切掉一整行"）。
+        //   ✓ 现在：一块一块减，并对**每一次**操作量"材料体积实际掉了多少"——
+        //     超出这块圆角自己的体积（×2.5）就立刻**退回**这一块，只留日志。
+        final List<Double> cornerTh = new ArrayList<>();
+        final List<List<Csg.Polygon>> corners = cornerBlends(cutEdges, cornerTh, log, index);
         if (!cutWedges.isEmpty()) {
-            if (cutWedges.size() <= 4) {
-                out = subtractLocal(out, mergeWedges(cutWedges));
-            } else {
-                // ★ 多个互不相交的切割体先并集再减，BSP 容易出破面/贴图丢失
-                //   （实测"连接处和圆角平行处贴图消失"）⇒ 逐个减更稳 ✓
-                for (final List<Csg.Polygon> w : cutWedges) {
-                    out = subtractLocal(out, w);
-                }
-            }
-            log.append(" [cut n=").append(cutWedges.size()).append(']');
+            out = applyOperands(out, cutWedges, cutTh, cutDbg, false, index, log);
         }
         if (!corners.isEmpty()) {
-            out = subtractLocal(out, mergeWedges(corners));
-            log.append(" [corner n=").append(corners.size()).append(']');
+            out = applyOperands(out, corners, cornerTh, null, false, index, log);
         }
         if (!fillWedges.isEmpty()) {
-            out = unionLocal(out, mergeWedges(fillWedges));
-            log.append(" [fill n=").append(fillWedges.size()).append(']');
+            out = applyOperands(out, fillWedges, fillTh, fillDbg, true, index, log);
+        }
+        return out;
+    }
+
+    /**
+     * **逐个**把一堆操作数作用到材料上，并量**真实体积变化** ✓
+     *
+     * <p>这是最后一道保险：一个"拓扑闭合但自交/绕序坏"的楔块，`polysVolume` 可能只偏一点，
+     * 但真正做布尔时会把整块材料判成"外部"⇒ 一次就去掉几十倍体积。这里用
+     * {@code |V(after)| − |V(before)|} 直接量 ⇒ 超预算就**退回**这一块（宁可少倒一条棱，
+     * 也不能把模型吃掉）。
+     *
+     * @param union true = 补料（凹棱），false = 切料（凸棱）
+     */
+    private static List<Csg.Polygon> applyOperands(final List<Csg.Polygon> mat,
+                                                   final List<List<Csg.Polygon>> ops,
+                                                   final List<Double> theory,
+                                                   final List<double[]> dbg,
+                                                   final boolean union,
+                                                   final int index,
+                                                   final StringBuilder log) {
+        List<Csg.Polygon> out = mat;
+        double totalTh = 0.0;
+        double totalDelta = 0.0;
+        int reverted = 0;
+        for (int i = 0; i < ops.size(); i++) {
+            final double v0 = Math.abs(polysVolume(out));
+            final List<Csg.Polygon> next = union
+                    ? unionLocal(out, ops.get(i)) : subtractLocal(out, ops.get(i));
+            final double v1 = Math.abs(polysVolume(next));
+            final double delta = union ? (v1 - v0) : (v0 - v1);
+            final double th = theory != null && i < theory.size() && theory.get(i) != null
+                    ? theory.get(i) : 0.0;
+            totalTh += th;
+            // 预算：这块圆角最多挪走它自己的体积（实测 1.02~1.12×）。给 2.5 倍余量
+            // （多棱重叠时"实际去除"只会更小，不会更大），再加 0.02 的绝对兜底
+            // 抵消多边形体积积分的噪声。
+            final double budget = Math.max(th * 2.5, th + 0.02);
+            if (th > 0.0 && delta > budget) {
+                reverted++;
+                log.append(" [f").append(index).append(union ? ":fill-over " : ":overcut ")
+                        .append(String.format(java.util.Locale.ROOT, "%.4f", delta))
+                        .append('/').append(String.format(java.util.Locale.ROOT, "%.4f", th));
+                if (dbg != null && i < dbg.size() && dbg.get(i) != null) {
+                    final double[] d = dbg.get(i);
+                    log.append(" a=(").append(fmt(d[0])).append(',').append(fmt(d[1]))
+                            .append(',').append(fmt(d[2])).append(')');
+                }
+                log.append(']');
+                continue; // ★ 不应用这一块
+            }
+            out = next;
+            totalDelta += delta;
+        }
+        log.append(union ? " [fill n=" : " [cut n=").append(ops.size());
+        if (reverted > 0) {
+            log.append(" rev=").append(reverted);
+        }
+        log.append(']');
+        // 总账（诊断用）：实际总变化 vs 理论总和。差值大 ⇒ 有操作数在乱切/乱补
+        if (totalTh > 0.0) {
+            trace("fillet:  " + (union ? "fill" : "cut") + " idx=" + index
+                    + " n=" + ops.size() + " rev=" + reverted
+                    + " delta=" + fmt(totalDelta) + " th=" + fmt(totalTh));
         }
         return out;
     }
@@ -2112,6 +2229,46 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     private static String vkey(final Csg.V3 v) {
         return Math.round(v.x() * 1000.0) + "," + Math.round(v.y() * 1000.0) + ","
                 + Math.round(v.z() * 1000.0);
+    }
+
+    /**
+     * 一组多边形是否**绕序一致且朝外**（每条有向边恰好出现一次、反向边也恰好一次）✓
+     *
+     * <p>为什么 `isClosed` 不够 ✗✓：实测事故里楔块**拓扑闭合**（每条无向边正好两个面），
+     * 但**端盖绕序写反** ⇒ 有向体积只剩 1/3，CSG 把它当"里外一半颠倒"的壳
+     * ⇒ 差集把整行材料吃掉、贴图崩坏。这个函数专门拦这种"闭合但朝向乱"的体。
+     */
+    public static boolean isOriented(final List<Csg.Polygon> polys) {
+        if (polys == null || polys.size() < 4) {
+            return false;
+        }
+        final java.util.HashMap<String, Integer> dir = new java.util.HashMap<>();
+        for (final Csg.Polygon p : polys) {
+            final List<Csg.Vertex> vs = p.vertices;
+            if (vs.size() < 3) {
+                return false;
+            }
+            for (int i = 0; i < vs.size(); i++) {
+                final String a = vkey(vs.get(i).pos());
+                final String b = vkey(vs.get((i + 1) % vs.size()).pos());
+                if (a.equals(b)) {
+                    return false; // 退化边
+                }
+                dir.merge(a + "|" + b, 1, Integer::sum);
+            }
+        }
+        for (final java.util.Map.Entry<String, Integer> e : dir.entrySet()) {
+            if (e.getValue() != 1) {
+                return false; // 同向重复 ⇒ 面重叠/绕序冲突
+            }
+            final String k = e.getKey();
+            final int sep = k.indexOf('|');
+            final String rev = k.substring(sep + 1) + '|' + k.substring(0, sep);
+            if (!Integer.valueOf(1).equals(dir.get(rev))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 折线总长 ✓（setback/体积估算用） */
@@ -2364,6 +2521,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      * 不再各切各的、在角上留尖刺 ✓
      */
     private static List<List<Csg.Polygon>> cornerBlends(final List<double[]> cutEdges,
+                                                        final List<Double> thOut,
                                                         final StringBuilder log,
                                                         final int index) {
         final List<List<Csg.Polygon>> out = new ArrayList<>();
@@ -2453,6 +2611,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final List<Csg.Polygon> blend = cornerBlend(vp, n1, n2, n3, r);
             if (!blend.isEmpty()) {
                 out.add(blend);
+                // 理论体积 = 角块 − 球缺 = r³(1−π/6)（实测 0.476r³）
+                if (thOut != null) {
+                    thOut.add(r * r * r * (1.0 - Math.PI / 6.0));
+                }
             }
         }
         if (!out.isEmpty()) {

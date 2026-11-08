@@ -297,27 +297,73 @@ public final class FilletCutter {
             }
         }
         final int rings = closed ? m : m - 1;
+        // ★★ 管壁绕序必须**朝外**（实测事故：端盖绕序写反 ⇒ 整个楔块的有向体积只剩
+        //    1/3（AL/3）。`polysVolume` 看着"偏小但像那么回事"，而 CSG 拿到一个
+        //    "一半面朝里"的封闭壳 ⇒ BSP 内外判错 ⇒ **减掉整行材料**、贴图崩坏。
+        //    它拓扑上仍是闭合的（每条边正好两个面）⇒ `isClosed` 拦不住。
+        //    实测：同一条棱 prism=0.024215 / 旧 sweep=0.008008（正好 1/3）。
+        //    截面在 (e1,e2) 里绕序固定 ⇒ 管壁朝外 ⇔ (e1×e2)·路径方向 > 0；
+        //    q1=-q2 时手性会翻过来，所以这里**按几何判**，不能硬编码。
+        final Vector3d e1v = new Vector3d(n).mul(q1);
+        final Vector3d e2v = new Vector3d(tan[0]).cross(n).normalize().mul(q2);
+        final boolean tubeOut = new Vector3d(e1v).cross(e2v).dot(tan[0]) >= 0;
         for (int i = 0; i < rings; i++) {
             final List<Vector3d> a = sections.get(i);
             final List<Vector3d> b = sections.get((i + 1) % m);
             for (int j = 0; j < k; j++) {
                 final int j2 = (j + 1) % k;
-                out.add(new Vector3d[] {a.get(j), b.get(j), b.get(j2)});
-                out.add(new Vector3d[] {a.get(j), b.get(j2), a.get(j2)});
+                if (tubeOut) {
+                    out.add(new Vector3d[] {a.get(j), b.get(j), b.get(j2)});
+                    out.add(new Vector3d[] {a.get(j), b.get(j2), a.get(j2)});
+                } else {
+                    out.add(new Vector3d[] {a.get(j), b.get(j2), b.get(j)});
+                    out.add(new Vector3d[] {a.get(j), a.get(j2), b.get(j2)});
+                }
             }
         }
         if (!closed) {
             // 两端封口（扇形；截面关于角点星形 ⇒ 用 0 号点扇开）
-            final List<Vector3d> s0 = sections.get(0);
-            for (int j = 1; j + 1 < k; j++) {
-                out.add(new Vector3d[] {s0.get(0), s0.get(j + 1), s0.get(j)});
-            }
-            final List<Vector3d> s1 = sections.get(m - 1);
-            for (int j = 1; j + 1 < k; j++) {
-                out.add(new Vector3d[] {s1.get(0), s1.get(j), s1.get(j + 1)});
-            }
+            // 绕序**由几何决定**（算出扇形法线与"朝外方向"比对），不靠起点/终点的
+            // 正序反序硬编码：上面已经把管壁强制朝外，所以这里外部法线就是
+            // 起点 −tan、终点 +tan ✓
+            addCap(out, sections.get(0), new Vector3d(tan[0]).negate());
+            addCap(out, sections.get(m - 1), new Vector3d(tan[m - 1]));
         }
         return out;
+    }
+
+    /**
+     * 用扇形给扫掠体封口，**绕序自动朝外** ✓
+     *
+     * @param out     三角面输出
+     * @param s       截面点（从角点开始、按截面顺序）
+     * @param outward 该端盖的**朝外**方向（起点 −路径方向、终点 +路径方向）
+     */
+    private static void addCap(final List<Vector3d[]> out, final List<Vector3d> s,
+                               final Vector3d outward) {
+        if (s == null || s.size() < 3) {
+            return;
+        }
+        final int k = s.size();
+        Vector3d nrm = null;
+        for (int j = 1; j + 1 < k && nrm == null; j++) {
+            final Vector3d c = new Vector3d(s.get(j)).sub(s.get(0))
+                    .cross(new Vector3d(s.get(j + 1)).sub(s.get(0)));
+            if (c.lengthSquared() > 1.0e-18) {
+                nrm = c;
+            }
+        }
+        if (nrm == null) {
+            return;
+        }
+        final boolean fwd = nrm.dot(outward) >= 0.0;
+        for (int j = 1; j + 1 < k; j++) {
+            if (fwd) {
+                out.add(new Vector3d[] {s.get(0), s.get(j), s.get(j + 1)});
+            } else {
+                out.add(new Vector3d[] {s.get(0), s.get(j + 1), s.get(j)});
+            }
+        }
     }
 
     /**

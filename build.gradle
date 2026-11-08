@@ -82,7 +82,9 @@ neoForge {
             client()
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
-
+            // ★ 客户端堆固定 6G（用户要求）：模型/镜像/阵列的网格与 CSG 数据量不小，
+            //   默认堆在反复进出草图/复制大体量特征时容易 GC 抖动。
+            jvmArguments.addAll '-Xmx6G'
         }
 
         server {

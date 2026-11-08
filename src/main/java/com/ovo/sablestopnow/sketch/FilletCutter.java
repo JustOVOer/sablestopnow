@@ -177,7 +177,29 @@ public final class FilletCutter {
     }
 
     /**
-     * **沿一条折线**扫出圆角楔块 ✓（曲线棱专用：整条弧一个整体，不是逐段棱柱）
+     * 把象限符号从**存档 n2 基**换算到**扫掠第二轴基**（{@code tan×cap}）✓
+     *
+     * <p>扫掠体的第二轴是 {@code side = tan×cap}，它和存档里的 n2 只差一个符号
+     * （取决于棱的方向和网格三角形的遍历顺序）。不换算就会把楔块建到**另一个象限**
+     * ⇒ 切掉相邻那一行材料（实测）。预览和求值必须共用这一个函数 ✓
+     *
+     * @param cap     盖面法线（= 参考法线 n1，单位向量）
+     * @param n2      存档里的第二个面法线
+     * @param tangent 棱/链首段方向（不必归一）
+     * @param q2      相对 n2 的象限符号（±1）
+     * @return 相对 {@code tan×cap} 的象限符号
+     */
+    public static int sweepQ2(final Vector3dc cap, final Vector3dc n2,
+                              final Vector3dc tangent, final int q2) {
+        final Vector3d side = new Vector3d(tangent).cross(cap);
+        if (side.lengthSquared() < 1.0e-12) {
+            return q2;
+        }
+        return side.dot(n2) < 0.0 ? -q2 : q2;
+    }
+
+    /**
+     * 沿一条折线**扫出圆角楔块** ✓（曲线棱专用：整条弧一个整体，不是逐段棱柱）
      *
      * <p>逐段棱柱在弧形上会在相邻段之间留下**楔形空隙**（用户实测"每个小圆角之间有间隙"）；
      * 扫掠体在关节处用**角平分面**（miter）连接 ⇒ 整条弧是连续的一根圆角 ✓

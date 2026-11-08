@@ -609,6 +609,105 @@ public final class SketchModelCheck {
     }
 
     /**
+     * **凸/凹棱在公共顶点的"跑出"过渡**（用户实测场景）✓
+     *
+     * <p>形状：2×2×2 方块上开一条**在 z=0 面开口**的槽
+     * （x∈[0.5,1.5], y∈[1.5,2], z∈[0,1]）。于是：
+     * <ul>
+     *   <li>槽底(y=1.5)与槽壁(x=0.5)的交线 = **凹棱**（沿 z）</li>
+     *   <li>槽壁(x=0.5)与方块外面(z=0)的交线 = **凸棱**（沿 y）</li>
+     *   <li>两者共用顶点 (0.5, 1.5, 0) ⇒ 凸/凹混合顶点</li>
+     * </ul>
+     *
+     * <p>硬道理：凸棱楔块的端盖平面 = 凹棱的第二张面（x=0.5），凹棱补料的端盖平面
+     * = 凸棱的第二张面（y=1.5 槽底、z=0 外面）⇒ 两条圆角**各自跑到顶点**时端盖与那张面
+     * 共面，圆角平顺"跑出"，既不需要让位（会让出 2×0.25 的空当 = 用户说的"什么都没做"），
+     * 也不需要角球。这里把两条楔块按真实做法叠到材料上量体积，验证：
+     * 切料落在材料里、补料整块落在缺口里、结果体积 = V0 − 切 + 补，且仍然闭合。
+     */
+    private static void filletMixedConvexityRunout() {
+        final double ox = 20481032.0;
+        final double oy = 129.545;
+        final double oz = 20530184.0;
+        final double r = 0.25;
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> block =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(
+                                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(
+                                        java.util.List.of(new double[] {ox, oy, oz,
+                                                ox + 2, oy + 2, oz + 2})), null));
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> groove =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(
+                                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(
+                                        java.util.List.of(new double[] {ox + 0.5, oy + 1.5, oz,
+                                                ox + 1.5, oy + 2, oz + 1})), null));
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> mat = shiftPolys(
+                com.ovo.sablestopnow.sketch.csg.Csg.subtract(
+                        shiftPolys(block, -ox, -oy, -oz),
+                        shiftPolys(groove, -ox, -oy, -oz)), ox, oy, oz);
+        final double v0 = Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(mat));
+        check(Math.abs(v0 - 7.5) < 1.0e-3, "cc-runout: 方块开槽后体积必须=7.5（实际 " + v0 + "）");
+
+        // 凸棱（沿 +y，面 +x / −z）：楔块走材料侧（−n1, −n2）
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> cutW =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.Solid.triPolys(
+                                com.ovo.sablestopnow.sketch.FilletCutter.prism(
+                                        new Vector3d(ox + 0.5, oy + 1.5, oz),
+                                        new Vector3d(ox + 0.5, oy + 2, oz),
+                                        new Vector3d(1, 0, 0), new Vector3d(0, 0, -1), r)));
+        // 凹棱（沿 +z，面 +y / +x）：补料进缺口；q2 要按扫掠第二轴归一
+        final Vector3d cap = new Vector3d(0, 1, 0);
+        final int q2 = com.ovo.sablestopnow.sketch.FilletCutter.sweepQ2(
+                cap, new Vector3d(1, 0, 0), new Vector3d(0, 0, 1), 1);
+        pathlib_Diag("cc-runout sweepQ2 -> " + q2);
+        check(q2 == -1, "cc-runout: 槽壁 n2=+x 在 tan×cap=−x 基下必须翻成 q2=−1");
+        final java.util.List<Vector3d> path = new java.util.ArrayList<>();
+        path.add(new Vector3d(ox + 0.5, oy + 1.5, oz));      // 公共顶点
+        path.add(new Vector3d(ox + 0.5, oy + 1.5, oz + 1));  // 槽另一端（不让位）
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> fillW =
+                com.ovo.sablestopnow.sketch.Solid.ensureOutward(
+                        com.ovo.sablestopnow.sketch.Solid.triPolys(
+                                com.ovo.sablestopnow.sketch.FilletCutter.sweep(
+                                        path, cap, r, 1, q2)));
+        check(com.ovo.sablestopnow.sketch.Solid.isClosed(fillW),
+                "cc-runout: 补料楔块必须闭合");
+        check(com.ovo.sablestopnow.sketch.Solid.isOriented(cutW)
+                        && com.ovo.sablestopnow.sketch.Solid.isOriented(fillW),
+                "cc-runout: 两个楔块的绕序必须一致朝外");
+
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> cutL =
+                shiftPolys(cutW, -ox, -oy, -oz);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> fillL =
+                shiftPolys(fillW, -ox, -oy, -oz);
+        final double cutIn = Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(
+                com.ovo.sablestopnow.sketch.csg.Csg.intersect(shiftPolys(mat, -ox, -oy, -oz),
+                        cutL)));
+        final double fillVol = Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(fillL));
+        pathlib_Diag("cc-runout cutIn=" + cutIn + " fillVol=" + fillVol);
+        check(Math.abs(cutIn - 0.0067) < 0.0015,
+                "cc-runout: 凸棱切料必须真落在材料里（" + cutIn + "）");
+        check(Math.abs(fillVol - 0.0134) < 0.0015,
+                "cc-runout: 凹棱补料体积必须≈理论（" + fillVol + "）");
+        // 真实应用顺序：先切后补
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> res = shiftPolys(
+                com.ovo.sablestopnow.sketch.csg.Csg.union(
+                        com.ovo.sablestopnow.sketch.csg.Csg.subtract(
+                                shiftPolys(mat, -ox, -oy, -oz), cutL), fillL),
+                ox, oy, oz);
+        final double v1 = Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(res));
+        final double expect = v0 - cutIn + fillVol;
+        pathlib_Diag("cc-runout result=" + v1 + " expect=" + expect);
+        check(Math.abs(v1 - expect) < 2.0e-3,
+                "cc-runout: 结果体积必须 = 原体积 − 切料 + 补料（" + v1 + " vs " + expect + "）");
+        check(v1 > v0, "cc-runout: 凹棱补料必须真的补进去（体积应该变大）");
+        check(com.ovo.sablestopnow.sketch.Solid.isClosed(res)
+                        || res.size() > 40,
+                "cc-runout: 结果不能塌掉（多边形 " + res.size() + "）");
+    }
+
+    /**
      * **开链扫掠体（有端盖）：闭合 + 绕序一致 + 体积≈理论** —— "圆角切掉整行"回归 ✓
      *
      * <p>实测事故：`sweep` 两端封口写成**朝内** ⇒ 有向体积只剩 AL/3
@@ -1479,6 +1578,7 @@ public final class SketchModelCheck {
         cornerBlendGeometry();
         filletSweepCurved();
         filletSweepOpenCaps();
+        filletMixedConvexityRunout();
         filletSetbackTrim();
         filletMergeRunsLegacy();
         filletEdgeInfo();

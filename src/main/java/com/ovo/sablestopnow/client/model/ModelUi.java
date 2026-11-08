@@ -2656,7 +2656,8 @@ public final class ModelUi {
             final org.joml.Vector3d n2 = first.n2() == null
                     ? new org.joml.Vector3d(1, 0, 0) : first.n2();
             final double[] qd = gqd[i];
-            // ★ 凸/凹共顶点 ⇒ setback：与求值侧完全同一套缩进 ✓
+            // ★ 凸/凹共顶点：**不让位**（与求值侧完全一致）——两条圆角都跑到公共顶点，
+            //   端盖各自与对面的那张面共面 ⇒ 平顺跑出，中间不留空 ✓
             final boolean cc = tStart[i] || tEnd[i];
             java.util.List<org.joml.Vector3d> pts =
                     new java.util.ArrayList<>(g.size() + 1);
@@ -2666,36 +2667,17 @@ public final class ModelUi {
                 pts.add(new org.joml.Vector3d(
                         pick.seg()[3], pick.seg()[4], pick.seg()[5]));
             }
-            if (cc) {
-                double total = 0.0;
-                for (int kk2 = 1; kk2 < pts.size(); kk2++) {
-                    total += pts.get(kk2).distance(pts.get(kk2 - 1));
-                }
-                final double sb = Math.max(1.0e-3, Math.min(radius, 0.35 * total));
-                pts = com.ovo.sablestopnow.sketch.FilletCutter.trimPolyline(pts,
-                        tStart[i] ? sb : 0.0, tEnd[i] ? sb : 0.0);
-                if (pts.size() < 2) {
-                    skipped++;
-                    continue;
-                }
-            }
             final java.util.List<org.joml.Vector3d[]> tris;
             if (g.size() > 1 || cc) {
                 // ★ 与求值侧**同一套** q2 归一：q2 是相对存档里的 n2，而扫掠的第二轴是
                 //   (tan×cap) ⇒ 两者反向时取负，否则预览的楔块会落到另一个象限 ✓
-                int q1i = (int) Math.round(qd[0]);
-                int q2i = (int) Math.round(qd[1]);
-                final org.joml.Vector3d tan0 = new org.joml.Vector3d(
-                        first.seg()[3] - first.seg()[0],
-                        first.seg()[4] - first.seg()[1],
-                        first.seg()[5] - first.seg()[2]);
-                if (tan0.lengthSquared() > 1.0e-12) {
-                    final org.joml.Vector3d side0 =
-                            tan0.cross(n1, new org.joml.Vector3d());
-                    if (side0.dot(n2) < 0.0) {
-                        q2i = -q2i;
-                    }
-                }
+                final int q1i = (int) Math.round(qd[0]);
+                final int q2i = com.ovo.sablestopnow.sketch.FilletCutter.sweepQ2(
+                        n1, n2, new org.joml.Vector3d(
+                                first.seg()[3] - first.seg()[0],
+                                first.seg()[4] - first.seg()[1],
+                                first.seg()[5] - first.seg()[2]),
+                        (int) Math.round(qd[1]));
                 tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts, n1, radius,
                         q1i, q2i);
             } else {

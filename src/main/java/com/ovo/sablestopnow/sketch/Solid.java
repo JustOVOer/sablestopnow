@@ -1916,9 +1916,18 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final double[] e0 = edges.get(rg[0]);
             final double r = e0[12];
             final Vector3d cap = new Vector3d(e0[6], e0[7], e0[8]).normalize();
-            // ★ 凸/凹共顶点 ⇒ **setback（让位）**：两条圆角都停在离顶点 r 处
-            //   （不超过链长的 35%）⇒ 中间留一段原棱，不再有锥形极小半径端，
-            //   也不会有两个方向相反的圆角面硬接（SolidWorks 默认就是这样处理的）✓
+            // ★★ 凸/凹共顶点：**不再 setback（让位）** —— 用户实测"让位"的后果是
+            //   相交处既没有圆角也没有过渡（两条圆角各退 0.25，中间空一段原棱）。
+            //
+            //   几何事实（这次先算清再改）：
+            //   · 凸棱楔块的端盖平面 = **凹棱的第二张面**（共享顶点处两面正交）
+            //   · 凹棱补料的端盖平面 = **凸棱的第二张面**
+            //   ⇒ 两条圆角各自沿自己的棱跑到公共顶点时，端盖恰好与那张面**共面**，
+            //     圆角平顺地"跑出"到那张面上（SolidWorks 的 fillet runout），
+            //     没有台阶、没有缝、也不需要角球（球面角块只适用于凸-凸顶点）。
+            //   ⇒ 这里保留 cc 只为了两件事：
+            //     a) 走扫掠路径（端盖与棱端齐平；prism 会沿棱外延 ext，会凸出到面外）
+            //     b) 该顶点**不做角球**（混合凸凹用球面角块是错的）
             final boolean cc = taperStart[it] || taperEnd[it];
             final List<Vector3d> pts0 = new ArrayList<>(rg[1] - rg[0] + 1);
             pts0.add(new Vector3d(e0[0], e0[1], e0[2]));
@@ -1926,19 +1935,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 final double[] ei = edges.get(i);
                 pts0.add(new Vector3d(ei[3], ei[4], ei[5]));
             }
-            List<Vector3d> pts = pts0;
+            final List<Vector3d> pts = pts0;
             if (cc) {
-                final double total = polylineLength(pts0);
-                final double sb = Math.max(1.0e-3, Math.min(r, 0.35 * total));
-                pts = FilletCutter.trimPolyline(pts0,
-                        taperStart[it] ? sb : 0.0, taperEnd[it] ? sb : 0.0);
-                trace("fillet:  setback idx=" + index + " sb=" + fmt(sb)
-                        + " len=" + fmt(total) + " start=" + taperStart[it]
-                        + " end=" + taperEnd[it] + " trimmed=" + fmt(polylineLength(pts)));
-                if (pts.size() < 2) {
-                    log.append(" [f").append(index).append(":cc-short]");
-                    continue;
-                }
+                trace("fillet:  cc-flush idx=" + index + " len=" + fmt(polylineLength(pts0))
+                        + " start=" + taperStart[it] + " end=" + taperEnd[it]);
             }
             final double lenPts = polylineLength(pts);
             final double theory = (r * r - Math.PI * r * r / 4.0) * lenPts;
@@ -1970,16 +1970,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 // ★ q2 是相对**存档里的 n2**，而扫掠的第二轴是 (tan×cap) ⇒ 两者可能反向
                 //   （n2 的顺序来自网格三角形的遍历顺序，不是由我们定的）。
                 //   不归一就会把楔块建到"另一个象限"⇒ 切掉相邻那一行材料 ✗
-                int q1i = (int) Math.round(qd[0]);
-                int q2i = (int) Math.round(qd[1]);
-                final Vector3d tan0 = new Vector3d(e0[3] - e0[0], e0[4] - e0[1],
-                        e0[5] - e0[2]);
-                if (tan0.lengthSquared() > 1.0e-12) {
-                    final Vector3d side0 = tan0.cross(cap, new Vector3d());
-                    if (side0.dot(new Vector3d(e0[9], e0[10], e0[11])) < 0.0) {
-                        q2i = -q2i;
-                    }
-                }
+                final int q1i = (int) Math.round(qd[0]);
+                final int q2i0 = (int) Math.round(qd[1]);
+                final int q2i = FilletCutter.sweepQ2(cap,
+                        new Vector3d(e0[9], e0[10], e0[11]),
+                        new Vector3d(e0[3] - e0[0], e0[4] - e0[1], e0[5] - e0[2]), q2i0);
                 final List<Vector3d[]> tris = FilletCutter.sweep(pts, cap, r, q1i, q2i);
                 if (tris == null || tris.isEmpty()) {
                     log.append(" [f").append(index).append(":sweep-empty]");
@@ -2004,7 +1999,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             trace("fillet:  quads=" + quads + "/4 pattern=" + (int) qd[3]
                     + " -> " + (concave ? "concave(fill)" : "convex(cut)")
                     + " idx=" + index + (curve ? " sweepSegs=" + (rg[1] - rg[0]) : "")
-                    + (cc ? " setback" : ""));
+                    + (cc ? " cc" : ""));
             // ★ 楔块必须**封闭**：扫掠/棱柱一旦出现裂口/自交，CSG 会把它当成"内部"
             //   ⇒ 减出来就是"把整行都切掉"、贴图坏（实测）。不封闭 ⇒ 宁可不倒 ✓
             if (!isClosed(wedge)) {
@@ -2056,7 +2051,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 cutTh.add(theory);
                 cutDbg.add(dbg);
                 // 顶点混合的候选：曲线只取**两端**的段（内部关节是平滑的，不需要角球）
-                // ★ 与相反分类共顶点的那一端**不做角球**：那里改用 setback 过渡 ✓
+                // ★ 与相反分类共顶点的那一端**不做角球**：凸/凹混合顶点不能套球面角块，
+                //   那里靠"两条圆角各自跑到顶点、端盖与对面共面"自然平顺过渡 ✓
                 final int[] ends = curve
                         ? new int[] {rg[0], rg[1] - 1} : new int[] {rg[0]};
                 for (final int ei : ends) {

@@ -2153,21 +2153,27 @@ public final class ModelUi {
                 new java.util.ArrayList<>();
         if (!mirrorSources.isEmpty()) {
             final var sketches = com.ovo.sablestopnow.sketch.SketchClientState.current(level);
-            for (final com.ovo.sablestopnow.sketch.Solid src
-                    : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, mirrorBody)) {
-                if (!mirrorSources.contains(src.id())) {
-                    continue;
+                for (final com.ovo.sablestopnow.sketch.Solid src
+                        : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, mirrorBody)) {
+                    if (!mirrorSources.contains(src.id())) {
+                        continue;
+                    }
+                    final com.ovo.sablestopnow.sketch.Sketch sk = src.resolve(sketches);
+                    if (sk == null) {
+                        continue;
+                    }
+                    // ★ 切割要画**它自己的棱柱线框**：`Solid.edges()` 对切割返回空
+                    //   ⇒ 以前镜像的切割没有线框（用户实测）。这里用拉伸棱柱的线框代替 ✓
+                    final java.util.List<org.joml.Vector3d[]> wire =
+                            src.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Cut c
+                                    ? com.ovo.sablestopnow.sketch.Extrude.prismEdges(sk, c.params())
+                                    : src.edges(sk);
+                    for (final org.joml.Vector3d[] e : wire) {
+                        segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
+                                com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[0], o, n),
+                                com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[1], o, n)));
+                    }
                 }
-                final com.ovo.sablestopnow.sketch.Sketch sk = src.resolve(sketches);
-                if (sk == null) {
-                    continue;
-                }
-                for (final org.joml.Vector3d[] e : src.edges(sk)) {
-                    segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
-                            com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[0], o, n),
-                            com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[1], o, n)));
-                }
-            }
         }
         // 顺序固定：set() 会清掉上一轮参考几何，所以最后再 setRefs ✓
         com.ovo.sablestopnow.client.model.FeaturePreview.set(mirrorBody, mirrorPlaneNormal, segs);
@@ -4500,11 +4506,10 @@ public final class ModelUi {
                               continue;
                           }
                           final double[] o = pl.offsetOrigin();
-                          // ★ 基准面特征作镜像面：参考高亮画**这块基准面本身**
-                          //   （四角 = shape 的方片，再平移到 offsetOrigin）✓
-                          final double dxo = o[0] - pl.ox();
-                          final double dyo = o[1] - pl.oy();
-                          final double dzo = o[2] - pl.oz();
+                          // ★ 基准面特征作镜像面：参考高亮画**这块基准面本身** ✓
+                          //   ⚠ corners() 内部**已经**用的是 offsetOrigin（见 Shape.Plane.corners）
+                          //   ⇒ 这里**不能再**按 (offsetOrigin−origin) 平移一次：会把位移加两遍，
+                          //   方片跑到镜像体表面上去（用户实测）。直接用 corners 即可。
                           final java.util.List<double[]> planeRefSegs =
                                   new java.util.ArrayList<>(4);
                           final java.util.List<org.joml.Vector3d> pcs = pl.corners(1.2);
@@ -4512,8 +4517,7 @@ public final class ModelUi {
                               final org.joml.Vector3d pa = pcs.get(pi);
                               final org.joml.Vector3d pb = pcs.get((pi + 1) % 4);
                               planeRefSegs.add(new double[] {
-                                  pa.x + dxo, pa.y + dyo, pa.z + dzo,
-                                  pb.x + dxo, pb.y + dyo, pb.z + dzo});
+                                  pa.x, pa.y, pa.z, pb.x, pb.y, pb.z});
                           }
                           body.add(new Button(Component.translatable("model.mirror.use_plane",
                                   sd.index()), () -> {
@@ -4528,22 +4532,8 @@ public final class ModelUi {
                       }
                   }
               }
-              if (mirrorPlaneOrigin != null && !mirrorSources.isEmpty()) {
-                  body.add(new Button(Component.translatable("model.mirror.confirm"), () -> {
-                      createMirrorFeature();
-                      lastLeftSignature = null;
-                      refreshLeftPanel();
-                  }).width(Widget.FILL));
-              }
-              body.add(new Button(Component.translatable("model.mirror.clear"), () -> {
-                  mirrorSources.clear();
-                  mirrorPlaneOrigin = null;
-                  mirrorPlaneSegs = null;
-                  mirrorPlaneNormal = null;
-                  com.ovo.sablestopnow.client.model.FeaturePreview.clear();
-                  lastLeftSignature = null;
-                  refreshLeftPanel();
-              }).width(Widget.FILL));
+              // ⚠ 这里**不再**放第二组“创建镜像 / 清空选择”：面板上方已经有一组
+              //   （始终可见、带参数校验）⇒ 以前这里又加一遍，用户看到**两组按钮**（实测）。
               return;
           }
           if (ModelTools.PATTERN.equals(tool)) {

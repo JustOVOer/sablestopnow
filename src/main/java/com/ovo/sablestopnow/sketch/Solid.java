@@ -1398,6 +1398,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             //   ② **切割源不再跳过**：切割盒反射后从镜像材料里减掉（洞跟着反射走）
             //   ③ 每个源**单独输出**一份 Placed，用**源自己的外观** ⇒ 贴图不串号 ✓
             final List<double[]> cutBoxes = new ArrayList<>();
+            // ★ 切割源镜像后也要有线框（用户实测"镜像的切割没有线框"）✓
+            final List<Vector3d[]> cutWireEdges = new ArrayList<>();
             final List<Csg.Polygon> filletPend = new ArrayList<>();
             for (final UUID sid : m.sources()) {
                 final Solid src = byId.get(sid);
@@ -1410,6 +1412,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 if (src.shape() instanceof Shape.Cut cut0 && srcSketch != null) {
                     for (final double[] b : Extrude.boxesOf(srcSketch, cut0.params())) {
                         cutBoxes.add(reflectBox(b, o, n));
+                    }
+                    for (final Vector3d[] ce : Extrude.prismEdges(srcSketch, cut0.params())) {
+                        cutWireEdges.add(new Vector3d[] {reflectPoint(ce[0], o, n),
+                                reflectPoint(ce[1], o, n)});
                     }
                     continue;
                 }
@@ -1426,6 +1432,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     edges.add(new Vector3d[] {reflectPoint(ed[0], o, n),
                             reflectPoint(ed[1], o, n)});
                 }
+                // ★ 被镜像的切割也要有线框 ✓（以前只减了盒子，产品上没有切割的线）
+                edges.addAll(cutWireEdges);
                 SolidMesh.Mesh mesh = e.mesh() == null ? null : reflectMesh(e.mesh(), o, n);
                 if (!cutBoxes.isEmpty()) {
                     mesh = subtractBoxesMesh(mesh, cutBoxes);
@@ -1457,8 +1465,13 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 // 视图实体：id/index 用镜像特征（选中/名字一致），形状与外观用**源的**
                 final Solid view = new Solid(mirror.id(), mirror.body(), src.sketchId(),
                         mirror.index(), src.shape(), src.appearance());
-                out.add(new Placed(view, finalBoxes, edges, mesh,
-                        new Vector3d(m.nx(), m.ny(), m.nz())));
+                // ★★ 贴图的投影法线必须用**源草图平面的法线**，不能用镜像平面法线 ✗
+                //   （用户实测"镜像的贴图极度拉伸"：`planeNormal` 是贴图 UV 的投影轴，
+                //    拿镜像面法线去投影 ⇒ 与几何方向完全不匹配 ⇒ 整面被拉成一条）
+                final Vector3d viewNormal = srcSketch != null && srcSketch.plane() != null
+                        ? srcSketch.plane().normal()
+                        : new Vector3d(m.nx(), m.ny(), m.nz());
+                out.add(new Placed(view, finalBoxes, edges, mesh, viewNormal));
             }
         }
         // item 10: **阵列**产物（N×M 个副本，归在"阵列N"一行）
@@ -1483,6 +1496,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             // ★ bug ⑨：阵列同样取**评估后**的几何 + 每个源单独输出（用源自己的外观）✓
             final List<double[]> cutOffsets = new ArrayList<>();
             final List<double[]> cutRaw = new ArrayList<>();
+            // ★ 切割的线框也要跟着阵列（与镜像同一处缺口：`Solid.edges()` 对切割返回空）
+            final List<Vector3d[]> cutWireRaw = new ArrayList<>();
             for (final UUID sid : pt.sources()) {
                 final Solid src = byId.get(sid);
                 if (src == null || !(src.shape() instanceof Shape.Cut cut0)) {
@@ -1495,6 +1510,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 for (final double[] b : Extrude.boxesOf(srcSketch, cut0.params())) {
                     cutRaw.add(b);
                 }
+                cutWireRaw.addAll(Extrude.prismEdges(srcSketch, cut0.params()));
             }
             for (final UUID sid : pt.sources()) {
                 final Solid src = byId.get(sid);
@@ -1526,6 +1542,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         edges.add(new Vector3d[] {
                             new Vector3d(ed[0]).add(off[0], off[1], off[2]),
                             new Vector3d(ed[1]).add(off[0], off[1], off[2])});
+                    }
+                    // ★ 被阵列的切割也要有线框 ✓（与镜像一致）
+                    for (final Vector3d[] ce : cutWireRaw) {
+                        edges.add(new Vector3d[] {
+                            new Vector3d(ce[0]).add(off[0], off[1], off[2]),
+                            new Vector3d(ce[1]).add(off[0], off[1], off[2])});
                     }
                     SolidMesh.Mesh mesh = e.mesh() == null ? null : translateMesh(e.mesh(), off);
                     // ★ 圆角也作用到阵列产物上（回归修复）✓
@@ -1561,7 +1583,13 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                     final Solid view = new Solid(pat.id(), pat.body(), src.sketchId(),
                             pat.index(), src.shape(), src.appearance());
-                    out.add(new Placed(view, finalBoxes, edges, mesh, null));
+                    // ★ 阵列产物也要带**贴图投影法线**：以前传 null ⇒ 渲染侧直接跳过
+                    //   "带贴图绘制"（门限要求非 null）⇒ 阵列体永远没有贴图。
+                    //   用源草图平面的法线（与源自己的 Placed 同一个值）✓
+                    final Sketch srcSk = src.resolve(sketches);
+                    final Vector3d viewNormal = srcSk != null && srcSk.plane() != null
+                            ? srcSk.plane().normal() : null;
+                    out.add(new Placed(view, finalBoxes, edges, mesh, viewNormal));
                 }
             }
         }

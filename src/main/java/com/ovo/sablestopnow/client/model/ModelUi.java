@@ -2099,7 +2099,7 @@ public final class ModelUi {
 
     /** Mirror tool: clicking a feature row toggles it as a mirror source. */
     public static void mirrorToggleSource(final com.ovo.sablestopnow.sketch.Solid solid) {
-        if (solid == null || solid.isPlane() || solid.isFillet() || solid.isMirror()) {
+        if (solid == null || solid.isPlane() || solid.isMirror()) {
             ModelMode.prompt("model.mirror.no_sources");
             return;
         }
@@ -3380,6 +3380,27 @@ public final class ModelUi {
     }
 
     /**
+     * 一个**圆角特征依赖的材料实体**（它的每条棱指向谁）✓
+     *
+     * <p>镜像/阵列把圆角当源时，必须保证“被倒圆的材料特征”也在源里 ——
+     * 否则镜像/阵列出来的产物上根本没有那条棱可倒。
+     * 面板据此决定**显示不显示**这个圆角的复选框（用户要求）。
+     */
+    private static java.util.Set<java.util.UUID> filletDeps(
+            final com.ovo.sablestopnow.sketch.Solid solid) {
+        final java.util.Set<java.util.UUID> out = new java.util.HashSet<>();
+        if (solid != null && solid.shape()
+                instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Fillet f) {
+            for (final com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef ref : f.edges()) {
+                if (ref.solidId() != null) {
+                    out.add(ref.solidId());
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
      * 开始**编辑一个已有特征**（右树“编辑”子行）✓
      *
      * <p>把该特征的全部参数预填进左栏，并记住 {@link #editingSolidId} ⇒
@@ -4464,8 +4485,16 @@ public final class ModelUi {
                   if (lv != null && b0 != null) {
                       for (final com.ovo.sablestopnow.sketch.Solid sd
                               : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
-                          if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
-                              continue; // 这些不是"材料特征"，镜像它们没有意义 ✓
+                          if (sd.isPlane() || sd.isMirror() || sd.isPattern()) {
+                              continue; // 基准面/镜像/阵列不是"材料特征"
+                          }
+                          if (sd.isFillet()) {
+                              // ★ 圆角**可以**被镜像，但依赖（被倒圆的材料特征）必须先勾上；
+                              //   没勾就**连复选框都不显示**（用户要求）✓
+                              final java.util.Set<java.util.UUID> deps = filletDeps(sd);
+                              if (deps.isEmpty() || !mirrorSources.containsAll(deps)) {
+                                  continue;
+                              }
                           }
                           final com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> prop =
                                   mirrorSourceProp(sd.id());
@@ -4581,8 +4610,24 @@ public final class ModelUi {
                     if (lv != null && b0 != null) {
                         for (final com.ovo.sablestopnow.sketch.Solid sd
                                 : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
-                            if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()) {
-                                continue;
+                            if (sd.isPlane() || sd.isMirror() || sd.isPattern()) {
+                                continue; // 基准面/镜像/阵列不是"材料特征"
+                            }
+                            if (sd.isFillet()) {
+                                // ★ 圆角可以被阵列，但依赖（被倒圆的材料特征）必须先勾上；
+                                //   没勾就**连复选框都不显示**（用户要求）✓
+                                final java.util.Set<java.util.UUID> deps = filletDeps(sd);
+                                boolean ready = !deps.isEmpty();
+                                for (final java.util.UUID d : deps) {
+                                    if (!com.ovo.sablestopnow.client.model.PatternTool
+                                            .hasSource(d)) {
+                                        ready = false;
+                                        break;
+                                    }
+                                }
+                                if (!ready) {
+                                    continue;
+                                }
                             }
                             final com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> prop =
                                     PATTERN_SRC_PROPS.computeIfAbsent(sd.id(), k ->
@@ -5248,8 +5293,9 @@ public final class ModelUi {
                   mirrorBody = b0;
                   for (final com.ovo.sablestopnow.sketch.Solid sd
                           : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv0, b0)) {
-                      // ★ 圆角也可以被镜像（与切割同等）✓
-                      if (sd.isPlane() || sd.isMirror() || sd.isPattern()) {
+                      // ★ 圆角**不再默认勾上**：它依赖“被倒圆的材料特征”，
+                      //   用户要求依赖没勾时连复选框都不显示 ⇒ 等依赖勾上后再手动勾 ✓
+                      if (sd.isPlane() || sd.isMirror() || sd.isPattern() || sd.isFillet()) {
                           continue;
                       }
                       mirrorSources.add(sd.id());

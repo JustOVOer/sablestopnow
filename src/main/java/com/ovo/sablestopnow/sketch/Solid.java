@@ -1400,6 +1400,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final List<double[]> cutBoxes = new ArrayList<>();
             // ★ 切割源镜像后也要有线框（用户实测"镜像的切割没有线框"）✓
             final List<Vector3d[]> cutWireEdges = new ArrayList<>();
+            // ★ 渲染网格用**真实切割体网格**，不用盒子近似（否则切割面贴图错/轮廓成阶梯）
+            final List<SolidMesh.Mesh> cutMeshes = new ArrayList<>();
             final List<Csg.Polygon> filletPend = new ArrayList<>();
             for (final UUID sid : m.sources()) {
                 final Solid src = byId.get(sid);
@@ -1416,6 +1418,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     for (final Vector3d[] ce : Extrude.prismEdges(srcSketch, cut0.params())) {
                         cutWireEdges.add(new Vector3d[] {reflectPoint(ce[0], o, n),
                                 reflectPoint(ce[1], o, n)});
+                    }
+                    final SolidMesh.Mesh cutMesh = SolidMesh.build(srcSketch, cut0.params());
+                    if (cutMesh != null && !cutMesh.isEmpty()) {
+                        cutMeshes.add(reflectMesh(cutMesh, o, n));
                     }
                     continue;
                 }
@@ -1435,15 +1441,42 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 // ★ 被镜像的切割也要有线框 ✓（以前只减了盒子，产品上没有切割的线）
                 edges.addAll(cutWireEdges);
                 SolidMesh.Mesh mesh = e.mesh() == null ? null : reflectMesh(e.mesh(), o, n);
-                if (!cutBoxes.isEmpty()) {
-                    mesh = subtractBoxesMesh(mesh, cutBoxes);
+                if (!cutMeshes.isEmpty()) {
+                    // ★ 真网格减法（盒子近似会让切割面贴图错、轮廓成阶梯）
+                    mesh = subtractCutterMeshes(mesh, cutMeshes);
                 }
                 final List<double[]> finalBoxes = cutBoxes.isEmpty() ? boxes
                         : subtractBoxes(boxes, cutBoxes);
                 // ★ 镜像产物上的圆角：棱数据本来就存成镜像后的局部坐标 ⇒ 直接在产物上应用 ✓
                 //   （以前这一步是死代码：filletPend 从没被填过 ⇒ "镜像体上无法圆角"）
-                final List<double[]> mirEdges = filletEdgeByMirror.get(mirror.id());
-                if (mirEdges != null && !mirEdges.isEmpty()
+                // ★★ 新增：**圆角特征本身也可以被镜像** —— 把被选中圆角特征的棱反射到镜像
+                //   空间，与“在镜像体上点棱倒圆”的 filletEdgeByMirror 合并成一次 applyFillets ✓
+                final java.util.Map<UUID, List<double[]>> srcFilletMap = new java.util.HashMap<>();
+                for (final UUID fsid : m.sources()) {
+                    final Solid fs = byId.get(fsid);
+                    if (fs == null || !(fs.shape() instanceof final Shape.Fillet fil)) {
+                        continue;
+                    }
+                    for (final Shape.EdgeRef ref : fil.edges()) {
+                        if (!src.id().equals(ref.solidId())) {
+                            continue; // 这条棱属于别材料 ⇒ 由那个材料的产物去倒
+                        }
+                        final Shape.EdgeRef mr = reflectRef(ref, o, n);
+                        final Vector3d rn1 = reflectDir(
+                                new Vector3d(ref.n1x(), ref.n1y(), ref.n1z()), n);
+                        final Vector3d rn2 = reflectDir(
+                                new Vector3d(ref.n2x(), ref.n2y(), ref.n2z()), n);
+                        expandRef(srcFilletMap, src.id(), mr, rn1, rn2, fil.radius(),
+                                mr.isCurve() ? (++curveGroupSeq) : -1, null, -1);
+                    }
+                }
+                final List<double[]> mirEdges = new ArrayList<>();
+                final List<double[]> mirOwn = filletEdgeByMirror.get(mirror.id());
+                if (mirOwn != null) {
+                    mirEdges.addAll(mirOwn);
+                }
+                mirEdges.addAll(srcFilletMap.getOrDefault(src.id(), List.of()));
+                if (!mirEdges.isEmpty()
                         && mesh != null && !mesh.isEmpty()) {
                     List<Csg.Polygon> mp = ensureOutward(CsgMesh.fromMesh(mesh, null));
                     if (!mp.isEmpty()) {
@@ -1498,6 +1531,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final List<double[]> cutRaw = new ArrayList<>();
             // ★ 切割的线框也要跟着阵列（与镜像同一处缺口：`Solid.edges()` 对切割返回空）
             final List<Vector3d[]> cutWireRaw = new ArrayList<>();
+            // ★ 渲染网格用真实切割体网格（盒子近似会让切割面贴图错/轮廓成阶梯）
+            final List<SolidMesh.Mesh> cutMeshesRaw = new ArrayList<>();
             for (final UUID sid : pt.sources()) {
                 final Solid src = byId.get(sid);
                 if (src == null || !(src.shape() instanceof Shape.Cut cut0)) {
@@ -1511,6 +1546,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     cutRaw.add(b);
                 }
                 cutWireRaw.addAll(Extrude.prismEdges(srcSketch, cut0.params()));
+                final SolidMesh.Mesh cm = SolidMesh.build(srcSketch, cut0.params());
+                if (cm != null && !cm.isEmpty()) {
+                    cutMeshesRaw.add(cm);
+                }
             }
             for (final UUID sid : pt.sources()) {
                 final Solid src = byId.get(sid);
@@ -1551,19 +1590,50 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                     SolidMesh.Mesh mesh = e.mesh() == null ? null : translateMesh(e.mesh(), off);
                     // ★ 圆角也作用到阵列产物上（回归修复）✓
-                    if (!cutHere.isEmpty()) {
-                        mesh = subtractBoxesMesh(mesh, cutHere);
+                    // ★ 切割用**真网格**平移后做减法（盒子近似会让切割面贴图错/轮廓成阶梯）
+                    if (!cutMeshesRaw.isEmpty()) {
+                        final List<SolidMesh.Mesh> here =
+                                new ArrayList<>(cutMeshesRaw.size());
+                        for (final SolidMesh.Mesh cm : cutMeshesRaw) {
+                            here.add(translateMesh(cm, off));
+                        }
+                        mesh = subtractCutterMeshes(mesh, here);
                     }
                     final List<double[]> finalBoxes = cutHere.isEmpty() ? boxes
                             : subtractBoxes(boxes, cutHere);
                     // ★ 阵列产物上的圆角：棱数据按**本副本的平移量**搬过来再应用 ✓
-                    final List<double[]> patEdges = filletEdgeByPattern.get(pat.id());
-                    if (patEdges != null && !patEdges.isEmpty()
-                            && mesh != null && !mesh.isEmpty()) {
-                        final List<double[]> moved = new ArrayList<>(patEdges.size());
-                        for (final double[] ed : patEdges) {
-                            moved.add(translateEdgeTuple(ed, off));
+                    // ★★ 新增：**圆角特征本身也可以被阵列** —— 把被选中圆角特征的棱按
+                    //   本副本的平移量搬过来，与 filletEdgeByPattern 合并成一次 applyFillets ✓
+                    final java.util.Map<UUID, List<double[]>> srcFilletMap = new java.util.HashMap<>();
+                    for (final UUID fsid : pt.sources()) {
+                        final Solid fs = byId.get(fsid);
+                        if (fs == null || !(fs.shape() instanceof final Shape.Fillet fil)) {
+                            continue;
                         }
+                        for (final Shape.EdgeRef ref : fil.edges()) {
+                            if (!src.id().equals(ref.solidId())) {
+                                continue;
+                            }
+                            final Shape.EdgeRef tr = translateRef(ref, off);
+                            expandRef(srcFilletMap, src.id(), tr,
+                                    new Vector3d(ref.n1x(), ref.n1y(), ref.n1z()),
+                                    new Vector3d(ref.n2x(), ref.n2y(), ref.n2z()),
+                                    fil.radius(), tr.isCurve() ? (++curveGroupSeq) : -1,
+                                    null, -1);
+                        }
+                    }
+                    final List<double[]> patEdges = new ArrayList<>();
+                    final List<double[]> patOwn = filletEdgeByPattern.get(pat.id());
+                    if (patOwn != null) {
+                        // 本副本的平移量对“在阵列体上点棱”的数据也要生效
+                        for (final double[] ed : patOwn) {
+                            patEdges.add(translateEdgeTuple(ed, off));
+                        }
+                    }
+                    patEdges.addAll(srcFilletMap.getOrDefault(src.id(), List.of()));
+                    if (!patEdges.isEmpty()
+                            && mesh != null && !mesh.isEmpty()) {
+                        final List<double[]> moved = patEdges;
                         List<Csg.Polygon> pp = ensureOutward(CsgMesh.fromMesh(mesh, null));
                         if (!pp.isEmpty()) {
                             trace("fillet: pattern=" + shortId(pat.id())
@@ -3030,6 +3100,46 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         return res.isEmpty() ? mesh : CsgMesh.toMesh(res);
     }
 
+    /**
+     * 用**真实的切割体网格**（不是碰撞盒近似）做减法 ✓ —— 镜像/阵列产物专用。
+     *
+     * <h2>为什么不能继续用 {@link #subtractBoxesMesh}</h2>
+     * 盒子近似只适合碰撞/代价高的场合；它用在**渲染网格**上时：
+     * <ul>
+     *   <li>弧形/斜的切割口变成**阶梯状的方块轮廓**；</li>
+     *   <li>新生成的切割面用的是盒子的**简单 UV**（每面 0..1）⇒ 贴图被拉伸/错位。</li>
+     * </ul>
+     * 源实体走的是真网格 CSG（`Csg.subtract` + 切割体网格），所以只有镜像/阵列
+     * 产物上的切割贴图不对（用户实测）。这里换成同一套真网格减法。
+     *
+     * @param mesh    产物网格（局部坐标，已反射/平移）
+     * @param cutters 切割体网格（与 mesh 在同一个空间）
+     */
+    private static SolidMesh.Mesh subtractCutterMeshes(final SolidMesh.Mesh mesh,
+                                                       final List<SolidMesh.Mesh> cutters) {
+        if (mesh == null || mesh.isEmpty() || cutters == null || cutters.isEmpty()) {
+            return mesh;
+        }
+        List<Csg.Polygon> acc = ensureOutward(CsgMesh.fromMesh(mesh, null));
+        if (acc.isEmpty()) {
+            return mesh;
+        }
+        for (final SolidMesh.Mesh c : cutters) {
+            if (c == null || c.isEmpty()) {
+                continue;
+            }
+            final List<Csg.Polygon> cp = CsgMesh.fromMesh(c, null);
+            if (cp.isEmpty()) {
+                continue;
+            }
+            final List<Csg.Polygon> next = subtractLocal(acc, cp);
+            if (!next.isEmpty()) {
+                acc = next;
+            }
+        }
+        return acc.isEmpty() ? mesh : CsgMesh.toMesh(acc);
+    }
+
     private static SolidMesh.Mesh cutWithFillets(final SolidMesh.Mesh mesh,
                                                   final List<Csg.Polygon> filletPolys) {
         if (mesh == null || mesh.isEmpty() || filletPolys == null || filletPolys.isEmpty()) {
@@ -3095,6 +3205,59 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         final double d = x * n[0] + y * n[1] + z * n[2];
         return new Vector3d(x - 2 * d * n[0] + o[0], y - 2 * d * n[1] + o[1],
                 z - 2 * d * n[2] + o[2]);
+    }
+
+    /** 反射一个**方向**（只转方向、不平移）✓ */
+    private static Vector3d reflectDir(final Vector3d d, final double[] n) {
+        final double k = 2.0 * (d.x * n[0] + d.y * n[1] + d.z * n[2]);
+        return new Vector3d(d.x - k * n[0], d.y - k * n[1], d.z - k * n[2]);
+    }
+
+    /**
+     * 反射一条**圆角边引用** ✓（几何 + 两个面法线 + 曲线折线）
+     *
+     * <p>给“圆角特征也能被镜像”用：产物的网格在镜像后的局部空间里，
+     * 所以棱也必须用同一个反射变换搬过去（法线按反射矩阵转，不是整体取反）。
+     */
+    private static Shape.EdgeRef reflectRef(final Shape.EdgeRef r, final double[] o,
+                                            final double[] n) {
+        final Vector3d a = reflectPoint(new Vector3d(r.ax(), r.ay(), r.az()), o, n);
+        final Vector3d b = reflectPoint(new Vector3d(r.bx(), r.by(), r.bz()), o, n);
+        final Vector3d n1 = reflectDir(new Vector3d(r.n1x(), r.n1y(), r.n1z()), n);
+        final Vector3d n2 = reflectDir(new Vector3d(r.n2x(), r.n2y(), r.n2z()), n);
+        double[] curve = new double[0];
+        if (r.isCurve()) {
+            final List<double[]> pts = r.curvePoints();
+            curve = new double[pts.size() * 3];
+            int k = 0;
+            for (final double[] p : pts) {
+                final Vector3d rp = reflectPoint(new Vector3d(p[0], p[1], p[2]), o, n);
+                curve[k++] = rp.x;
+                curve[k++] = rp.y;
+                curve[k++] = rp.z;
+            }
+        }
+        return new Shape.EdgeRef(r.solidId(), a.x, a.y, a.z, b.x, b.y, b.z,
+                n1.x, n1.y, n1.z, n2.x, n2.y, n2.z, curve);
+    }
+
+    /** 平移一条**圆角边引用**（阵列副本用）✓ */
+    private static Shape.EdgeRef translateRef(final Shape.EdgeRef r, final double[] off) {
+        double[] curve = new double[0];
+        if (r.isCurve()) {
+            final List<double[]> pts = r.curvePoints();
+            curve = new double[pts.size() * 3];
+            int k = 0;
+            for (final double[] p : pts) {
+                curve[k++] = p[0] + off[0];
+                curve[k++] = p[1] + off[1];
+                curve[k++] = p[2] + off[2];
+            }
+        }
+        return new Shape.EdgeRef(r.solidId(),
+                r.ax() + off[0], r.ay() + off[1], r.az() + off[2],
+                r.bx() + off[0], r.by() + off[1], r.bz() + off[2],
+                r.n1x(), r.n1y(), r.n1z(), r.n2x(), r.n2y(), r.n2z(), curve);
     }
 
     /** 反射一个网格 ✓（位置反射、法线按**反射矩阵**变换、三角形绕序翻转） */

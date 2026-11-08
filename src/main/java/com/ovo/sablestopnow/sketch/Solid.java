@@ -1936,12 +1936,21 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 pts0.add(new Vector3d(ei[3], ei[4], ei[5]));
             }
             final List<Vector3d> pts = pts0;
+            // ★ runout：凸/凹相交的那一端把半径沿链收到 ~8%
+            //   （不是"让位"——那会留一段原棱；也不是平切——那会留端面台阶）
+            final double[] radii = FilletCutter.radiusProfile(pts, r,
+                    taperStart[it], taperEnd[it]);
             if (cc) {
-                trace("fillet:  cc-flush idx=" + index + " len=" + fmt(polylineLength(pts0))
-                        + " start=" + taperStart[it] + " end=" + taperEnd[it]);
+                double rMin = r;
+                for (final double rr : radii) {
+                    rMin = Math.min(rMin, rr);
+                }
+                trace("fillet:  cc-runout idx=" + index + " len=" + fmt(polylineLength(pts0))
+                        + " start=" + taperStart[it] + " end=" + taperEnd[it]
+                        + " rMin=" + fmt(rMin));
             }
             final double lenPts = polylineLength(pts);
-            final double theory = (r * r - Math.PI * r * r / 4.0) * lenPts;
+            final double theory = FilletCutter.sweptVolume(pts, radii);
             // ★ 折痕指标：2·r·sin(θ/2)/最短相邻段 ⇒ >1 说明"局部曲率半径 < r"，
             //   扫掠体必然自交（SolidWorks 这时会判"半径过大"）。只记日志，最后一道
             //   体积门会把它拦下来 ✓
@@ -1975,7 +1984,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 final int q2i = FilletCutter.sweepQ2(cap,
                         new Vector3d(e0[9], e0[10], e0[11]),
                         new Vector3d(e0[3] - e0[0], e0[4] - e0[1], e0[5] - e0[2]), q2i0);
-                final List<Vector3d[]> tris = FilletCutter.sweep(pts, cap, r, q1i, q2i);
+                final List<Vector3d[]> tris = FilletCutter.sweep(pts, cap, radii, q1i, q2i);
                 if (tris == null || tris.isEmpty()) {
                     log.append(" [f").append(index).append(":sweep-empty]");
                     continue;

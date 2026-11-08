@@ -2678,7 +2678,10 @@ public final class ModelUi {
                                 first.seg()[4] - first.seg()[1],
                                 first.seg()[5] - first.seg()[2]),
                         (int) Math.round(qd[1]));
-                tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts, n1, radius,
+                // ★ runout 与求值侧同一套：cc 端半径收到 ~8% ✓
+                final double[] radii = com.ovo.sablestopnow.sketch.FilletCutter
+                        .radiusProfile(pts, radius, tStart[i], tEnd[i]);
+                tris = com.ovo.sablestopnow.sketch.FilletCutter.sweep(pts, n1, radii,
                         q1i, q2i);
             } else {
                 final org.joml.Vector3d m1 = new org.joml.Vector3d(n1).mul(-qd[0]);

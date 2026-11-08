@@ -649,15 +649,21 @@ public final class SketchModelCheck {
         final double v0 = Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(mat));
         check(Math.abs(v0 - 7.5) < 1.0e-3, "cc-runout: 方块开槽后体积必须=7.5（实际 " + v0 + "）");
 
-        // 凸棱（沿 +y，面 +x / −z）：楔块走材料侧（−n1, −n2）
+        // 凸棱（沿 +y，面 +x / −z）：cc 端(=公共顶点)做 runout，走真实求值那条路（sweep）
+        final Vector3d capC = new Vector3d(1, 0, 0);
+        final java.util.List<Vector3d> cutPath = new java.util.ArrayList<>();
+        cutPath.add(new Vector3d(ox + 0.5, oy + 1.5, oz)); // 公共顶点
+        cutPath.add(new Vector3d(ox + 0.5, oy + 2, oz));
+        final int cutQ2 = com.ovo.sablestopnow.sketch.FilletCutter.sweepQ2(
+                capC, new Vector3d(0, 0, -1), new Vector3d(0, 1, 0), -1);
+        final double[] cutRadii = com.ovo.sablestopnow.sketch.FilletCutter
+                .radiusProfile(cutPath, r, true, false);
         final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> cutW =
                 com.ovo.sablestopnow.sketch.Solid.ensureOutward(
                         com.ovo.sablestopnow.sketch.Solid.triPolys(
-                                com.ovo.sablestopnow.sketch.FilletCutter.prism(
-                                        new Vector3d(ox + 0.5, oy + 1.5, oz),
-                                        new Vector3d(ox + 0.5, oy + 2, oz),
-                                        new Vector3d(1, 0, 0), new Vector3d(0, 0, -1), r)));
-        // 凹棱（沿 +z，面 +y / +x）：补料进缺口；q2 要按扫掠第二轴归一
+                                com.ovo.sablestopnow.sketch.FilletCutter.sweep(
+                                        cutPath, capC, cutRadii, -1, cutQ2)));
+        // 凹棱（沿 +z，面 +y / +x）：补料进缺口；cc 端同样 runout
         final Vector3d cap = new Vector3d(0, 1, 0);
         final int q2 = com.ovo.sablestopnow.sketch.FilletCutter.sweepQ2(
                 cap, new Vector3d(1, 0, 0), new Vector3d(0, 0, 1), 1);
@@ -665,17 +671,25 @@ public final class SketchModelCheck {
         check(q2 == -1, "cc-runout: 槽壁 n2=+x 在 tan×cap=−x 基下必须翻成 q2=−1");
         final java.util.List<Vector3d> path = new java.util.ArrayList<>();
         path.add(new Vector3d(ox + 0.5, oy + 1.5, oz));      // 公共顶点
-        path.add(new Vector3d(ox + 0.5, oy + 1.5, oz + 1));  // 槽另一端（不让位）
+        path.add(new Vector3d(ox + 0.5, oy + 1.5, oz + 1));  // 槽另一端
+        final double[] fillRadii = com.ovo.sablestopnow.sketch.FilletCutter
+                .radiusProfile(path, r, true, false);
         final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> fillW =
                 com.ovo.sablestopnow.sketch.Solid.ensureOutward(
                         com.ovo.sablestopnow.sketch.Solid.triPolys(
                                 com.ovo.sablestopnow.sketch.FilletCutter.sweep(
-                                        path, cap, r, 1, q2)));
+                                        path, cap, fillRadii, 1, q2)));
         check(com.ovo.sablestopnow.sketch.Solid.isClosed(fillW),
                 "cc-runout: 补料楔块必须闭合");
         check(com.ovo.sablestopnow.sketch.Solid.isOriented(cutW)
                         && com.ovo.sablestopnow.sketch.Solid.isOriented(fillW),
                 "cc-runout: 两个楔块的绕序必须一致朝外");
+        // runout 半径表：顶点处 ≈8%、远端 = 全半径
+        pathlib_Diag("cc-runout radii=" + java.util.Arrays.toString(fillRadii));
+        check(Math.abs(fillRadii[0] - Math.max(0.01, 0.08 * r)) < 1.0e-9,
+                "cc-runout: 公共顶点处半径必须收到 ~8%（实际 " + fillRadii[0] + "）");
+        check(Math.abs(fillRadii[fillRadii.length - 1] - r) < 1.0e-9,
+                "cc-runout: 远端必须仍是全半径");
 
         final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> cutL =
                 shiftPolys(cutW, -ox, -oy, -oz);
@@ -685,11 +699,22 @@ public final class SketchModelCheck {
                 com.ovo.sablestopnow.sketch.csg.Csg.intersect(shiftPolys(mat, -ox, -oy, -oz),
                         cutL)));
         final double fillVol = Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(fillL));
-        pathlib_Diag("cc-runout cutIn=" + cutIn + " fillVol=" + fillVol);
-        check(Math.abs(cutIn - 0.0067) < 0.0015,
-                "cc-runout: 凸棱切料必须真落在材料里（" + cutIn + "）");
-        check(Math.abs(fillVol - 0.0134) < 0.0015,
-                "cc-runout: 凹棱补料体积必须≈理论（" + fillVol + "）");
+        final double thCut = com.ovo.sablestopnow.sketch.FilletCutter
+                .sweptVolume(cutPath, cutRadii);
+        final double thFill = com.ovo.sablestopnow.sketch.FilletCutter
+                .sweptVolume(path, fillRadii);
+        final double cutVol = Math.abs(com.ovo.sablestopnow.sketch.Solid.polysVolume(cutL));
+        pathlib_Diag("cc-runout cutIn=" + cutIn + " thCut=" + thCut
+                + " cutVol=" + cutVol + " fillVol=" + fillVol + " thFill=" + thFill);
+        // 体积理论值 = 变半径积分 (1−π/4)∫r²ds；几何体积必须对得上（体积门靠它）
+        check(Math.abs(cutVol - thCut) < thCut * 0.12,
+                "cc-runout: runout 楔块体积必须≈变半径理论（" + cutVol + " vs " + thCut + "）");
+        check(Math.abs(fillVol - thFill) < thFill * 0.12,
+                "cc-runout: 凹棱补料体积必须≈变半径理论（" + fillVol + " vs " + thFill + "）");
+        check(cutIn > cutVol * 0.9,
+                "cc-runout: 凸棱切料必须几乎整个落在材料里（" + cutIn + "/" + cutVol + "）");
+        check(fillVol < 0.0134 * 0.85,
+                "cc-runout: runout 必须让补料体积明显小于全半径（" + fillVol + "）");
         // 真实应用顺序：先切后补
         final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> res = shiftPolys(
                 com.ovo.sablestopnow.sketch.csg.Csg.union(

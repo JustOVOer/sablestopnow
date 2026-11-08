@@ -177,6 +177,87 @@ public final class FilletCutter {
     }
 
     /**
+     * 链上每个关节的半径表 = 常数 r，**凸/凹相交的那一端做 runout**（半径线性收到 ~8%）✓
+     *
+     * <p>为什么必须收：凸/凹混合顶点上，两条圆角面其实**相切于同一张面**（凸棱的球在面下、
+     * 凹棱的球在面上，两个圆柱在面上那一点相切）。所以正确的收尾不是"让位"（会留一段原棱，
+     * 用户实测"什么都没做"），也不是平切一刀（会留一个可见的端面台阶），
+     * 而是**圆角面平顺地跑出到那张面上** —— 半径沿链收到接近 0，面自然贴合 ✓
+     *
+     * <p>闭合链没有端点，不做 runout（那要用角补面，不是一回事）。
+     *
+     * @param pts        链点
+     * @param r          全半径
+     * @param taperStart 起点做 runout（起点 = 凸/凹公共顶点）
+     * @param taperEnd   终点做 runout
+     * @return 与 pts 一一对应的半径
+     */
+    public static double[] radiusProfile(final List<Vector3d> pts, final double r,
+                                         final boolean taperStart, final boolean taperEnd) {
+        if (pts == null || pts.isEmpty()) {
+            return new double[0];
+        }
+        final int n = pts.size();
+        final double[] out = new double[n];
+        java.util.Arrays.fill(out, r);
+        if (n < 2 || (!taperStart && !taperEnd)) {
+            return out;
+        }
+        // 闭合链 = 没有端点 ⇒ 不跑出
+        if (n > 2 && pts.get(0).distanceSquared(pts.get(n - 1)) < 1.0e-10) {
+            return out;
+        }
+        final double[] cum = new double[n];
+        for (int i = 1; i < n; i++) {
+            cum[i] = cum[i - 1] + pts.get(i).distance(pts.get(i - 1));
+        }
+        final double total = cum[n - 1];
+        if (total < 1.0e-9) {
+            return out;
+        }
+        final double tl = Math.min(r, 0.40 * total);
+        final double rMin = Math.max(0.01, 0.08 * r);
+        for (int i = 0; i < n; i++) {
+            double radius = r;
+            if (taperStart) {
+                radius = Math.min(radius, runoutRadius(cum[i], tl, r, rMin));
+            }
+            if (taperEnd) {
+                radius = Math.min(radius, runoutRadius(total - cum[i], tl, r, rMin));
+            }
+            out[i] = radius;
+        }
+        return out;
+    }
+
+    /** runout：距离端点 d 处的半径（d ≥ tl ⇒ 全半径）✓ */
+    private static double runoutRadius(final double d, final double tl,
+                                       final double r, final double rMin) {
+        if (d >= tl) {
+            return r;
+        }
+        return rMin + (r - rMin) * Math.max(0.0, d / tl);
+    }
+
+    /**
+     * 变半径扫掠体的**理论体积** ✓ = (1−π/4)·∫r² ds
+     * （每段把 r² 当线性变化积分 ⇒ {@code (a²+ab+b²)/3·len}）
+     */
+    public static double sweptVolume(final List<Vector3d> pts, final double[] radii) {
+        if (pts == null || radii == null || pts.size() < 2
+                || radii.length != pts.size()) {
+            return 0.0;
+        }
+        double sum = 0.0;
+        for (int i = 1; i < pts.size(); i++) {
+            final double a = radii[i - 1];
+            final double b = radii[i];
+            sum += (a * a + a * b + b * b) / 3.0 * pts.get(i).distance(pts.get(i - 1));
+        }
+        return sum * (1.0 - Math.PI / 4.0);
+    }
+
+    /**
      * 把象限符号从**存档 n2 基**换算到**扫掠第二轴基**（{@code tan×cap}）✓
      *
      * <p>扫掠体的第二轴是 {@code side = tan×cap}，它和存档里的 n2 只差一个符号
@@ -217,8 +298,7 @@ public final class FilletCutter {
     }
 
     /**
-     * 扫掠体（**半径可以沿链线性变化**）✓ —— 凸/凹过渡处把半径收小到 ~0，
-     * 两个圆角在共顶点处切向相接，不再有台阶 ✓
+     * 扫掠体（**半径可以沿链线性变化**）✓
      *
      * @param r0 起点半径
      * @param r1 终点半径（闭合链忽略，用平均值）
@@ -226,8 +306,34 @@ public final class FilletCutter {
     public static List<Vector3d[]> sweep(final List<Vector3d> points, final Vector3dc cap,
                                          final double r0, final double r1,
                                          final int q1, final int q2) {
-        final List<Vector3d[]> out = new ArrayList<>();
         if (points == null || points.size() < 2 || r0 <= 1.0e-6 || r1 <= 1.0e-6) {
+            return new ArrayList<>();
+        }
+        // 沿原始折线的累计长度 ⇒ 线性变半径 ✓
+        final double[] cum = new double[points.size()];
+        for (int i = 1; i < points.size(); i++) {
+            cum[i] = cum[i - 1] + points.get(i).distance(points.get(i - 1));
+        }
+        final double total = cum[cum.length - 1];
+        final double[] radii = new double[points.size()];
+        for (int i = 0; i < radii.length; i++) {
+            radii[i] = total < 1.0e-9 ? (r0 + r1) * 0.5
+                    : r0 + (r1 - r0) * (cum[i] / total);
+        }
+        return sweep(points, cap, radii, q1, q2);
+    }
+
+    /**
+     * 扫掠体（**每个关节一个半径**）✓ —— 凸/凹相交处的 **fillet runout**：
+     * 半径沿链收到很小 ⇒ 圆角面平滑地"跑出"到相邻面上，既不留台阶也不留缝。
+     *
+     * @param radii 与 {@code points} 一一对应的半径（半径必须 > 0）
+     */
+    public static List<Vector3d[]> sweep(final List<Vector3d> points, final Vector3dc cap,
+                                         final double[] radii, final int q1, final int q2) {
+        final List<Vector3d[]> out = new ArrayList<>();
+        if (points == null || points.size() < 2 || radii == null
+                || radii.length != points.size()) {
             return out;
         }
         final Vector3d n = new Vector3d(cap);
@@ -235,13 +341,19 @@ public final class FilletCutter {
             return out;
         }
         n.normalize();
-        // 去掉连续重复点
+        // 去掉连续重复点（半径同步去掉）
         final List<Vector3d> pts = new ArrayList<>();
-        for (final Vector3d p : points) {
+        final List<Double> rs = new ArrayList<>();
+        for (int i = 0; i < points.size(); i++) {
+            final Vector3d p = points.get(i);
+            if (radii[i] <= 1.0e-6) {
+                return out;
+            }
             if (!pts.isEmpty() && pts.get(pts.size() - 1).distanceSquared(p) < 1.0e-12) {
                 continue;
             }
             pts.add(new Vector3d(p));
+            rs.add(radii[i]);
         }
         if (pts.size() < 2) {
             return out;
@@ -250,6 +362,7 @@ public final class FilletCutter {
                 && pts.get(0).distanceSquared(pts.get(pts.size() - 1)) < 1.0e-10;
         if (closed) {
             pts.remove(pts.size() - 1);
+            rs.remove(rs.size() - 1);
         }
         final int m = pts.size();
         if (m < 2) {
@@ -276,13 +389,6 @@ public final class FilletCutter {
             }
             tan[i] = t.normalize();
         }
-        // 沿链的累计长度 ⇒ 每个关节的**局部半径**（r0→r1 线性变化）✓
-        final double[] cum = new double[m];
-        for (int i = 1; i < m; i++) {
-            cum[i] = cum[i - 1] + pts.get(i).distance(pts.get(i - 1));
-        }
-        final double total = closed
-                ? cum[m - 1] + pts.get(0).distance(pts.get(m - 1)) : cum[m - 1];
         // 每个关节的截面（角平分面内），点数必须一致
         final List<List<Vector3d>> sections = new ArrayList<>(m);
         for (int i = 0; i < m; i++) {
@@ -293,14 +399,8 @@ public final class FilletCutter {
             side.normalize();
             final Vector3d e1 = new Vector3d(n).mul(q1);
             final Vector3d e2 = side.mul(q2);
-            final double ri;
-            if (closed || total < 1.0e-9) {
-                ri = (r0 + r1) * 0.5;
-            } else {
-                ri = r0 + (r1 - r0) * (cum[i] / total);
-            }
             final List<Vector3d> sec = sectionOffsets(
-                    new Vector3d(e1).negate(), new Vector3d(e2).negate(), ri);
+                    new Vector3d(e1).negate(), new Vector3d(e2).negate(), rs.get(i));
             if (sec.size() < 3) {
                 return out;
             }

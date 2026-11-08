@@ -340,8 +340,14 @@ public final class PatternTool {
                 if (sk == null) {
                     continue;
                 }
+                // ★ 切割的线框：`Solid.edges()` 对 Cut 返回空 ⇒ 以前阵列的切割
+                //   没有任何预览线（用户实测）。改用拉伸棱柱的线框 ✓
+                final List<Vector3d[]> wire =
+                        src.shape() instanceof final Solid.Shape.Cut c
+                                ? com.ovo.sablestopnow.sketch.Extrude.prismEdges(sk, c.params())
+                                : src.edges(sk);
                 for (final double[] off : offsets) {
-                    for (final Vector3d[] e : src.edges(sk)) {
+                    for (final Vector3d[] e : wire) {
                         segs.add(new FeaturePreview.Seg(
                                 new Vector3d(e[0]).add(off[0], off[1], off[2]),
                                 new Vector3d(e[1]).add(off[0], off[1], off[2])));

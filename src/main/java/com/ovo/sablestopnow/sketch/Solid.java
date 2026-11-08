@@ -3097,14 +3097,19 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 z - 2 * d * n[2] + o[2]);
     }
 
-    /** 反射一个网格 ✓（位置反射、法线取反、三角形绕序翻转） */
+    /** 反射一个网格 ✓（位置反射、法线按**反射矩阵**变换、三角形绕序翻转） */
     private static SolidMesh.Mesh reflectMesh(final SolidMesh.Mesh in, final double[] o,
                                               final double[] n) {
         final List<SolidMesh.Vertex> vs = new java.util.ArrayList<>(in.vertices().size());
+        final double[] zero = {0, 0, 0};
         for (final SolidMesh.Vertex v : in.vertices()) {
             final Vector3d p = reflectPoint(v.position(), o, n);
-            vs.add(new SolidMesh.Vertex(p,
-                    new Vector3d(-v.normal().x, -v.normal().y, -v.normal().z), v.u(), v.v()));
+            // ★★ 法线必须用**反射矩阵**变换：R·n = n − 2(n·n̂)n̂ ✔
+            //   以前直接写成 (−x,−y,−z)（整体取反）✗ —— 只有镜像面法线恰好竖直时才对，
+            //   一般朝向（尤其斜镜像面）下法线是错的 ⇒ 带法线的着色/光影发暗、光照方向不对
+            //   （用户实测"光照看起来有点暗"）。绕序已经翻过 ⇒ 存 R·n 与几何朝向一致 ✓
+            final Vector3d rn = reflectPoint(v.normal(), zero, n);
+            vs.add(new SolidMesh.Vertex(p, rn, v.u(), v.v()));
         }
         final int[] src = in.indices();
         final int[] outIdx = new int[src.length];

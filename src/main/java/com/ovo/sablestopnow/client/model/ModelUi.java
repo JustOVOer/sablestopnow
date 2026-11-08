@@ -4599,21 +4599,8 @@ public final class ModelUi {
                         }
                     }
                 }
-              if (com.ovo.sablestopnow.client.model.PatternTool.dirCount() > 0
-                      && com.ovo.sablestopnow.client.model.PatternTool.sourceCount() > 0) {
-                  body.add(new Button(applyLabel("model.pattern.create"), () -> {
-                      createPatternFeature((int) (double) patternN1.get(),
-                              (double) patternS1.get(),
-                              (int) (double) patternN2.get(), (double) patternS2.get());
-                      lastLeftSignature = null;
-                      refreshLeftPanel();
-                  }).width(Widget.FILL));
-              }
-              body.add(new Button(Component.translatable("model.pattern.clear"), () -> {
-                  PatternTool.reset();
-                  lastLeftSignature = null;
-                  refreshLeftPanel();
-              }).width(Widget.FILL));
+              // ⚠ 与镜像面板同样的坑：上面已经有一组“创建阵列 / 清空选择”
+              //   （始终可见、内部会校验方向/源），这里以前又加了一组 ⇒ 用户看到两份按钮。
               return;
           }
         if (ModelTools.MATE.equals(tool)) {

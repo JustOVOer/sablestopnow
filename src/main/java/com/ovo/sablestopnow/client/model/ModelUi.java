@@ -278,6 +278,7 @@ public final class ModelUi {
                             cutMode = false;
                             mirrorSources.clear();
                             mirrorPlaneOrigin = null;
+                            mirrorPlaneSegs = null;
                             mirrorPlaneNormal = null;
                             startTool(ModelTools.MIRROR);
                         }).tooltipKey("model.tool.mirror.hint"));
@@ -2039,6 +2040,16 @@ public final class ModelUi {
     private static org.joml.Vector3d mirrorPlaneOrigin;
     private static org.joml.Vector3d mirrorPlaneNormal;
     private static java.util.UUID mirrorBody;
+    /**
+     * 选中作镜像面的**那张面的真实轮廓**（局部坐标，每段 6 个数）✓
+     *
+     * <p>为什么单独存：`Shape.Plane.corners()` 造的只是"以命中点为中心的方框"，
+     * 用户实际想看到的是**自己点中的那张面**。真命中面时用
+     * {@code hit.face().segments()}（真实边界）；只有方块面兜底（没有面数据）或
+     * 选的是**基准面特征**时才退回方框/基准面方片。
+     */
+    @Nullable
+    private static java.util.List<double[]> mirrorPlaneSegs;
 
     /** Mirror tool: first face sets the mirror plane; a second face click with sources creates it. */
     public static boolean mirrorPickPlane(
@@ -2063,6 +2074,8 @@ public final class ModelUi {
             mirrorPlaneOrigin = new org.joml.Vector3d(loc[0], loc[1], loc[2]);
             mirrorPlaneNormal = new org.joml.Vector3d(loc[3], loc[4], loc[5]).normalize();
             mirrorBody = bh.body();
+            // 方块面兜底：没有面的真实轮廓 ⇒ 用方框（updateMirrorPreview 里生成）
+            mirrorPlaneSegs = null;
             updateMirrorPreview();
             lastLeftSignature = null;
             refreshLeftPanel();
@@ -2076,6 +2089,9 @@ public final class ModelUi {
         mirrorPlaneOrigin = new org.joml.Vector3d(hit.localCenter());
         mirrorPlaneNormal = new org.joml.Vector3d(hit.localNormal()).normalize();
         mirrorBody = hit.body();
+        // ★ 用**真实的面轮廓**做参考高亮（局部坐标，渲染侧再按 renderPose 变换）✓
+        mirrorPlaneSegs = hit.face() == null ? null
+                : new java.util.ArrayList<>(hit.face().segments());
         updateMirrorPreview();
         forceRefreshLeft();
         return true;
@@ -2097,7 +2113,10 @@ public final class ModelUi {
 
     /** Preview: mirrored wireframe of the selected sources, in preview yellow. */
     private static void updateMirrorPreview() {
-        if (mirrorPlaneOrigin == null || mirrorPlaneNormal == null || mirrorSources.isEmpty()) {
+        // ★★ bug 3 修复：参考面（青色）与"镜像副本（黄色）"**分开两条路**。
+        //   以前 sources 为空就把整个预览清空 ⇒ 用户按"先选面、再选源"的顺序操作时，
+        //   选完镜像面**每帧都被清掉**，看起来就是"根本没有高亮选中的参考面"。
+        if (mirrorPlaneOrigin == null || mirrorPlaneNormal == null) {
             com.ovo.sablestopnow.client.model.FeaturePreview.clear();
             return;
         }
@@ -2108,10 +2127,16 @@ public final class ModelUi {
         }
         final double[] o = {mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z};
         final double[] n = {mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z};
-        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
+        // ① 参考几何：优先画**真实的面轮廓**；没有（方块面兜底）就画方框 ✓
+        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> refs =
                 new java.util.ArrayList<>();
-        // ★ 先把**镜像面**画成一个方框（选完面立刻有可见反馈 ✓ 之前只有"选了但看不到"）
-        {
+        if (mirrorPlaneSegs != null && !mirrorPlaneSegs.isEmpty()) {
+            for (final double[] s : mirrorPlaneSegs) {
+                refs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
+                        new org.joml.Vector3d(s[0], s[1], s[2]),
+                        new org.joml.Vector3d(s[3], s[4], s[5])));
+            }
+        } else {
             final com.ovo.sablestopnow.sketch.Solid.Shape.Plane tmp =
                     new com.ovo.sablestopnow.sketch.Solid.Shape.Plane(
                             mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z,
@@ -2119,27 +2144,34 @@ public final class ModelUi {
                             0.0, null, -1);
             final java.util.List<org.joml.Vector3d> cs = tmp.corners(1.2);
             for (int i = 0; i < 4; i++) {
-                segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
+                refs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
                         cs.get(i), cs.get((i + 1) % 4)));
             }
         }
-        final var sketches = com.ovo.sablestopnow.sketch.SketchClientState.current(level);
-        for (final com.ovo.sablestopnow.sketch.Solid src
-                : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, mirrorBody)) {
-            if (!mirrorSources.contains(src.id())) {
-                continue;
-            }
-            final com.ovo.sablestopnow.sketch.Sketch sk = src.resolve(sketches);
-            if (sk == null) {
-                continue;
-            }
-            for (final org.joml.Vector3d[] e : src.edges(sk)) {
-                segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
-                        com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[0], o, n),
-                        com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[1], o, n)));
+        // ② 产物预览：镜像副本（源为空时为空表，但**不影响**上面的参考几何）✓
+        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
+                new java.util.ArrayList<>();
+        if (!mirrorSources.isEmpty()) {
+            final var sketches = com.ovo.sablestopnow.sketch.SketchClientState.current(level);
+            for (final com.ovo.sablestopnow.sketch.Solid src
+                    : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, mirrorBody)) {
+                if (!mirrorSources.contains(src.id())) {
+                    continue;
+                }
+                final com.ovo.sablestopnow.sketch.Sketch sk = src.resolve(sketches);
+                if (sk == null) {
+                    continue;
+                }
+                for (final org.joml.Vector3d[] e : src.edges(sk)) {
+                    segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
+                            com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[0], o, n),
+                            com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[1], o, n)));
+                }
             }
         }
+        // 顺序固定：set() 会清掉上一轮参考几何，所以最后再 setRefs ✓
         com.ovo.sablestopnow.client.model.FeaturePreview.set(mirrorBody, mirrorPlaneNormal, segs);
+        com.ovo.sablestopnow.client.model.FeaturePreview.setRefs(mirrorBody, refs);
     }
 
     /** Creates the mirror feature. */
@@ -2187,6 +2219,7 @@ public final class ModelUi {
             com.ovo.sablestopnow.client.model.FeaturePreview.clear();
             mirrorSources.clear();
             mirrorPlaneOrigin = null;
+            mirrorPlaneSegs = null;
             mirrorPlaneNormal = null;
             return true;
         }
@@ -2207,6 +2240,7 @@ public final class ModelUi {
         com.ovo.sablestopnow.client.model.FeaturePreview.clear();
         mirrorSources.clear();
         mirrorPlaneOrigin = null;
+        mirrorPlaneSegs = null;
         mirrorPlaneNormal = null;
         com.ovo.sablestopnow.SablestopNow.LOGGER.info("[mirror] created idx={}", mirror.index());
         lastTreeSignature = null;
@@ -4408,6 +4442,7 @@ public final class ModelUi {
                   mirrorSources.clear();
                   MIRROR_SRC_PROPS.forEach((k, prop) -> prop.set(false));
                   mirrorPlaneOrigin = null;
+                  mirrorPlaneSegs = null;
                   mirrorPlaneNormal = null;
                   com.ovo.sablestopnow.client.model.FeaturePreview.clear();
                   forceRefreshLeft();
@@ -4460,12 +4495,28 @@ public final class ModelUi {
                               continue;
                           }
                           final double[] o = pl.offsetOrigin();
+                          // ★ 基准面特征作镜像面：参考高亮画**这块基准面本身**
+                          //   （四角 = shape 的方片，再平移到 offsetOrigin）✓
+                          final double dxo = o[0] - pl.ox();
+                          final double dyo = o[1] - pl.oy();
+                          final double dzo = o[2] - pl.oz();
+                          final java.util.List<double[]> planeRefSegs =
+                                  new java.util.ArrayList<>(4);
+                          final java.util.List<org.joml.Vector3d> pcs = pl.corners(1.2);
+                          for (int pi = 0; pi < 4; pi++) {
+                              final org.joml.Vector3d pa = pcs.get(pi);
+                              final org.joml.Vector3d pb = pcs.get((pi + 1) % 4);
+                              planeRefSegs.add(new double[] {
+                                  pa.x + dxo, pa.y + dyo, pa.z + dzo,
+                                  pb.x + dxo, pb.y + dyo, pb.z + dzo});
+                          }
                           body.add(new Button(Component.translatable("model.mirror.use_plane",
                                   sd.index()), () -> {
                               mirrorPlaneOrigin = new org.joml.Vector3d(o[0], o[1], o[2]);
                               mirrorPlaneNormal = new org.joml.Vector3d(pl.nx(), pl.ny(), pl.nz())
                                       .normalize();
                               mirrorBody = sd.body();
+                              mirrorPlaneSegs = planeRefSegs;
                               updateMirrorPreview();
                               forceRefreshLeft();
                           }).width(Widget.FILL));
@@ -4482,6 +4533,7 @@ public final class ModelUi {
               body.add(new Button(Component.translatable("model.mirror.clear"), () -> {
                   mirrorSources.clear();
                   mirrorPlaneOrigin = null;
+                  mirrorPlaneSegs = null;
                   mirrorPlaneNormal = null;
                   com.ovo.sablestopnow.client.model.FeaturePreview.clear();
                   lastLeftSignature = null;
@@ -5201,6 +5253,7 @@ public final class ModelUi {
               filletSourceSolid = null;
               mirrorSources.clear();
               mirrorPlaneOrigin = null;
+              mirrorPlaneSegs = null;
               mirrorPlaneNormal = null;
               com.ovo.sablestopnow.client.model.FeaturePreview.clear();
               // ★ 默认把该体的**全部材料特征**勾上 ⇒ "创建镜像"按钮一定出现 ✓

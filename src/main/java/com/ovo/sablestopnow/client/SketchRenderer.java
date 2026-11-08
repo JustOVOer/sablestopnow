@@ -1447,7 +1447,9 @@ public final class SketchRenderer {
                                           final Vec3 cameraPos, final ClientSubLevel sub) {
         final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> segs =
                 com.ovo.sablestopnow.client.model.FeaturePreview.segments();
-        if (segs.isEmpty()) {
+        final java.util.List<com.ovo.sablestopnow.client.model.FeaturePreview.Seg> refs =
+                com.ovo.sablestopnow.client.model.FeaturePreview.refs();
+        if (segs.isEmpty() && refs.isEmpty()) {
             return 0;
         }
         final Pose3dc rp = sub.renderPose();
@@ -1458,13 +1460,25 @@ public final class SketchRenderer {
         final Vec3 up = new Vec3(wn.x, wn.y, wn.z);
         quadUp = up.lengthSqr() < 1.0e-9 ? new Vec3(0, 1, 0) : up.normalize();
         final float[] yellow = Colors.preview();
+        // ★ 已选参考几何用**青色**，和黄色的"产物预览"区分开 ✓
+        final float[] cyan = {0.25f, 0.95f, 0.98f};
         // 第二遍：**不做深度测试**再画一次（暗一点）⇒ 被模型挡住的那一半预览也看得见
         // （用户实测："双向拉伸/切割其中一个方向没有预览线框" —— 其实是被实体挡住了）
         final MultiBufferSource.BufferSource flatBuf =
                 immediate(1 << 16);
         final VertexConsumer vflat = flatBuf.getBuffer(ModRenderTypes.SKETCH_LINES_QUADS_FLAT);
         final float[] dim = {yellow[0] * 0.55f, yellow[1] * 0.55f, yellow[2] * 0.55f};
+        final float[] dimCyan = {cyan[0] * 0.55f, cyan[1] * 0.55f, cyan[2] * 0.55f};
         int drawn = 0;
+        // ① 参考几何（面/棱）先画：它表示"你选中的东西"，任何时候都必须看得见 ✓
+        for (final var seg : refs) {
+            final Vec3 a = world(cameraPos, rp, seg.a());
+            final Vec3 b = world(cameraPos, rp, seg.b());
+            quadLine(vcq, pose, a, b, cyan);
+            quadLine(vflat, pose, a, b, dimCyan);
+            drawn++;
+        }
+        // ② 产物预览（黄色）
         for (final var seg : segs) {
             final Vec3 a = world(cameraPos, rp, seg.a());
             final Vec3 b = world(cameraPos, rp, seg.b());

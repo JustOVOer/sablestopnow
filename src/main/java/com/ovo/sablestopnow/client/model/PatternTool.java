@@ -290,10 +290,16 @@ public final class PatternTool {
                 }));
     }
 
-    /** 预览：把源特征按偏移复制后的线框画成黄色 ✓ */
+    /**
+     * 预览：**青色 = 选中的方向棱**（与源无关）、**黄色 = 各份副本** ✓
+     *
+     * <p>★★ bug 4 修复：以前这里只要 `SOURCES` 为空就直接 `clear()` 返回，
+     * 而且从不画方向棱本身（`DIR_EDGES` 只写不读）⇒ 用户点完方向棱看不到任何高亮。
+     * 现在两条路分开：参考棱只依赖 `DIRS`/`DIR_EDGES`，副本才依赖 `SOURCES`。
+     */
     public static void preview(final int n1, final double s1, final int n2, final double s2) {
         FeaturePreview.clear();
-        if (body == null || DIRS.isEmpty() || SOURCES.isEmpty()) {
+        if (body == null || DIRS.isEmpty()) {
             return;
         }
         final Minecraft mc = Minecraft.getInstance();
@@ -301,40 +307,51 @@ public final class PatternTool {
         if (level == null) {
             return;
         }
-        final List<double[]> offsets = new ArrayList<>();
-        final Solid.Shape.Dir d0 = DIRS.get(0);
-        for (int i = 1; i < Math.max(1, n1); i++) {
-            offsets.add(new double[] {d0.dx() * s1 * i, d0.dy() * s1 * i, d0.dz() * s1 * i});
+        // ① 参考几何：选中的方向棱（青色，与源列表无关）✓
+        final List<FeaturePreview.Seg> refs = new ArrayList<>();
+        for (final double[] s : DIR_EDGES) {
+            refs.add(new FeaturePreview.Seg(
+                    new Vector3d(s[0], s[1], s[2]), new Vector3d(s[3], s[4], s[5])));
         }
-        if (DIRS.size() >= 2 && n2 > 1) {
-            final Solid.Shape.Dir d1 = DIRS.get(1);
-            final List<double[]> base = new ArrayList<>(offsets);
-            for (int j = 1; j < n2; j++) {
-                for (final double[] o0 : base) {
-                    offsets.add(new double[] {o0[0] + d1.dx() * s2 * j,
-                            o0[1] + d1.dy() * s2 * j, o0[2] + d1.dz() * s2 * j});
-                }
-            }
-        }
+        // ② 产物预览：各份副本（源为空 ⇒ 空表，但参考棱照样显示）✓
         final List<FeaturePreview.Seg> segs = new ArrayList<>();
-        final var sketches = SketchClientState.current(level);
-        for (final Solid src : SolidClientState.ofBody(level, body)) {
-            if (!SOURCES.contains(src.id())) {
-                continue;
+        if (!SOURCES.isEmpty()) {
+            final List<double[]> offsets = new ArrayList<>();
+            final Solid.Shape.Dir d0 = DIRS.get(0);
+            for (int i = 1; i < Math.max(1, n1); i++) {
+                offsets.add(new double[] {d0.dx() * s1 * i, d0.dy() * s1 * i, d0.dz() * s1 * i});
             }
-            final Sketch sk = src.resolve(sketches);
-            if (sk == null) {
-                continue;
+            if (DIRS.size() >= 2 && n2 > 1) {
+                final Solid.Shape.Dir d1 = DIRS.get(1);
+                final List<double[]> base = new ArrayList<>(offsets);
+                for (int j = 1; j < n2; j++) {
+                    for (final double[] o0 : base) {
+                        offsets.add(new double[] {o0[0] + d1.dx() * s2 * j,
+                                o0[1] + d1.dy() * s2 * j, o0[2] + d1.dz() * s2 * j});
+                    }
+                }
             }
-            for (final double[] off : offsets) {
-                for (final Vector3d[] e : src.edges(sk)) {
-                    segs.add(new FeaturePreview.Seg(
-                            new Vector3d(e[0]).add(off[0], off[1], off[2]),
-                            new Vector3d(e[1]).add(off[0], off[1], off[2])));
+            final var sketches = SketchClientState.current(level);
+            for (final Solid src : SolidClientState.ofBody(level, body)) {
+                if (!SOURCES.contains(src.id())) {
+                    continue;
+                }
+                final Sketch sk = src.resolve(sketches);
+                if (sk == null) {
+                    continue;
+                }
+                for (final double[] off : offsets) {
+                    for (final Vector3d[] e : src.edges(sk)) {
+                        segs.add(new FeaturePreview.Seg(
+                                new Vector3d(e[0]).add(off[0], off[1], off[2]),
+                                new Vector3d(e[1]).add(off[0], off[1], off[2])));
+                    }
                 }
             }
         }
+        // 顺序固定：set() 会清参考，最后 setRefs ✓
         FeaturePreview.set(body, null, segs);
+        FeaturePreview.setRefs(body, refs);
     }
 
     /** 真正创建阵列特征 ✓ */

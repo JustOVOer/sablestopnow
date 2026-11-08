@@ -753,11 +753,29 @@ public final class SketchClient {
                 block.getY() + 0.5 + face.getStepY() * 0.5,
                 block.getZ() + 0.5 + face.getStepZ() * 0.5);
         final Vector3d normal = new Vector3d(face.getStepX(), face.getStepY(), face.getStepZ());
+        // ⚠ 草图平面**必须**用 plot 局部法线（存档就是局部系），但相机必须用**世界**法线。
+        //   ★★ 实测 bug：这条分支原来把局部法线直接丢给 alignCameraTo ⇒
+        //     对**未对齐 MC 网格**的结构（被物理旋转过），视线沿的是局部法线而不是真实面的
+        //     世界法线 ⇒ 进草图不正视。另外两条入口（基准面/模型面）都做了姿态变换，
+        //     只有这条漏了。用 MateTargeting.worldAxis 只做旋转（不掺平移）✓
+        final org.joml.Vector3d worldNormal = hit.body() == null
+                ? new org.joml.Vector3d(normal)
+                : MateTargeting.worldAxis(hit.body(), normal);
         if (!MODE.chooseFace(center, normal)) {
             return false;
         }
         SketchRenderer.setEditing(MODE.editingId());
-        alignCameraTo(normal);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[sketch-face-block] body={} local=({},{},{}) world=({},{},{})",
+                hit.body() == null ? "?"
+                        : hit.body().getUniqueId().toString().substring(0, 8),
+                String.format(java.util.Locale.ROOT, "%.3f", normal.x),
+                String.format(java.util.Locale.ROOT, "%.3f", normal.y),
+                String.format(java.util.Locale.ROOT, "%.3f", normal.z),
+                String.format(java.util.Locale.ROOT, "%.3f", worldNormal.x),
+                String.format(java.util.Locale.ROOT, "%.3f", worldNormal.y),
+                String.format(java.util.Locale.ROOT, "%.3f", worldNormal.z));
+        alignCameraTo(worldNormal);
         return true;
     }
 
@@ -808,15 +826,23 @@ public final class SketchClient {
                 : Math.toDegrees(Math.atan2(-lx, lz));
         com.ovo.sablestopnow.client.model.ModelCamera.alignTo((float) yawDeg, (float) pitchDeg);
         // ★ **自证式修正** ✓：不依赖"我对 yaw/pitch 符号的记忆"✗（真机上已出现 plates=0 的疑点 ✗）
-        //   做法 ✓：设置完读回真实视线方向 ✓，若它与面法线**同向**（说明相机朝着背面 ✗）
+        //   做法 ✓：算出**目标**视线方向，若它与面法线**同向**（说明相机朝着背面 ✗）
         //        就把 yaw 转 180°、pitch 取反再设一次 ✓ ⇒ 无论约定如何，结果都必然是"正对着面看"✓
-        final var look = com.ovo.sablestopnow.client.model.ModelCamera.lookVector();
-        final double dot = look.x * normal.x() + look.y * normal.y() + look.z * normal.z();
+        //
+        //   ★★ 修实测 bug：这里原来读的是 `ModelCamera.lookVector()` —— 那是**当前**朝向，
+        //      而 `alignTo` 只设了**目标**（yaw/pitch 还在缓动，此刻仍是旧视角）
+        //      ⇒ 判据用的是上一个视角 ⇒ 有一半概率把**本来正确**的目标再翻 180°，
+        //      相机跑到面的背后（看起来"没正视 / 从模型里看"）。
+        //      现在用目标 yaw/pitch 解析算出的 look，正常恒为 dot=−1，永不翻转 ✓
+        final var targetLook = com.ovo.sablestopnow.client.model.ModelCamera
+                .viewFor((float) yawDeg, (float) pitchDeg);
+        final double dot = targetLook.x * normal.x() + targetLook.y * normal.y()
+                + targetLook.z * normal.z();
         if (dot > 0.0) {
             com.ovo.sablestopnow.client.model.ModelCamera.alignTo(
                     (float) (yawDeg + 180.0), (float) -pitchDeg);
             com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                    "[sketch] face-on corrected: dot={} ⇒ flipped",
+                    "[sketch] face-on corrected: dotTarget={} ⇒ flipped",
                     String.format(java.util.Locale.ROOT, "%.3f", dot));
         }
     }

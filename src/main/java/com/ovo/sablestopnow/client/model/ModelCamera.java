@@ -551,6 +551,16 @@ public final class ModelCamera {
 
     // ============ 基向量 ============
 
+    /**
+     * 给定 yaw/pitch（度）的**视线方向** ✓（与 {@link #lookVector()} 使用同一套约定）。
+     *
+     * <p>给"设置目标后立刻校验目标是否正确"用：{@link #lookVector()} 返回的是**当前**
+     * （还在缓动中）的朝向，刚调用 {@link #alignTo} 之后读它拿到的是旧值 ⇒ 判据会反。
+     */
+    public static Vec3 viewFor(final float yawDeg, final float pitchDeg) {
+        return viewVector(yawDeg, pitchDeg);
+    }
+
     private static Vec3 viewVector(final float yawDeg, final float pitchDeg) {
         final float f = pitchDeg * (float) (Math.PI / 180.0);
         final float g = -yawDeg * (float) (Math.PI / 180.0);

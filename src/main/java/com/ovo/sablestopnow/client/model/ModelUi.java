@@ -443,8 +443,8 @@ public final class ModelUi {
             body.add(backField);
         }
 
-        body.add(new Button(Component.translatable("model.extrude.create"),
-                ModelUi::createExtrude).width(Widget.FILL));
+        body.add(new Button(applyLabel("model.extrude.create"),
+                () -> createExtrude()).width(Widget.FILL));
         body.add(reselectButton());
     }
 
@@ -514,8 +514,8 @@ public final class ModelUi {
         });
         body.add(angleField);
 
-        body.add(new Button(Component.translatable("model.revolve.create"),
-                ModelUi::createRevolve).width(Widget.FILL));
+        body.add(new Button(applyLabel("model.revolve.create"),
+                () -> createRevolve()).width(Widget.FILL));
         body.add(reselectButton());
     }
 
@@ -614,7 +614,9 @@ public final class ModelUi {
         // **应用**：把待定的贴图参数真正写到实体上（用户原则：只有"确定"才作出更改）
         body.add(new Button(Component.translatable("model.texture.apply"), () -> {
             saveAppearance(solid, solid.appearance()
-                    .withBlocksPerTile(textureScale.get()));
+                    .withBlocksPerTile(textureScale.get())
+                    // ★ connected 以前**从来没被保存过**（复选框只是改了一个 UI 待定值）
+                    .withConnected(Boolean.TRUE.equals(textureConnected.get())));
             refreshLeftPanel();
         }).width(Widget.FILL));
           // item 11: connected texture toggle (needs block ctm data)
@@ -627,16 +629,28 @@ public final class ModelUi {
                             com.ovo.sablestopnow.sketch.SolidAppearance.EMPTY))
                     .width(Widget.FILL));
         }
-        body.add(new Button(Component.translatable("model.texture.close"), () -> {
-            // ⚠ **关闭必须强制重建**：`refreshLeftPanel()` 开头有"签名没变就早退"的优化，
-            //   而关闭时签名恰好可能被判成"没变" → 什么都不重建 → **面板关不掉**
-            //   （用户实测："texture 面板仍然无法被关闭或者顶掉"）。
-            //   关闭是明确的用户动作，不该被这个优化挡住，所以把上次签名清掉强制重建。
-            textureSolidId = null;
-            textureBlockQuery.set("");
-            lastLeftSignature = null;
-            refreshLeftPanel();
-        }).width(Widget.FILL));
+        body.add(new Button(Component.translatable("model.texture.close"),
+                () -> closeTextureEditor(false)).width(Widget.FILL));
+    }
+
+    /**
+     * 关闭贴图编辑区 ✓
+     *
+     * @param apply true = 先把待定参数（平铺比例 / 连接纹理）写回实体（“完成”用）；
+     *              false = 直接关闭、丢弃待定值（“关闭”/“取消”用）
+     */
+    private static void closeTextureEditor(final boolean apply) {
+        final com.ovo.sablestopnow.sketch.Solid solid = resolveSolid(textureSolidId);
+        if (apply && solid != null) {
+            saveAppearance(solid, solid.appearance()
+                    .withBlocksPerTile(textureScale.get())
+                    .withConnected(Boolean.TRUE.equals(textureConnected.get())));
+        }
+        textureSolidId = null;
+        textureBlockQuery.set("");
+        textureSearchApplied.set("");
+        lastLeftSignature = null;
+        refreshLeftPanel();
     }
 
     /**
@@ -905,15 +919,15 @@ public final class ModelUi {
      * <p>⚠ 旋转体目前**不参与碰撞**（斜几何要用 OBB，还没做）——所以这里不检查"能不能拉出东西"，
      * 只检查轴选没选。
      */
-    private static void createRevolve() {
+    private static boolean createRevolve() {
         final com.ovo.sablestopnow.sketch.Sketch source = currentExtrudeSource();
         if (source == null) {
             ModelMode.prompt("model.prompt.extrude_pick_sketch");
-            return;
+            return false;
         }
         if (revolveAxis == null) {
             ModelMode.prompt("model.revolve.no_axis");
-            return;
+            return false;
         }
         final com.ovo.sablestopnow.sketch.Revolve.Params params =
                 new com.ovo.sablestopnow.sketch.Revolve.Params(
@@ -940,7 +954,13 @@ public final class ModelUi {
                 edgeCount, revolveAxis[0], revolveAxis[1], revolveAxis[2], revolveAxis[3]);
         if (edgeCount == 0) {
             ModelMode.prompt("model.revolve.empty_profile");
-            return;
+            return false;
+        }
+        // ★ 编辑已有旋转 ⇒ 原地更新（同 id / 序号 / 草图）✓
+        if (commitShape(new com.ovo.sablestopnow.sketch.Solid.Shape.Revolution(params))) {
+            com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+            lastPreviewSig = "";
+            return true;
         }
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(
                 com.ovo.sablestopnow.sketch.Solid.createRevolution(
@@ -949,6 +969,7 @@ public final class ModelUi {
         lastPreviewSig = "";
         ModelMode.prompt("model.prompt.extrude_created");
         refreshLeftPanel();
+        return true;
     }
 
     /** 拉伸/旋转的切换按钮。 */
@@ -1327,26 +1348,9 @@ public final class ModelUi {
                           return;
                       }
                   }
-                  // ★ item 6.5：点特征行 ⇒ **进入左侧编辑**（预填参数）✓
-                  if (solid.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Extrusion e) {
-                      ModelMode.setTool(ModelTools.EXTRUDE);
-                      cutMode = false;
-                      revolveMode = false;
-                      extrudeDepth.set(e.params().depth1());
-                        extrudeBackDepth.set(e.params().depth2());
-                        extrudeMode = e.params().mode();
-                      lastLeftSignature = null;
-                      refreshLeftPanel();
-                      return;
-                  }
-                  if (solid.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Revolution r) {
-                      ModelMode.setTool(ModelTools.EXTRUDE);
-                      revolveMode = true;
-                      revolveAngle.set(r.params().angleDeg());
-                      lastLeftSignature = null;
-                      refreshLeftPanel();
-                      return;
-                  }
+                  // ★ 点特征行**不再**进入编辑（右栏行点击不够可靠，用户要求只保留“编辑”子行）。
+                  //   以前这里有一段“预填参数但不记编辑目标”的半成品 ⇒ 点“创建”会
+                  //   **新建一个重复特征**，是“左栏逻辑混乱”的来源之一。
                 ModelMode.selectModel(solid.body());
                 refreshLeftPanel();
                 return;
@@ -1636,6 +1640,18 @@ public final class ModelUi {
      */
     @Nullable
     private static java.util.UUID textureSolidId;
+
+    /**
+     * 正在**编辑已有特征**的那个特征 id（null = 新建）。
+     *
+     * <p>★ 为什么必须有：树上点了“编辑”之后，左栏预填的是这个特征的参数，主按钮必须
+     * **原地更新同一个特征**（同 id / 序号 / 草图 / 外观）。没有这个标记时，
+     * 面板里的“创建”会新建一个**重复特征**（用户实测“逻辑混乱”）。
+     *
+     * <p>必须进 {@link #leftPanelSignature()}：否则面板内容与“更新/创建”文案都不刷新。
+     */
+    @Nullable
+    private static java.util.UUID editingSolidId;
 
     /** 贴图平铺比例：几个方块铺一次。 */
     /** item 11：连接纹理开关（面板内的待定值，应用时才写进实体）✓ */
@@ -2163,6 +2179,17 @@ public final class ModelUi {
             index = Math.max(index, s.index() + 1);
         }
         index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(mirrorBody, 0) + 1);
+        // ★ 编辑已有镜像 ⇒ **原地更新**（平面/源换掉，id/序号/草图/外观不变）✓
+        if (commitShape(new com.ovo.sablestopnow.sketch.Solid.Shape.Mirror(
+                mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z,
+                mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z,
+                new java.util.ArrayList<>(mirrorSources)))) {
+            com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+            mirrorSources.clear();
+            mirrorPlaneOrigin = null;
+            mirrorPlaneNormal = null;
+            return true;
+        }
         final java.util.UUID mirrorSketchId = sketchFor(
                 mirrorSources.isEmpty() ? null : mirrorSources.get(0), mirrorBody);
         if (mirrorSketchId == null) {
@@ -2771,11 +2798,11 @@ public final class ModelUi {
         return id == null ? "-" : id.toString().substring(0, 8);
     }
 
-    private static void createFilletFeature(final double radius) {
+    private static boolean createFilletFeature(final double radius) {
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
         if (level == null || filletPicks.isEmpty() || filletSourceSolid == null) {
-            return;
+            return false;
         }
         // ★ 坐标系核对（创建必经之路，保证一定打印）
         {
@@ -2824,7 +2851,7 @@ public final class ModelUi {
         if (edgeLen < 1.0e-3) {
             // 退化棱：硬建一个"什么都不切"的特征只会让玩家以为功能坏了 ✓ 直接说清楚
             ModelMode.prompt("model.fillet.degenerate");
-            return;
+            return false;
         }
         int index = 1;
         for (final com.ovo.sablestopnow.sketch.Solid s
@@ -2899,13 +2926,22 @@ public final class ModelUi {
                         refs.get(0).ax(), refs.get(0).ay(), refs.get(0).az()),
                 String.format(java.util.Locale.ROOT, "%.3f,%.3f,%.3f",
                         refs.get(0).bx(), refs.get(0).by(), refs.get(0).bz()), radius);
+        // ★ 编辑已有圆角 ⇒ **原地更新**（半径/棱集换掉，id/序号/草图/外观不变）✓
+        if (commitShape(new com.ovo.sablestopnow.sketch.Solid.Shape.Fillet(radius, refs))) {
+            com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+            filletPicks.clear();
+            filletPickSeq = 0;
+            filletSolidId = null;
+            filletSourceSolid = null;
+            return true;
+        }
         final java.util.UUID filletSketchId = sketchFor(filletSolidId, filletSourceSolid);
         com.ovo.sablestopnow.SablestopNow.LOGGER.info(
                 "[fillet-step] sketchId={} sourceSolid={}", shortId8(filletSketchId),
                 shortId8(filletSourceSolid));
         if (filletSketchId == null) {
             ModelMode.prompt("model.order.missing_sketch");
-            return;
+            return false;
         }
         final com.ovo.sablestopnow.sketch.Solid fillet =
                 com.ovo.sablestopnow.sketch.Solid.createFillet(filletSourceSolid,
@@ -2923,6 +2959,7 @@ public final class ModelUi {
         lastTreeSignature = null;
         refreshTreeNow();
         ModelMode.setTool(ModelTools.NONE);
+        return true;
     }
 
     /**
@@ -3162,12 +3199,12 @@ public final class ModelUi {
     }
 
     /** 真正创建基准面特征 ✓（与其它特征同级、受序号/依赖约束） */
-    private static void createPlaneFeature(final double distance) {
+    private static boolean createPlaneFeature(final double distance) {
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
         if (level == null || planeFaceOrigin == null || planeFaceNormal == null
                 || planeSourceSolid == null) {
-            return;
+            return false;
         }
         int index = 1;
         for (final com.ovo.sablestopnow.sketch.Solid s
@@ -3175,10 +3212,23 @@ public final class ModelUi {
             index = Math.max(index, s.index() + 1);
         }
         index = Math.max(index, LOCAL_SOLID_INDEX.getOrDefault(planeSourceSolid, 0) + 1);
+        // ★ 编辑已有基准面 ⇒ **原地更新**（偏移/来源换掉，id/序号/草图/外观不变）✓
+        if (commitShape(new com.ovo.sablestopnow.sketch.Solid.Shape.Plane(
+                planeFaceOrigin[0], planeFaceOrigin[1], planeFaceOrigin[2],
+                planeFaceNormal[0], planeFaceNormal[1], planeFaceNormal[2],
+                distance, planeSourceSolid, planeSourceFace))) {
+            com.ovo.sablestopnow.client.model.FeaturePreview.clear();
+            planeFaceOrigin = null;
+            planeFaceNormal = null;
+            planeSolidId = null;
+            planeSourceSolid = null;
+            planeSourceFace = -1;
+            return true;
+        }
         final java.util.UUID planeSketchId = sketchFor(planeSolidId, planeSourceSolid);
         if (planeSketchId == null) {
             ModelMode.prompt("model.order.missing_sketch");
-            return;
+            return false;
         }
         final com.ovo.sablestopnow.sketch.Solid plane =
                 com.ovo.sablestopnow.sketch.Solid.createPlane(planeSourceSolid,
@@ -3199,6 +3249,7 @@ public final class ModelUi {
         lastTreeSignature = null;
         refreshTreeNow();
         ModelMode.setTool(ModelTools.NONE);
+        return true;
     }
 
     /**
@@ -3231,6 +3282,11 @@ public final class ModelUi {
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
         if (level == null || solid == null) {
+            return;
+        }
+        // ★ 树上“编辑”子行：把该特征的全部参数预填进左栏，并进入**原地更新**模式 ✓
+        if ("edit".equals(action)) {
+            beginFeatureEdit(solid);
             return;
         }
         if ("del".equals(action)) {
@@ -3277,11 +3333,216 @@ public final class ModelUi {
         refreshTreeNow();
     }
 
-    private static void createExtrude() {
+    /** 主按钮文案：编辑已有特征时显示“更新”，否则保持原来的“创建”文案 ✓ */
+    private static Component applyLabel(final String createKey) {
+        return Component.translatable(
+                editingSolidId != null ? "model.feature.update" : createKey);
+    }
+
+    /**
+     * 开始**编辑一个已有特征**（右树“编辑”子行）✓
+     *
+     * <p>把该特征的全部参数预填进左栏，并记住 {@link #editingSolidId} ⇒
+     * 面板主按钮与底部“完成”都会**原地更新**它（id / 序号 / 草图 / 外观都不变），
+     * 不会像以前那样新建一个重复特征。
+     */
+    private static void beginFeatureEdit(final com.ovo.sablestopnow.sketch.Solid solid) {
+        if (solid == null || solid.shape() == null) {
+            return;
+        }
+        // 左栏是**单槽编辑器**：先把别的编辑态清掉（与树里各种选择互斥的既有纪律一致）
+        ModelForceUi.select(null);
+        ModelCouplingUi.clearSelection();
+        MateClientState.setHighlightedMate(null);
+        textureSolidId = null;
+        final com.ovo.sablestopnow.sketch.Solid.Shape shape = solid.shape();
+        selectedSolidId = solid.id();
+        ModelMode.selectModel(solid.body());
+        boolean ok = true;
+        if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Extrusion e) {
+            ModelMode.setTool(ModelTools.EXTRUDE);
+            revolveMode = false;
+            cutMode = false;
+            extrudeSource = solid.sketchId();
+            extrudeDepth.set(e.params().depth1());
+            extrudeBackDepth.set(e.params().depth2());
+            extrudeMode = e.params().mode();
+        } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Cut c) {
+            ModelMode.setTool(ModelTools.EXTRUDE);
+            revolveMode = false;
+            cutMode = true;
+            extrudeSource = solid.sketchId();
+            extrudeDepth.set(c.params().depth1());
+            extrudeBackDepth.set(c.params().depth2());
+            extrudeMode = c.params().mode();
+        } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Revolution r) {
+            ModelMode.setTool(ModelTools.EXTRUDE);
+            revolveMode = true;
+            cutMode = false;
+            extrudeSource = solid.sketchId();
+            final com.ovo.sablestopnow.sketch.Revolve.Params p = r.params();
+            revolveAxis = new double[] {p.axisU(), p.axisV(), p.dirU(), p.dirV()};
+            revolveAngle.set(p.angleDeg());
+            revolveDirection = p.direction();
+        } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Fillet f) {
+            ModelMode.setTool(ModelTools.FILLET);
+            filletSourceSolid = solid.body();
+            filletSolidId = null;
+            filletRadius.set(f.radius());
+            prefillFilletPicks(f.edges());
+        } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Mirror m) {
+            ModelMode.setTool(ModelTools.MIRROR);
+            mirrorBody = solid.body();
+            mirrorSources.clear();
+            mirrorSources.addAll(m.sources());
+            mirrorPlaneOrigin = new org.joml.Vector3d(m.ox(), m.oy(), m.oz());
+            mirrorPlaneNormal = new org.joml.Vector3d(m.nx(), m.ny(), m.nz());
+        } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Pattern p) {
+            ModelMode.setTool(ModelTools.PATTERN);
+            PatternTool.prefill(solid.body(), p.dirs(), p.sources());
+            if (!p.dirs().isEmpty()) {
+                patternN1.set((double) p.dirs().get(0).count());
+                patternS1.set(p.dirs().get(0).spacing());
+            }
+            if (p.dirs().size() >= 2) {
+                patternN2.set((double) p.dirs().get(1).count());
+                patternS2.set(p.dirs().get(1).spacing());
+            }
+        } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane pl) {
+            ModelMode.setTool(ModelTools.PLANE);
+            planeSourceSolid = solid.body();
+            planeSourceFace = pl.sourceFace();
+            planeFaceOrigin = new double[] {pl.ox(), pl.oy(), pl.oz()};
+            planeFaceNormal = new double[] {pl.nx(), pl.ny(), pl.nz()};
+            planeDistance.set(Math.abs(pl.distance()));
+        } else {
+            ok = false;
+        }
+        if (!ok) {
+            editingSolidId = null;
+            ModelMode.prompt("model.feature.not_editable");
+            return;
+        }
+        editingSolidId = solid.id();
+        lastLeftSignature = null;
+        refreshLeftPanel();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[feature-edit] begin id={} idx={} shape={}",
+                solid.id(), solid.index(), shape.getClass().getSimpleName());
+    }
+
+    /**
+     * 把存档里的 `EdgeRef` **反构**成拾取项 ✓（编辑圆角时预填左栏的棱列表）
+     *
+     * <p>一个 `EdgeRef` = 一条棱（直线 1 段；曲线棱是整条弧的折线）⇒
+     * 同一个 ref 的段共用**一个 group**，和当初“一次点选 = 一个特征引用”的规则一致。
+     * 凸凹标记存不进 `EdgeRef`，这里给 −1（未知），求值时由网格解析判定 —— 与新建路径一致 ✓
+     */
+    private static void prefillFilletPicks(
+            final java.util.List<com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef> refs) {
+        filletPicks.clear();
+        filletPickSeq = 0;
+        if (refs == null) {
+            return;
+        }
+        for (final com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef ref : refs) {
+            final int g = filletPickSeq++;
+            final org.joml.Vector3d n1 = new org.joml.Vector3d(
+                    ref.n1x(), ref.n1y(), ref.n1z());
+            final org.joml.Vector3d n2 = new org.joml.Vector3d(
+                    ref.n2x(), ref.n2y(), ref.n2z());
+            final java.util.List<double[]> segs = ref.isCurve()
+                    ? ref.curveSegs() : java.util.List.of();
+            if (!segs.isEmpty()) {
+                for (final double[] s : segs) {
+                    filletPicks.add(new FilletPick(g, copySeg(s), n1, n2, -1));
+                }
+            } else {
+                filletPicks.add(new FilletPick(g, new double[] {ref.ax(), ref.ay(), ref.az(),
+                        ref.bx(), ref.by(), ref.bz()}, n1, n2, -1));
+            }
+        }
+    }
+
+    /** 把当前左栏参数**应用到正在编辑的特征**（面板主按钮与“完成”共用同一套动作）✓ */
+    private static boolean applyLeftEditor() {
+        final String tool = ModelMode.tool();
+        if (ModelTools.EXTRUDE.equals(tool)) {
+            return revolveMode ? createRevolve() : createExtrude();
+        }
+        if (ModelTools.FILLET.equals(tool)) {
+            return createFilletFeature(filletRadius.get());
+        }
+        if (ModelTools.MIRROR.equals(tool)) {
+            return createMirrorFeature();
+        }
+        if (ModelTools.PATTERN.equals(tool)) {
+            return createPatternFeature((int) (double) patternN1.get(), patternS1.get(),
+                    (int) (double) patternN2.get(), patternS2.get());
+        }
+        if (ModelTools.PLANE.equals(tool)) {
+            return createPlaneFeature(planeDistance.get());
+        }
+        return false;
+    }
+
+    /**
+     * 把形状落到**正在编辑的特征**上 ✓（同 id / 序号 / 草图 / 外观，只换形状）
+     *
+     * <p>服务端 `SaveSolidPayload` 是**按 id upsert**（`SolidData.put`），
+     * 调序/贴图已经在用同一条链路，所以不需要新协议。
+     *
+     * @return true = 已经作为“更新”提交（调用方**不要**再去新建）
+     */
+    private static boolean commitShape(final com.ovo.sablestopnow.sketch.Solid.Shape next) {
+        final java.util.UUID id = editingSolidId;
+        if (id == null || next == null) {
+            return false;
+        }
+        final com.ovo.sablestopnow.sketch.Solid editing = resolveSolid(id);
+        if (editing == null) {
+            editingSolidId = null;
+            return false;
+        }
+        final com.ovo.sablestopnow.sketch.Solid updated = editing.withShape(next);
+        com.ovo.sablestopnow.network.SolidNetworking.sendSave(updated);
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[feature-edit] update id={} idx={} shape={}",
+                updated.id(), updated.index(), next.getClass().getSimpleName());
+        editingSolidId = null;
+        // ★ 更新完就退出工具：主按钮若还在，再点一下会**新建一个重复特征**
+        ModelMode.setTool(ModelTools.NONE);
+        ModelMode.clearPicks();
+        lastLeftSignature = null;
+        refreshTreeNow();
+        refreshLeftPanel();
+        ModelMode.prompt("model.feature.updated");
+        return true;
+    }
+
+    /**
+     * 阵列主按钮：编辑态 ⇒ 原地更新；否则走原来的新建 ✓
+     */
+    private static boolean createPatternFeature(final int n1, final double s1,
+                                                final int n2, final double s2) {
+        final com.ovo.sablestopnow.sketch.Solid.Shape.Pattern next =
+                PatternTool.buildShape(n1, s1, n2, s2);
+        if (next == null) {
+            ModelMode.prompt("model.pattern.no_sources");
+            return false;
+        }
+        if (commitShape(next)) {
+            return true;
+        }
+        PatternTool.create(n1, s1, n2, s2);
+        return true;
+    }
+
+    private static boolean createExtrude() {
         final com.ovo.sablestopnow.sketch.Sketch source = currentExtrudeSource();
         if (source == null) {
             ModelMode.prompt("model.prompt.extrude_pick_sketch");
-            return;
+            return false;
         }
         final double d1 = extrudeDepth.get();
         final double d2 = extrudeBackDepth.get();
@@ -3291,7 +3552,14 @@ public final class ModelUi {
         // 而不是建一个永远画不出来的空实体。
         if (com.ovo.sablestopnow.sketch.Extrude.boxesOf(source, params).isEmpty()) {
             ModelMode.prompt("model.prompt.extrude_no_profile");
-            return;
+            return false;
+        }
+        // ★ 编辑已有特征 ⇒ **原地更新**同一个特征（id/序号/草图/外观不变）✓
+        final com.ovo.sablestopnow.sketch.Solid.Shape shape = cutMode
+                ? new com.ovo.sablestopnow.sketch.Solid.Shape.Cut(params)
+                : new com.ovo.sablestopnow.sketch.Solid.Shape.Extrusion(params);
+        if (commitShape(shape)) {
+            return true;
         }
         final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
@@ -3313,6 +3581,7 @@ public final class ModelUi {
         refreshTreeNow();
         ModelMode.prompt("model.prompt.extrude_created");
         refreshLeftPanel();
+        return true;
     }
 
     /** 左栏内容的输入：功能、已选元素、已选类型、当前模型、选中的施力点/耦合。 */
@@ -3381,6 +3650,9 @@ public final class ModelUi {
         // ⚠ 贴图编辑区也要进指纹：点了「贴图」要展开编辑区、改了主手方块要刷新"当前贴图"那一行。
         // 不进就是"点了没反应"（这个坑在本文件里已经踩过好几次）。
         sb.append('#').append(textureSolidId);
+        // ★ 正在编辑的特征也必须进指纹：它决定主按钮显示“更新”还是“创建”，
+        //   不进指纹就会出现“面板还写着创建、点下去却更新”的错乱。
+        sb.append('#').append(editingSolidId);
         // ⚠⚠ **搜索框的文本绝对不能进签名。**
         //   我加过一次，代价是"下拉框永远不弹出、也点不了"（用户实测）：
         //   签名一变整栏就重建 → 正在打字的 ComboBox/TextField 每个字都被换成新实例
@@ -3717,6 +3989,13 @@ public final class ModelUi {
             // 以前它只藏在"拉伸工具"面板里，所以用户根本找不到 ——
             // 特征节点上就该有它自己的编辑入口。
             // ★ item 4：**顺序调整**（↑/↓）+ 删除（item 6.5）—— 以子行形式出现（树只支持 child 行）
+            // ★ 用户要求：**每个特征都要有自己的“编辑”入口**，点了在左栏编辑参数 ✓
+            //   （以前只有“拉伸/旋转”点行会半途预填，而且没有记住编辑目标 ⇒ 会新建重复特征）
+            final TreeView.TreeItem editRow = new TreeView.TreeItem(
+                    "feat:edit:" + bodyId + ":" + solid.id())
+                    .label(Component.translatable("model.feature.edit"));
+            editRow.data = solid;
+            row.child(editRow);
             final TreeView.TreeItem upRow = new TreeView.TreeItem(
                     "feat:up:" + bodyId + ":" + solid.id())
                     .label(Component.translatable("model.order.up"));
@@ -3925,6 +4204,23 @@ public final class ModelUi {
         refreshLeftPanel();
     }
 
+    /**
+     * 左栏当前是否“正在编辑某个东西” ✓ —— **唯一判据**。
+     *
+     * <p>以前“面板显示什么”和“完成按钮能不能点”是两套手工维护的判据，
+     * 贴图面板（可以在无工具状态下从树上打开）漏在第二套之外 ⇒
+     * 面板明明在显示，底部“完成”却是灰的，只能靠面板内部的按钮关掉
+     *（用户实测“贴图只能用应用贴图来关闭”）。现在两处都只认这一个函数。
+     */
+    private static boolean leftEditing() {
+        return !ModelTools.NONE.equals(ModelMode.tool())
+                || ModelForceUi.selectedId() != null
+                || ModelCouplingUi.hasSelection()
+                || MateClientState.highlightedMate() != null
+                || textureSolidId != null
+                || editingSolidId != null;
+    }
+
     public static void refreshLeftPanel() {
         final Container body = leftBody;
         if (body == null) {
@@ -3968,7 +4264,7 @@ public final class ModelUi {
           final boolean featureToolNow = ModelTools.PLANE.equals(tool)
                   || ModelTools.FILLET.equals(tool) || ModelTools.MIRROR.equals(tool)
                   || ModelTools.PATTERN.equals(tool);
-          if (!featureToolNow && selectedSolidId != null) {
+          if (!featureToolNow && selectedSolidId != null && editingSolidId == null) {
               final net.minecraft.client.Minecraft mc0 =
                       net.minecraft.client.Minecraft.getInstance();
               final net.minecraft.world.level.Level lv0 = mc0 == null ? null : mc0.level;
@@ -4031,7 +4327,7 @@ public final class ModelUi {
               });
               body.add(planeDist);
               if (planeFaceOrigin != null) {
-                  body.add(new Button(Component.translatable("model.plane.create"), () -> {
+                  body.add(new Button(applyLabel("model.plane.create"), () -> {
                       createPlaneFeature(planeDistance.get());
                       lastLeftSignature = null;
                       refreshLeftPanel();
@@ -4067,7 +4363,7 @@ public final class ModelUi {
               });
               body.add(radiusField);
               if (!filletPicks.isEmpty()) {
-                  body.add(new Button(Component.translatable("model.fillet.create"), () -> {
+                  body.add(new Button(applyLabel("model.fillet.create"), () -> {
                       createFilletFeature(filletRadius.get());
                       lastLeftSignature = null;
                       refreshLeftPanel();
@@ -4216,8 +4512,8 @@ public final class ModelUi {
                       "model.pattern.n2", CMD_PATTERN_N2, patternN2, 1, 64));
               body.add(com.ovo.sablestopnow.client.gui.lib.UiField.number(
                       "model.pattern.s2", CMD_PATTERN_S2, patternS2, -32.0, 32.0, 0.25));
-              body.add(new Button(Component.translatable("model.pattern.create"), () -> {
-                  PatternTool.create((int) (double) patternN1.get(), patternS1.get(),
+              body.add(new Button(applyLabel("model.pattern.create"), () -> {
+                  createPatternFeature((int) (double) patternN1.get(), patternS1.get(),
                           (int) (double) patternN2.get(), patternS2.get());
                   forceRefreshLeft();
               }).width(Widget.FILL));
@@ -4258,8 +4554,8 @@ public final class ModelUi {
                 }
               if (com.ovo.sablestopnow.client.model.PatternTool.dirCount() > 0
                       && com.ovo.sablestopnow.client.model.PatternTool.sourceCount() > 0) {
-                  body.add(new Button(Component.translatable("model.pattern.create"), () -> {
-                      PatternTool.create((int) (double) patternN1.get(),
+                  body.add(new Button(applyLabel("model.pattern.create"), () -> {
+                      createPatternFeature((int) (double) patternN1.get(),
                               (double) patternS1.get(),
                               (int) (double) patternN2.get(), (double) patternS2.get());
                       lastLeftSignature = null;
@@ -4710,15 +5006,9 @@ public final class ModelUi {
         }
 
         if (completeButton != null) {
-            // ⚠ 判据是「有没有正在编辑的东西」，不是「当前是不是某个工具」。
-            // 从树里点进一个施力点/耦合组编辑时 tool 是 none，但「完成」显然应该可用 ——
-            // 以前这里只认 tool，于是编辑施力点时按钮是灰的（用户实测反馈
-            // 「编辑施力点时无法点击完成，创建施力点时却可以」）。
-            final boolean editing = !ModelTools.NONE.equals(tool)
-                    || ModelForceUi.selectedId() != null
-                    || ModelCouplingUi.hasSelection()
-                    || MateClientState.highlightedMate() != null;
-            completeButton.enabled = editing;
+            // ★ 判据统一走 leftEditing()：贴图面板、特征编辑态也算“在编辑”，
+            //   否则面板在显示、按钮却是灰的（用户实测）。
+            completeButton.enabled = leftEditing();
         }
     }
 
@@ -4743,6 +5033,25 @@ public final class ModelUi {
      */
     public static void completeTool() {
         final String tool = ModelMode.tool();
+
+        // ① 贴图编辑区：**完成 = 应用待定参数并关闭** ✓
+        //   （以前这里没有这个分支：面板在显示、按钮却是灰的，只能点面板内部的“关闭”）
+        if (textureSolidId != null) {
+            closeTextureEditor(true);
+            ModelMode.prompt("model.texture.done");
+            return;
+        }
+
+        // ② 正在编辑**已有特征**：完成 = 应用并关闭（与面板主按钮同一套动作）✓
+        if (editingSolidId != null) {
+            if (!applyLeftEditor()) {
+                return; // 参数不完整/退化 ⇒ 提示已经给出，保持编辑态
+            }
+            ModelMode.setTool(ModelTools.NONE);
+            ModelMode.clearPicks();
+            afterEdit();
+            return;
+        }
 
         // 草图环境：「完成」= 提交整张草图给服务端并退出编辑。
         // 放在最前面：草图有自己的一整套状态，不该落到下面「选参考」的那套逻辑里。
@@ -4849,6 +5158,12 @@ public final class ModelUi {
         ModelForceUi.select(null);
         ModelCouplingUi.clearSelection();
         MateClientState.setHighlightedMate(null);
+        // ★ 取消也必须关掉贴图编辑区与特征编辑态 ——
+        //   以前这两项不在取消范围内：贴图面板点“取消”之后仍然挂着（用户实测）。
+        textureSolidId = null;
+        textureBlockQuery.set("");
+        textureSearchApplied.set("");
+        editingSolidId = null;
         ModelMode.setTool(ModelTools.NONE);
         ModelMode.clearPicks();
         chosenType = null;
@@ -4862,6 +5177,9 @@ public final class ModelUi {
     }
 
     public static void startTool(final String toolId) {
+        // ★ 进任何工具都先退出“编辑已有特征”的上下文：
+        //   否则在编辑拉伸A时点“圆角”，新建的圆角会被当成“更新拉伸A”（灾难性串味）。
+        editingSolidId = null;
         ModelCouplingUi.clearSelection();
         ModelForceUi.select(null);
         MateClientState.setHighlightedMate(null);

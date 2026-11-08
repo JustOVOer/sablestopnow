@@ -82,6 +82,47 @@ public final class PatternTool {
         }
     }
 
+    /**
+     * **编辑已有阵列**时预填方向与源 ✓（树上“编辑”子行）
+     *
+     * <p>阵列里存的是方向向量 + 次数 + 间距，没有存“当时点的是哪条棱”
+     * （`DIR_EDGES` 只用于高亮，而且从来没被读过），所以这里只回填真正参与计算的状态。
+     */
+    public static void prefill(final UUID bodyId, final List<Solid.Shape.Dir> dirs,
+                               final List<UUID> sources) {
+        body = bodyId;
+        DIRS.clear();
+        DIR_EDGES.clear();
+        SOURCES.clear();
+        if (dirs != null) {
+            DIRS.addAll(dirs);
+        }
+        if (sources != null) {
+            SOURCES.addAll(sources);
+        }
+    }
+
+    /**
+     * 按当前方向/源 + 参数造出 {@link Solid.Shape.Pattern}（**不发送**）✓
+     *
+     * <p>给“编辑已有阵列”用：同一份形状既能原地更新（`withShape`），
+     * 也能交给 `create` 走新建。返回 null = 缺方向/源。
+     */
+    public static Solid.Shape.Pattern buildShape(final int n1, final double s1,
+                                                 final int n2, final double s2) {
+        if (DIRS.isEmpty() || SOURCES.isEmpty()) {
+            return null;
+        }
+        final List<Solid.Shape.Dir> dirs = new ArrayList<>();
+        dirs.add(new Solid.Shape.Dir(DIRS.get(0).dx(), DIRS.get(0).dy(), DIRS.get(0).dz(),
+                Math.max(1, n1), s1));
+        if (DIRS.size() >= 2 && n2 > 1) {
+            dirs.add(new Solid.Shape.Dir(DIRS.get(1).dx(), DIRS.get(1).dy(), DIRS.get(1).dz(),
+                    n2, s2));
+        }
+        return new Solid.Shape.Pattern(dirs, new ArrayList<>(SOURCES));
+    }
+
     /** 当前阵列作用的体 ✓（面板据此列特征；可能比 selectedModel 更可靠） */
     public static UUID bodyId() {
         return body;

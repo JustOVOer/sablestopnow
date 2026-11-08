@@ -112,7 +112,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
 
         record Mirror(double ox, double oy, double oz, double nx, double ny, double nz,
-                      java.util.List<java.util.UUID> sources) implements Shape {
+                      java.util.List<java.util.UUID> sources,
+                      java.util.UUID planeSolidId) implements Shape {
+
+            /** 兼容旧调用（没有关联的基准面特征）✓ */
+            public Mirror(final double ox, final double oy, final double oz,
+                          final double nx, final double ny, final double nz,
+                          final java.util.List<java.util.UUID> sources) {
+                this(ox, oy, oz, nx, ny, nz, sources, null);
+            }
+
             public Mirror {
                 final double len = Math.sqrt(nx * nx + ny * ny + nz * nz);
                 if (!Double.isFinite(len) || len < 1.0e-9) {
@@ -122,6 +131,17 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 ny /= len;
                 nz /= len;
                 sources = sources == null ? java.util.List.of() : java.util.List.copyOf(sources);
+            }
+
+            /**
+             * **跟随基准面特征** ✓：编辑基准面的距离后镜像要跟着移动。
+             *
+             * <p>镜像存的是"平面点 + 法线"的**快照**；若它是从某个基准面特征选来的，
+             * 就把那个特征 id 也存下来，求值时用该特征**当前**的 offsetOrigin/法线
+             * 覆盖快照 ⇒ 改基准面距离，镜像随之移动（用户实测要求）。
+             */
+            public boolean followsPlane() {
+                return planeSolidId != null;
             }
         }
 
@@ -326,8 +346,22 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                      final double ox, final double oy, final double oz,
                                      final double nx, final double ny, final double nz,
                                      final java.util.List<UUID> sources) {
+        return createMirror(body, sketchId, index, ox, oy, oz, nx, ny, nz, sources, null);
+    }
+
+    /**
+     * 新建镜像特征（可**关联一个基准面特征**）✓
+     *
+     * @param planeSolidId 镜像面来自的那个基准面特征；null = 面/方块面（固定平面）
+     */
+    public static Solid createMirror(final UUID body, final UUID sketchId, final int index,
+                                     final double ox, final double oy, final double oz,
+                                     final double nx, final double ny, final double nz,
+                                     final java.util.List<UUID> sources,
+                                     final UUID planeSolidId) {
         return new Solid(UUID.randomUUID(), body, sketchId, index,
-                new Shape.Mirror(ox, oy, oz, nx, ny, nz, sources), SolidAppearance.EMPTY);
+                new Shape.Mirror(ox, oy, oz, nx, ny, nz, sources, planeSolidId),
+                SolidAppearance.EMPTY);
     }
 
     /** 新建一个**阵列特征** ✓（item 10） */
@@ -1391,8 +1425,20 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             if (!(mirror.shape() instanceof final Shape.Mirror m)) {
                 continue;
             }
-            final double[] o = {m.ox(), m.oy(), m.oz()};
-            final double[] n = {m.nx(), m.ny(), m.nz()};
+            // ★ **跟随基准面特征**：镜像面若来自某个基准面特征（planeSolidId），
+            //   就用它**当前**的 offsetOrigin/法线 ⇒ 改基准面距离，镜像跟着移动 ✓
+            //   （用户实测：编辑基准面距离后对应镜像没有动）
+            double[] planeO = {m.ox(), m.oy(), m.oz()};
+            double[] planeN = {m.nx(), m.ny(), m.nz()};
+            if (m.followsPlane()) {
+                final Solid pf = byId.get(m.planeSolidId());
+                if (pf != null && pf.shape() instanceof final Shape.Plane pl) {
+                    planeO = pl.offsetOrigin();
+                    planeN = new double[] {pl.nx(), pl.ny(), pl.nz()};
+                }
+            }
+            final double[] o = planeO;
+            final double[] n = planeN;
             // ★ bug ⑨ 系统性修法：
             //   ① 每个源取**评估后**的几何（已扣切割、已倒圆角）
             //   ② **切割源不再跳过**：切割盒反射后从镜像材料里减掉（洞跟着反射走）

@@ -267,6 +267,11 @@ public class SolidData extends SavedData {
                       }
                   }
                   entry.put("mirrorSources", srcList);
+                  // ★ 若镜像面来自某个**基准面特征**，存下它的 id ⇒ 改基准面距离镜像跟着动
+                  if (m.planeSolidId() != null) {
+                      entry.put("mirrorPlane", net.minecraft.nbt.NbtUtils.createUUID(
+                              m.planeSolidId()));
+                  }
               }
               case Solid.Shape.Pattern pt -> {
                   // item 10: pattern = up to 3 directions (dir + count + spacing) + sources
@@ -364,7 +369,9 @@ public class SolidData extends SavedData {
                       yield new Solid.Shape.Mirror(
                               entry.getDouble("mo"), entry.getDouble("mo2"), entry.getDouble("mo3"),
                               entry.getDouble("mn"), entry.getDouble("mn2"), entry.getDouble("mn3"),
-                              srcs);
+                              srcs,
+                              entry.contains("mirrorPlane")
+                                      ? NbtUtils.loadUUID(entry.get("mirrorPlane")) : null);
                   }
                   case "fillet" -> {
                       final java.util.List<Solid.Shape.EdgeRef> refs = new java.util.ArrayList<>();

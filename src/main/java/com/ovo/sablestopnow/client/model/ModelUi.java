@@ -278,6 +278,7 @@ public final class ModelUi {
                             cutMode = false;
                             mirrorSources.clear();
                             mirrorPlaneOrigin = null;
+                            mirrorPlaneSolidId = null;
                             mirrorPlaneSegs = null;
                             mirrorPlaneNormal = null;
                             startTool(ModelTools.MIRROR);
@@ -2045,6 +2046,14 @@ public final class ModelUi {
     private static org.joml.Vector3d mirrorPlaneNormal;
     private static java.util.UUID mirrorBody;
     /**
+     * 镜像面来自哪个**基准面特征**（null = 面/方块面，固定平面）✓
+     *
+     * <p>存下来之后镜像会跟随该基准面：编辑基准面的距离，镜像跟着移动
+     *（用户实测要求；镜像的 `Shape.Mirror.planeSolidId` 也存这个）。
+     */
+    @Nullable
+    private static java.util.UUID mirrorPlaneSolidId;
+    /**
      * 选中作镜像面的**那张面的真实轮廓**（局部坐标，每段 6 个数）✓
      *
      * <p>为什么单独存：`Shape.Plane.corners()` 造的只是"以命中点为中心的方框"，
@@ -2080,6 +2089,7 @@ public final class ModelUi {
             mirrorBody = bh.body();
             // 方块面兜底：没有面的真实轮廓 ⇒ 用方框（updateMirrorPreview 里生成）
             mirrorPlaneSegs = null;
+            mirrorPlaneSolidId = null; // 不是基准面特征 ⇒ 平面固定，不跟随
             updateMirrorPreview();
             lastLeftSignature = null;
             refreshLeftPanel();
@@ -2128,6 +2138,17 @@ public final class ModelUi {
         final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
         if (level == null) {
             return;
+        }
+        //  跟随基准面特征：每帧取该特征**当前**的平面 ⇒ 改了基准面距离，
+        //   预览与随后的提交都跟得上（用户实测：改完基准面镜像没动）
+        if (mirrorPlaneSolidId != null) {
+            final com.ovo.sablestopnow.sketch.Solid pf = resolveSolid(mirrorPlaneSolidId);
+            if (pf != null && pf.shape()
+                    instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane pl) {
+                final double[] po = pl.offsetOrigin();
+                mirrorPlaneOrigin = new org.joml.Vector3d(po[0], po[1], po[2]);
+                mirrorPlaneNormal = new org.joml.Vector3d(pl.nx(), pl.ny(), pl.nz());
+            }
         }
         final double[] o = {mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z};
         final double[] n = {mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z};
@@ -2225,10 +2246,11 @@ public final class ModelUi {
         if (commitShape(new com.ovo.sablestopnow.sketch.Solid.Shape.Mirror(
                 mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z,
                 mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z,
-                new java.util.ArrayList<>(mirrorSources)))) {
+                new java.util.ArrayList<>(mirrorSources), mirrorPlaneSolidId))) {
             com.ovo.sablestopnow.client.model.FeaturePreview.clear();
             mirrorSources.clear();
             mirrorPlaneOrigin = null;
+            mirrorPlaneSolidId = null;
             mirrorPlaneSegs = null;
             mirrorPlaneNormal = null;
             return true;
@@ -2244,12 +2266,13 @@ public final class ModelUi {
                         mirrorSketchId, index,
                         mirrorPlaneOrigin.x, mirrorPlaneOrigin.y, mirrorPlaneOrigin.z,
                         mirrorPlaneNormal.x, mirrorPlaneNormal.y, mirrorPlaneNormal.z,
-                        new java.util.ArrayList<>(mirrorSources));
+                        new java.util.ArrayList<>(mirrorSources), mirrorPlaneSolidId);
         com.ovo.sablestopnow.network.SolidNetworking.sendSave(mirror);
         LOCAL_SOLID_INDEX.put(mirrorBody, mirror.index());
         com.ovo.sablestopnow.client.model.FeaturePreview.clear();
         mirrorSources.clear();
         mirrorPlaneOrigin = null;
+        mirrorPlaneSolidId = null;
         mirrorPlaneSegs = null;
         mirrorPlaneNormal = null;
         com.ovo.sablestopnow.SablestopNow.LOGGER.info("[mirror] created idx={}", mirror.index());
@@ -3462,6 +3485,7 @@ public final class ModelUi {
             mirrorSources.addAll(m.sources());
             mirrorPlaneOrigin = new org.joml.Vector3d(m.ox(), m.oy(), m.oz());
             mirrorPlaneNormal = new org.joml.Vector3d(m.nx(), m.ny(), m.nz());
+            mirrorPlaneSolidId = m.planeSolidId();
         } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Pattern p) {
             ModelMode.setTool(ModelTools.PATTERN);
             PatternTool.prefill(solid.body(), p.dirs(), p.sources());
@@ -4385,7 +4409,7 @@ public final class ModelUi {
                               "model.plane.distance", CMD_PLANE_DISTANCE, planeDistance,
                               -com.ovo.sablestopnow.sketch.Extrude.MAX_DEPTH,
                               com.ovo.sablestopnow.sketch.Extrude.MAX_DEPTH, 0.25);
-              planeDist.format(v -> String.format(java.util.Locale.ROOT, "%.2f", v));
+              planeDist.format(v -> String.format(java.util.Locale.ROOT, "%.3f", v));
               planeDist.commit(v -> {
                   planeDistance.set(v);
                   updatePlanePreview(v);
@@ -4473,6 +4497,7 @@ public final class ModelUi {
                   mirrorSources.clear();
                   MIRROR_SRC_PROPS.forEach((k, prop) -> prop.set(false));
                   mirrorPlaneOrigin = null;
+                  mirrorPlaneSolidId = null;
                   mirrorPlaneSegs = null;
                   mirrorPlaneNormal = null;
                   com.ovo.sablestopnow.client.model.FeaturePreview.clear();
@@ -4559,6 +4584,7 @@ public final class ModelUi {
                                       .normalize();
                               mirrorBody = sd.body();
                               mirrorPlaneSegs = planeRefSegs;
+                              mirrorPlaneSolidId = sd.id(); //  跟随这个基准面特征 ✓
                               updateMirrorPreview();
                               forceRefreshLeft();
                           }).width(Widget.FILL));
@@ -5284,6 +5310,7 @@ public final class ModelUi {
               filletSourceSolid = null;
               mirrorSources.clear();
               mirrorPlaneOrigin = null;
+              mirrorPlaneSolidId = null;
               mirrorPlaneSegs = null;
               mirrorPlaneNormal = null;
               com.ovo.sablestopnow.client.model.FeaturePreview.clear();

@@ -419,8 +419,12 @@ public final class ModelUi {
         final com.ovo.sablestopnow.client.gui.lib.UiField depthField =
                 com.ovo.sablestopnow.client.gui.lib.UiField.number(
                         depthKey, CMD_EXTRUDE_DEPTH, extrudeDepth,
-                        0.1, com.ovo.sablestopnow.sketch.Extrude.MAX_DEPTH, 1.0);
-        depthField.format(v -> String.format(java.util.Locale.ROOT, "%.1f", v));
+                        // ★ min 0.1 → 0.01、step 1.0 → 0.1（bug 14）：
+                        //   以前 min=0.1 且 step=1.0，输入框被按 1 取整 ⇒ 只能填整数，
+                        //   0.05 这类薄拉伸直接被抬到 0.1。文本框现在不再按 step 吸附，
+                        //   step 只影响滑条粒度 ✓
+                        0.01, com.ovo.sablestopnow.sketch.Extrude.MAX_DEPTH, 0.1);
+        depthField.format(v -> String.format(java.util.Locale.ROOT, "%.2f", v));
         depthField.commit(v -> {
             // ⚠⚠ **回车只改"待定值"，绝不建实体。**
             //   用户原则（2026-10）："任意页面都应当只有在点击**确定**才在游戏内作出更改。"
@@ -436,8 +440,8 @@ public final class ModelUi {
                     com.ovo.sablestopnow.client.gui.lib.UiField.number(
                             "model.extrude.back_depth", CMD_EXTRUDE_BACK_DEPTH,
                             extrudeBackDepth, 0.0,
-                            com.ovo.sablestopnow.sketch.Extrude.MAX_DEPTH, 1.0);
-            backField.format(v -> String.format(java.util.Locale.ROOT, "%.1f", v));
+                            com.ovo.sablestopnow.sketch.Extrude.MAX_DEPTH, 0.1);
+            backField.format(v -> String.format(java.util.Locale.ROOT, "%.2f", v));
             backField.commit(v -> {
                 extrudeBackDepth.set(v); // 同上：只改待定值
             });
@@ -3300,7 +3304,7 @@ public final class ModelUi {
      */
     private static com.ovo.sablestopnow.sketch.Extrude.Params buildExtrudeParams(
             final double depth1, final double depth2) {
-        final double d1 = Math.max(0.1, Math.abs(depth1));
+        final double d1 = Math.max(0.01, Math.abs(depth1));
         final double d2 = Math.abs(depth2);
         final boolean back = depth1 < 0.0;
         return switch (extrudeMode) {

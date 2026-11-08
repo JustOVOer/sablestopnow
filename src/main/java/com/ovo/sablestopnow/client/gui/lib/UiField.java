@@ -91,7 +91,7 @@ public class UiField extends Container {
             final Double parsed = parse(text);
             if (parsed != null) {
                 // 边打字边预览：滑条同步跟手，但不发包
-                value.set(clamp(parsed));
+                value.set(clampText(parsed));
                 if (onPreview != null) {
                     Cmd.run((command == null ? "field" : command) + ".preview",
                             () -> onPreview.accept(value.get()));
@@ -101,7 +101,7 @@ public class UiField extends Container {
         box.commit(text -> {
             final Double parsed = parse(text);
             if (parsed != null) {
-                value.set(clamp(parsed));
+                value.set(clampText(parsed));
                 commit(value.get());
             }
             // 解析失败：不发命令；下一次重绘时输入框会回到真值投影（等于自动撤销）
@@ -141,6 +141,8 @@ public class UiField extends Container {
                                   final int min, final int max) {
         final UiField field = new UiField(command, value, min, max, 1.0, labelKey);
         field.format(v -> String.format("%.0f", v));
+        // 整数字段：文本输入要取整（否则输入 2.7 会存 2.7、显示 3，读的人会以为存了 3）
+        field.roundText = true;
         return field;
     }
 
@@ -209,13 +211,23 @@ public class UiField extends Container {
         }
     }
 
-    private double clamp(final double v) {
-        double out = v;
-        if (step > 0.0) {
-            out = Math.round(out / step) * step;
-        }
-        return Math.max(min, Math.min(max, out));
+    /**
+     * **文本输入**的夹取：只夹到 {@code [min, max]}，**不按 step 取整** ✓
+     *
+     * <p>为什么不能复用滑条那套（实测 bug 14）：`clamp` 会执行
+     * {@code round(v/step)*step} —— 文本框也走它的话，step=1.0 的输入框就变成
+     * **只能填整数**（输入 1.5 → 2.0、0.5 → 1.0、0.05 → 还被 min 抬到 0.1）。
+     * "拖滑条要吸附"和"打字要精确"是两种语义，必须分开：
+     * 滑条按 step 吸附（Slider 自己处理），文本框只保证在合法区间内。
+     */
+    private double clampText(final double v) {
+        // 整数字段（次数/数量）仍然取整；小数字段保持用户输入的精确值 ✓
+        final double x = roundText ? Math.round(v) : v;
+        return Math.max(min, Math.min(max, x));
     }
+
+    /** true = 这是**整数**字段（`integer()` 工厂），文本输入要取整 ✓ */
+    private boolean roundText;
 
     @Nullable
     private Double parse(final String text) {

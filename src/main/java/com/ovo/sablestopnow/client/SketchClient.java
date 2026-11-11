@@ -782,12 +782,11 @@ public final class SketchClient {
         final org.joml.Vector3d worldNormal = hit.body() == null
                 ? new org.joml.Vector3d(normal)
                 : MateTargeting.worldAxis(hit.body(), normal);
-        // ★ 草图平面的“上方”参考必须是**世界上方在 plot 局部系里的方向**
-        //   （结构被旋转过时，(0,1,0) 不是世界竖直 ⇒ v 轴与屏幕竖直错开 ⇒ 网格是斜的）
-        final org.joml.Vector3d upLocal = hit.body() == null
-                ? new org.joml.Vector3d(0, 1, 0)
-                : worldUpLocal(hit.body());
-        if (!MODE.chooseFace(center, normal, upLocal)) {
+        // ★★ 网格必须与**物理结构上的方块网格**平行（用户要求）：
+        //   草图 u/v 由 plot 局部系推导（up = 局部 (0,1,0)）⇒ 与原版一致。
+        //   ⚠ 不能用“世界上方”当参考：结构被旋转过时那样会让网格跟着世界转，
+        //   反而偏离结构自己的方块网格。（窗口层面的“平”要靠相机 roll 解决，另做。）
+        if (!MODE.chooseFace(center, normal)) {
             return false;
         }
         SketchRenderer.setEditing(MODE.editingId());

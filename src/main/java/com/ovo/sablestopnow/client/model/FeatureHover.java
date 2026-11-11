@@ -88,7 +88,7 @@ public final class FeatureHover {
         if (placed.isEmpty()) {
             return;
         }
-        final Vec3 from = ModelCamera.position();
+        final Vec3 from = ModelCamera.rayOrigin(mc);
         final Vec3 dir = ModelCamera.rayDirection(mc);
         if (from == null || dir == null) {
             return;

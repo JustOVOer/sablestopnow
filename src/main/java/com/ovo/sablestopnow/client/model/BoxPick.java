@@ -47,7 +47,7 @@ public final class BoxPick {
         if (placed.isEmpty()) {
             return null;
         }
-        final var from = ModelCamera.position();
+        final var from = ModelCamera.rayOrigin(mc);
         final var dir = ModelCamera.rayDirection(mc);
         if (from == null || dir == null) {
             return null;

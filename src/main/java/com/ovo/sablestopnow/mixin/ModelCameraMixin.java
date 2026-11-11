@@ -73,6 +73,15 @@ public abstract class ModelCameraMixin {
         final float rollDeg = ModelCamera.roll();
         if (rollDeg != 0.0f) {
             this.rotation.rotateZ((float) Math.toRadians(rollDeg));
+            // 诊断：值变化超过 1° 才打（用户反馈用）
+            if (Math.abs(rollDeg - lastLoggedRoll) > 1.0f) {
+                lastLoggedRoll = rollDeg;
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                        "[roll] apply={}", String.format(java.util.Locale.ROOT, "%.1f", rollDeg));
+            }
         }
     }
+
+    /** roll 诊断日志去重 ✓ */
+    private static float lastLoggedRoll;
 }

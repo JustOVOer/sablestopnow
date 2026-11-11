@@ -243,6 +243,9 @@ public final class ModelInput {
     private static void tickCameraDrag(final long window, final Minecraft mc, final double dx, final double dy) {
         final boolean middle = GLFW.glfwGetMouseButton(window, BUTTON_MIDDLE) == GLFW.GLFW_PRESS;
         if (!middle) {
+            if (draggingCamera) {
+                ModelCamera.clearOrbitPivot(); // ★ 松开中键：支点失效 ✓
+            }
             draggingCamera = false;
             return;
         }
@@ -251,6 +254,14 @@ public final class ModelInput {
         }
         final boolean ctrl = isDown(window, GLFW.GLFW_KEY_LEFT_CONTROL, GLFW.GLFW_KEY_RIGHT_CONTROL);
         final boolean shift = isDown(window, GLFW.GLFW_KEY_LEFT_SHIFT, GLFW.GLFW_KEY_RIGHT_SHIFT);
+        if (!draggingCamera && !ctrl && !shift) {
+            // ★ SolidWorks 的旋转支点 = **按下去那一刻光标下的模型表面点** ✓
+            //   没命中模型（看天空）⇒ null ⇒ 退回绕轨道中心转。
+            final com.ovo.sablestopnow.client.model.BoxPick.Hit hit =
+                    com.ovo.sablestopnow.client.model.BoxPick.nearest(mc);
+            ModelCamera.setOrbitPivot(hit == null ? null : new net.minecraft.world.phys.Vec3(
+                    hit.worldPoint().x(), hit.worldPoint().y(), hit.worldPoint().z()));
+        }
         draggingCamera = true;
         if (ctrl) {
             ModelCamera.pan(dx, dy);

@@ -131,6 +131,8 @@ public final class SketchRenderer {
     /** 正在编辑的草图 id；由草图 UI 设置。 */
     @Nullable
     private static UUID editingId;
+    /** roll 诊断：每次进草图只打一行日志 ✓ */
+    private static boolean rollLogged;
     /** 正在编辑时鼠标落点的预览位置（平面内坐标）。 */
     @Nullable
     private static double[] previewPoint;
@@ -369,12 +371,26 @@ public final class SketchRenderer {
                     .worldAxis(rollSub, working.plane().axisV());
             final Vec3 look = com.ovo.sablestopnow.client.model.ModelCamera.lookVector();
             final double faceOn = -(look.x * rn.x + look.y * rn.y + look.z * rn.z);
+            // 诊断：每次进草图只打一行，告诉我们门限实际看到了什么（用户反馈用）
+            if (!rollLogged && faceOn > 0.5) {
+                rollLogged = true;
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                        "[roll] faceOn={} n=({},{},{}) v=({},{},{})",
+                        String.format(java.util.Locale.ROOT, "%.4f", faceOn),
+                        String.format(java.util.Locale.ROOT, "%.3f", rn.x),
+                        String.format(java.util.Locale.ROOT, "%.3f", rn.y),
+                        String.format(java.util.Locale.ROOT, "%.3f", rn.z),
+                        String.format(java.util.Locale.ROOT, "%.3f", rv.x),
+                        String.format(java.util.Locale.ROOT, "%.3f", rv.y),
+                        String.format(java.util.Locale.ROOT, "%.3f", rv.z));
+            }
             if (faceOn > 0.995) {
                 com.ovo.sablestopnow.client.model.ModelCamera.alignRollForUp(rn, rv);
             } else {
                 com.ovo.sablestopnow.client.model.ModelCamera.alignRoll(0.0f);
             }
         } else if (!sketching) {
+            rollLogged = false;
             com.ovo.sablestopnow.client.model.ModelCamera.alignRoll(0.0f);
         }
         if (working != null) {

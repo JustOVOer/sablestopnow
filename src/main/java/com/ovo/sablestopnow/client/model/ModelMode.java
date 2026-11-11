@@ -321,7 +321,7 @@ public final class ModelMode {
             hoveredRef = null;
             return;
         }
-        final Vec3 from = ModelCamera.position();
+        final Vec3 from = ModelCamera.rayOrigin(mc);
         final Vec3 dir = ModelCamera.rayDirection(mc);
         final MateTargeting.BoxHit hit = MateTargeting.raycastFrom(from, dir, 128.0);
         diagHover(mc, from, dir, hit);

@@ -195,7 +195,7 @@ public final class SketchClient {
         if (sub == null) {
             return;
         }
-        final Vec3 from = ModelCamera.position();
+        final Vec3 from = ModelCamera.rayOrigin(mc);
         final Vec3 dir = ModelCamera.rayDirection(mc);
         final Pose3dc pose = sub.renderPose();
         final Vector3d localFrom = toLocalPoint(pose, from);
@@ -421,7 +421,7 @@ public final class SketchClient {
         if (sub == null) {
             return false;
         }
-        final Vec3 from = ModelCamera.position();
+        final Vec3 from = ModelCamera.rayOrigin(mc);
         final Vec3 dir = ModelCamera.rayDirection(mc);
         final Pose3dc pose = sub.renderPose();
         final Vector3d localFrom = toLocalPoint(pose, from);

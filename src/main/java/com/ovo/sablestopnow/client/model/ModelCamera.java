@@ -209,10 +209,37 @@ public final class ModelCamera {
     public static void orbit(final double dx, final double dy) {
         // 人工旋转一开始就把滚转归零, 否则旋转手感是歪的 ✓
         rollGoal = 0.0f;
+        // ★ SolidWorks 的旋转：**围绕光标下的那个点**转，不是围绕轨道中心 ✗
+        //   （用户实测要求）。pivot 在按下中键的那一刻由调用方设好；
+        //   null = 没有可用的表面点 ⇒ 退回绕 target 转。
+        final float dyaw = (float) (dx * ORBIT_SPEED);
+        final float dpitch = (float) (dy * ORBIT_SPEED);
+        if (orbitPivot != null) {
+            final org.joml.Vector3d v = new org.joml.Vector3d(
+                    targetGoal.x - orbitPivot[0], targetGoal.y - orbitPivot[1],
+                    targetGoal.z - orbitPivot[2]);
+            // ΔR 与相机同一套约定：rotationYXZ(-yaw, pitch) ⇒ 先 Y 后 X
+            final org.joml.Quaterniond q = new org.joml.Quaterniond();
+            q.rotateY(Math.toRadians(-dyaw));
+            q.rotateX(Math.toRadians(dpitch));
+            q.transform(v);
+            targetGoal.set(orbitPivot[0] + v.x, orbitPivot[1] + v.y, orbitPivot[2] + v.z);
+        }
         // 方向与 SolidWorks 一致：往右拖 = 模型跟着手往右转 = 相机绕到左边（yaw 增大）。
         // 早先写成 yaw 减小，用户实测反馈「中键旋转反了」。
-        yawGoal = (float) (yawGoal + dx * ORBIT_SPEED);
-        pitchGoal = Mth.clamp((float) (pitchGoal + dy * ORBIT_SPEED), -89.5f, 89.5f);
+        yawGoal = (float) (yawGoal + dyaw);
+        pitchGoal = Mth.clamp((float) (pitchGoal + dpitch), -89.5f, 89.5f);
+    }
+
+    /** 世界点，作为旋转的**支点**（光标下的表面点）；null = 绕轨道中心转 ✓ */
+    private static double[] orbitPivot;
+
+    public static void setOrbitPivot(final Vec3 p) {
+        orbitPivot = p == null ? null : new double[] {p.x, p.y, p.z};
+    }
+
+    public static void clearOrbitPivot() {
+        orbitPivot = null;
     }
 
     public static void pan(final double dx, final double dy) {
@@ -270,6 +297,11 @@ public final class ModelCamera {
         return roll;
     }
 
+    /** 目标 roll（度）—— 诊断日志用 ✓ */
+    public static float rollGoal() {
+        return rollGoal;
+    }
+
     /** 目标 roll（度）：草图正视时让结构 v 轴朝上；退出/转开视角时归零 ✓ */
     public static void alignRoll(final float deg) {
         rollGoal = deg;
@@ -302,7 +334,19 @@ public final class ModelCamera {
         }
         u.normalize();
         rollGoal = (float) -Math.toDegrees(Math.atan2(u.dot(r0), u.dot(u0)));
+        // 诊断：目标 roll 变化超过 1° 时打一行（用户实测反馈用；不影响渲染）
+        if (Math.abs(rollGoal - lastRollLog) > 1.0f) {
+            lastRollLog = rollGoal;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[roll] goal={} u·r0={} u·u0={}",
+                    String.format(java.util.Locale.ROOT, "%.1f", rollGoal),
+                    String.format(java.util.Locale.ROOT, "%.4f", u.dot(r0)),
+                    String.format(java.util.Locale.ROOT, "%.4f", u.dot(u0)));
+        }
     }
+
+    /** roll 诊断日志的去重值 ✓ */
+    private static float lastRollLog;
 
     /** 忘记当前状态：退出模型模式/断线时调用，下次进入重新按玩家视角摆位。 */
     public static void forget() {
@@ -500,6 +544,13 @@ public final class ModelCamera {
             return;
         }
         // 探针：相机轨道中心，永远在相机正前方（投影必然有效）
+        // ★ 正交：解析路径是**透视**公式，和正交矩阵必然对不上 ⇒ 裁决会错误地
+        //   退回解析路径 ⇒ 拾取用透视、画面用正交（用户实测"正交下点不中"）。
+        //   正交时矩阵就是真相，直接信任矩阵路径 ✓
+        if (com.ovo.sablestopnow.client.OrthoCompat.isOrthoOn()) {
+            useMatrices = frameValid;
+            return;
+        }
         final Vec3 probe = new Vec3(target.x, target.y, target.z);
         final double[] viaMatrix = projectViaMatrix(probe, w, h);
         final double[] viaAnalytic = projectAnalytic(probe, mc, w, h);
@@ -596,9 +647,37 @@ public final class ModelCamera {
 
     /** 光标射线在距相机 {@code at} 处的世界点。 */
     @Nullable
-    public static Vec3 rayPoint(final Minecraft mc, final double at) {        final Vec3 dir = rayDirection(mc);
-        final Vec3 pos = position();
-        return pos.add(dir.scale(at));
+    public static Vec3 rayPoint(final Minecraft mc, final double at) {
+        final Vec3 dir = rayDirection(mc);
+        final Vec3 from = rayOrigin(mc);
+        return from.add(dir.scale(at));
+    }
+
+    /**
+     * 光标射线的**世界起点**（近平面上的那个点）✓
+     *
+     * <h2>为什么不能像以前那样用 {@link #position()}</h2>
+     * 透视下"相机位置 + t·方向"和"近平面上一点 + t·方向"描述的是**同一条射线**
+     * （只差一个参数平移），所以以前用相机位置没毛病。
+     * 但**正交**投影的射线是**互相平行**的：屏幕上不同的位置对应不同的起点，
+     * 起点必须从屏幕坐标反投影到近平面拿到 ⇒ 否则所有拾取都会偏向屏幕中心
+     * （用户实测"正交下点不中/只能点到中间"）。
+     */
+    @Nullable
+    public static Vec3 rayOrigin(final Minecraft mc) {
+        final int w = mc.getWindow().getGuiScaledWidth();
+        final int h = mc.getWindow().getGuiScaledHeight();
+        ensureVerdict(mc);
+        if (w > 0 && h > 0 && useMatrices) {
+            final double ndcX = 2.0 * com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() / w - 1.0;
+            final double ndcY = 1.0 - 2.0 * com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() / h;
+            final Vector4f near = FRAME_INVERSE.transform(
+                    new Vector4f((float) ndcX, (float) ndcY, -1.0f, 1.0f));
+            if (Math.abs(near.w) > 1.0e-6f) {
+                return new Vec3(near.x / near.w, near.y / near.w, near.z / near.w);
+            }
+        }
+        return position();
     }
 
     // ============ 基向量 ============

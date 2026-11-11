@@ -151,6 +151,19 @@ public final class OrthoCompat {
         }
     }
 
+    /** 正交投影复刻的诊断：只打一次，确认反射到底成没成 ✓ */
+    private static boolean projLogged;
+
+    /** 在 captureFrame 里调一次，告诉日志"这一帧拾取用的是哪份投影" */
+    public static void logProjectionOnce(final boolean usedOrtho) {
+        if (projLogged) {
+            return;
+        }
+        projLogged = true;
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[ortho] captureFrame projection={}", usedOrtho ? "ortho(own)" : "event");
+    }
+
     /**
      * **正交下的滚轮缩放**：改 {@code scale_x/scale_y}，不是相机距离 ✓
      *

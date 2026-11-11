@@ -599,12 +599,15 @@ public final class ModelCamera {
         // ★ 正交：用前置模组**自己那份**投影矩阵（事件里给的不一定是替换后的）✗
         //   否则画面正交、拾取一直按透视算 ⇒ 正交下"点不中"（用户实测）
         Matrix4f projection = projectionArg;
+        boolean usedOrtho = false;
         if (com.ovo.sablestopnow.client.OrthoCompat.isOrthoOn()) {
             final Matrix4f ortho = com.ovo.sablestopnow.client.OrthoCompat.orthoProjection();
             if (ortho != null) {
                 projection = ortho;
+                usedOrtho = true;
             }
         }
+        com.ovo.sablestopnow.client.OrthoCompat.logProjectionOnce(usedOrtho);
         FRAME_PROJECTION.set(projection);
         final Vec3 camPos = camera.getPosition();
         // world → camera：先平移 -camPos，再乘相机朝向的共轭（与 MC 的 prepareCullFrustum 完全一致）
@@ -728,5 +731,24 @@ public final class ModelCamera {
 
     private static Vec3 upVector(final Vec3 look, final Vec3 right) {
         return right.cross(look).normalize();
+    }
+
+    /**
+     * **屏幕上的"上"在世界的方向**（含 roll）✓
+     *
+     * <p>相机 roll 之后，屏幕基向量 = 相机基向量绕视线转 roll：
+     * {@code up' = up·cosφ − right·sinφ}（见 CameraRollMixin 的 rotation.rotateZ）。
+     * WASD/平移要跟着**屏幕**走，否则滚转一开，"W 往前"就变成往侧面
+     * （用户实测："roll 对了，但 WASD 方向不对"）。
+     */
+    public static Vec3 screenUp() {
+        final Vec3 look = lookVector();
+        final Vec3 right = rightVector(look);
+        final Vec3 up = upVector(look, right);
+        final double phi = Math.toRadians(roll);
+        final double c = Math.cos(phi);
+        final double s = Math.sin(phi);
+        return new Vec3(up.x * c - right.x * s, up.y * c - right.y * s,
+                up.z * c - right.z * s).normalize();
     }
 }

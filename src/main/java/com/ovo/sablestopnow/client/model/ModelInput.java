@@ -204,8 +204,19 @@ public final class ModelInput {
         }
         final Vec3 look = ModelCamera.lookVector();
         final Vec3 flat = new Vec3(look.x, 0.0, look.z);
-        // 正上/正下方俯视时水平分量退化：这时「前后」没有意义，改用世界轴兜底
-        final Vec3 ahead = flat.lengthSqr() < 1.0e-6 ? new Vec3(0, 0, 1) : flat.normalize();
+        // ★ 屏幕相对移动（roll 之后也必须"W = 屏幕往上"）：
+        //   前进方向优先取**屏幕 up 的水平分量**；接近平视时它几乎竖直（退化）⇒
+        //   退回"视线的水平分量"（旧行为）；再退化就退回世界 +Z。
+        final Vec3 scrUp = ModelCamera.screenUp();
+        final Vec3 flatUp = new Vec3(scrUp.x, 0.0, scrUp.z);
+        final Vec3 ahead;
+        if (flatUp.lengthSqr() > 0.09) {
+            ahead = flatUp.normalize();
+        } else if (flat.lengthSqr() > 1.0e-6) {
+            ahead = flat.normalize();
+        } else {
+            ahead = new Vec3(0, 0, 1);
+        }
         final Vec3 right = new Vec3(-ahead.z, 0.0, ahead.x).normalize();
         final double step = KEY_MOVE_SPEED * Math.max(2.0, ModelCamera.distance())
                 * Math.min(0.1, com.ovo.sablestopnow.client.gui.lib.Ui.frameDelta());

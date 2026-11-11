@@ -106,4 +106,50 @@ public final class OrthoCompat {
         }
         com.ovo.sablestopnow.SablestopNow.LOGGER.info("[ortho] sketch exit: restored {}", prev);
     }
+
+    /** 正交当前是否开启（前置没装 = false）✓ */
+    public static boolean isOrthoOn() {
+        final Object cfg = config();
+        return cfg != null && readEnabled(cfg);
+    }
+
+    /**
+     * **正交下的滚轮缩放**：改 {@code scale_x/scale_y}，不是相机距离 ✓
+     *
+     * <p>正交投影里推近/拉远相机不改变物体大小（平行投影与距离无关）⇒
+     * 滚轮必须缩放视图本身，否则"滚了半天没反应/突然变脸"（用户实测手感反馈）。
+     * 步长与透视那条（0.12）保持一致：一格滚轮约 ±12%。
+     */
+    public static void zoomOrtho(final double delta) {
+        final Object cfg = config();
+        if (cfg == null) {
+            return;
+        }
+        try {
+            final double factor = Math.exp(-delta * 0.12);
+            final Field fx = cfg.getClass().getField("scale_x");
+            final Field fy = cfg.getClass().getField("scale_y");
+            float sx = fx.getFloat(cfg);
+            float sy = fy.getFloat(cfg);
+            if (!(sx > 0.0f)) {
+                sx = 1.0f;
+            }
+            if (!(sy > 0.0f)) {
+                sy = 1.0f;
+            }
+            sx = (float) Math.max(0.02, Math.min(16.0, sx * factor));
+            sy = (float) Math.max(0.02, Math.min(16.0, sy * factor));
+            // 优先走它的 setter（内部还会同步 prev 值，避免插值跳变）
+            try {
+                cfg.getClass().getMethod("setScaleX", float.class).invoke(cfg, sx);
+                cfg.getClass().getMethod("setScaleY", float.class).invoke(cfg, sy);
+            } catch (final Throwable ignored) {
+                fx.setFloat(cfg, sx);
+                fy.setFloat(cfg, sy);
+            }
+            cfg.getClass().getMethod("setDirty", boolean.class).invoke(cfg, true);
+        } catch (final Throwable t) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.warn("[ortho] zoom failed", t);
+        }
+    }
 }

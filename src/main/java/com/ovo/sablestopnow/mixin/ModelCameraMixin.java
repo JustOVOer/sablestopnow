@@ -32,6 +32,20 @@ public abstract class ModelCameraMixin {
     protected abstract void setPosition(double x, double y, double z);
 
     /**
+     * 相机旋转四元数（**只有它**能表达 roll）✓
+     *
+     * <p>{@link #setRotation} 只能给 yaw/pitch；MC 的相机没有第三个自由度。
+     * 而"正视于草图平面"时视线方向 = 面法线是唯一解，屏幕的竖直方向被世界 +Y 唯一确定
+     * ⇒ 结构被物理旋转过时，草图方块网格在屏幕上必然是斜的。唯一出路是在
+     * {@code rotation} 上再乘一个绕**视线轴**的滚转。
+     *
+     * <p>为什么安全：世界渲染/剔除/拾取都读同一个 {@code camera.rotation()}
+     * （我们的 {@code ModelCamera.FRAME_VIEW} 也是），所以画面与拾取会一起转。
+     */
+    @Shadow
+    private org.joml.Quaternionf rotation;
+
+    /**
      * 相机平滑必须在<b>本帧摆相机之前</b>推进。
      *
      * <p>以前在 {@code RenderLevelStageEvent} 里推进（那是摆完相机之后），于是「画面用的相机」
@@ -55,5 +69,10 @@ public abstract class ModelCameraMixin {
         final Vec3 position = ModelCamera.position();
         this.setPosition(position.x, position.y, position.z);
         this.setRotation(ModelCamera.yaw(), ModelCamera.pitch());
+        // ★ roll：必须在 setRotation **之后**（它会把 rotation 从 yaw/pitch 重建）✓
+        final float rollDeg = ModelCamera.roll();
+        if (rollDeg != 0.0f) {
+            this.rotation.rotateZ((float) Math.toRadians(rollDeg));
+        }
     }
 }

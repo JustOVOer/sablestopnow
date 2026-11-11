@@ -358,6 +358,25 @@ public final class SketchRenderer {
         // 不在这里单独画一次的话，编辑期间画的图元根本不显示，
         // 表现为「画的线要退出草图才出现」（用户实测反馈）。
         final Sketch working = sketching ? SketchClient.mode().working() : null;
+        // ★ roll：编辑草图且**正视于草图平面**时，让结构 v 轴在屏幕上朝上（网格横竖平）；
+        //   一旦转开视角立刻归零 ⇒ 旋转手感保持正常（用户要求）。
+        if (sketching && working != null && working.plane() != null
+                && byId.get(working.body()) != null) {
+            final ClientSubLevel rollSub = byId.get(working.body());
+            final org.joml.Vector3d rn = com.ovo.sablestopnow.client.MateTargeting
+                    .worldAxis(rollSub, working.plane().normal());
+            final org.joml.Vector3d rv = com.ovo.sablestopnow.client.MateTargeting
+                    .worldAxis(rollSub, working.plane().axisV());
+            final Vec3 look = com.ovo.sablestopnow.client.model.ModelCamera.lookVector();
+            final double faceOn = -(look.x * rn.x + look.y * rn.y + look.z * rn.z);
+            if (faceOn > 0.995) {
+                com.ovo.sablestopnow.client.model.ModelCamera.alignRollForUp(rn, rv);
+            } else {
+                com.ovo.sablestopnow.client.model.ModelCamera.alignRoll(0.0f);
+            }
+        } else if (!sketching) {
+            com.ovo.sablestopnow.client.model.ModelCamera.alignRoll(0.0f);
+        }
         if (working != null) {
             final ClientSubLevel wsub = byId.get(working.body());
             if (wsub != null) {

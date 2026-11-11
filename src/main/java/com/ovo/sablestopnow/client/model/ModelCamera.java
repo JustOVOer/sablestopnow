@@ -56,6 +56,9 @@ public final class ModelCamera {
     private static final Vector3d targetGoal = new Vector3d();
     private static double distance = 14.0;
     private static double distanceGoal = 14.0;
+    /** roll: 绕视线滚转(度). MC 相机没有这个自由度 => 由 CameraRollMixin 应用(草图正视时用) */
+    private static float roll;
+    private static float rollGoal;
     private static float yaw;
     private static float yawGoal;
     private static float pitch = 28.0f;
@@ -198,11 +201,14 @@ public final class ModelCamera {
         distance += (distanceGoal - distance) * kk;
         yaw += Mth.wrapDegrees(yawGoal - yaw) * (float) kk;
         pitch += (pitchGoal - pitch) * (float) kk;
+        roll += Mth.wrapDegrees(rollGoal - roll) * (float) kk;
     }
 
     // ============ 操作 ============
 
     public static void orbit(final double dx, final double dy) {
+        // 人工旋转一开始就把滚转归零, 否则旋转手感是歪的 ✓
+        rollGoal = 0.0f;
         // 方向与 SolidWorks 一致：往右拖 = 模型跟着手往右转 = 相机绕到左边（yaw 增大）。
         // 早先写成 yaw 减小，用户实测反馈「中键旋转反了」。
         yawGoal = (float) (yawGoal + dx * ORBIT_SPEED);
@@ -227,6 +233,13 @@ public final class ModelCamera {
      * 步长也调细了一档（0.12），一格滚轮大约 ±12%。
      */
     public static void zoom(final double delta, final boolean atCursor, final Minecraft mc) {
+        // ★ 正交：滚轮改的是**正交缩放**（OrthoCamera 的 scale_x/scale_y），不是相机距离 ✗
+        //   正交投影下推近/拉远相机不会改变物体大小 ⇒ 必须缩放视图本身，
+        //   否则滚轮的"手感"完全不对（用户实测反馈）
+        if (com.ovo.sablestopnow.client.OrthoCompat.isOrthoOn()) {
+            com.ovo.sablestopnow.client.OrthoCompat.zoomOrtho(delta);
+            return;
+        }
         final double factor = Math.exp(-delta * 0.12);
         distanceGoal = Mth.clamp(distanceGoal * factor, MIN_DISTANCE, MAX_DISTANCE);
     }
@@ -250,6 +263,45 @@ public final class ModelCamera {
     public static void alignTo(final float yawDeg, final float pitchDeg) {
         yawGoal = yawDeg;
         pitchGoal = Mth.clamp(pitchDeg, -89.5f, 89.5f);
+    }
+
+    /** 当前 roll（度）—— 只有 {@code CameraRollMixin} 读它 ✓ */
+    public static float roll() {
+        return roll;
+    }
+
+    /** 目标 roll（度）：草图正视时让结构 v 轴朝上；退出/转开视角时归零 ✓ */
+    public static void alignRoll(final float deg) {
+        rollGoal = deg;
+    }
+
+    /**
+     * 目标 roll：让 {@code upWorld}（世界系，例如草图的 v 轴）在屏幕上朝上 ✓
+     *
+     * <p>视线取 {@code -viewNormal}（正视于该面）。没有 roll 时屏幕的竖直方向
+     * 被世界 +Y 唯一确定 ⇒ 这里算的是"把 upWorld 转到那个竖直方向"所需的角度：
+     * 屏幕右 {@code r0 = F × u0}，竖直 {@code u0 = 世界上方在垂直视线平面内的投影}，
+     * 于是 {@code roll = -atan2(u·r0, u·u0)}。
+     */
+    public static void alignRollForUp(final org.joml.Vector3dc viewNormal,
+                                      final org.joml.Vector3dc upWorld) {
+        final org.joml.Vector3d f = new org.joml.Vector3d(viewNormal).negate().normalize();
+        final org.joml.Vector3d y = new org.joml.Vector3d(0, 1, 0);
+        final org.joml.Vector3d u0 = new org.joml.Vector3d(y).fma(-y.dot(f), f);
+        if (u0.lengthSquared() < 1.0e-9) {
+            rollGoal = 0.0f;
+            return;
+        }
+        u0.normalize();
+        final org.joml.Vector3d r0 = new org.joml.Vector3d(f).cross(u0).normalize();
+        final org.joml.Vector3d u = new org.joml.Vector3d(upWorld);
+        u.fma(-u.dot(f), f);
+        if (u.lengthSquared() < 1.0e-9) {
+            rollGoal = 0.0f;
+            return;
+        }
+        u.normalize();
+        rollGoal = (float) -Math.toDegrees(Math.atan2(u.dot(r0), u.dot(u0)));
     }
 
     /** 忘记当前状态：退出模型模式/断线时调用，下次进入重新按玩家视角摆位。 */

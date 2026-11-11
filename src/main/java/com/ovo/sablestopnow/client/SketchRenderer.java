@@ -414,10 +414,10 @@ public final class SketchRenderer {
             }
             final boolean editing = editingId != null && editingId.equals(sketch.id());
             final float[] color = editing ? EDITING_COLOR : IDLE_COLOR;
-            // ★ 被吸收的草图：只留文字，不画曲线 ✓
-            if (!sketchUsed.contains(sketch.id())) {
-                drawn += drawSketch(vcq, pose, cameraPos, sub.renderPose(), sketch, color);
-            }
+            // ★★ 用户要求（2026-10）：**草图只在编辑时显示** —— 退出编辑后不画曲线，
+            //   否则不论什么颜色，草图线都会一直叠在实体上（"常驻显示"）。
+            //   文字/尺寸标注仍然常驻（早前明确要求"退出草图后文字也要常驻"）。
+            //   （此前按"是否被特征吸收"区分的规则已作废：自由草图也一样隐藏。）
               // item 3: 退出草图后文字也要常驻（之前只在 working 副本上画）
               drawn += drawSketchTexts(pose, cameraPos, sub.renderPose(), sketch);
             if (editing && previewPoint != null) {

@@ -80,11 +80,42 @@ public record SketchPlane(Vector3d origin, Vector3d axisU, Vector3d axisV) {
      * @param normal     面的外法线（会被归一化）
      */
     public static SketchPlane onFace(final Vector3dc faceCenter, final Vector3dc normal) {
+        return onFace(faceCenter, normal, new Vector3d(0, 1, 0));
+    }
+
+    /**
+     * 贴在方块面上的草图平面，**显式给出“上方”参考** ✓
+     *
+     * <p>为什么要这个重载（用户实测：进草图后网格在窗口里是斜的）：
+     * 屏幕的“竖直”由**世界** +Y 和视线共同决定；而草图 v 轴是
+     * “上方参考投影到平面内”。结构（sub-level）被物理旋转过后，
+     * plot 局部系里的 (0,1,0) **不是**世界 +Y ⇒ v 轴与屏幕竖直差一个结构旋转
+     * ⇒ 正视时网格看起来是斜的。
+     * 调用方应传 {@code pose.orientation()⁻¹ · (0,1,0)}（plot 局部的“世界上方”）。
+     *
+     * @param upHint plot 局部的“世界上方”（不必归一化；退化时自动换参考）
+     */
+    public static SketchPlane onFace(final Vector3dc faceCenter, final Vector3dc normal,
+                                     final Vector3dc upHint) {
         final Vector3d n = new Vector3d(normal).normalize();
-        final Vector3d up = Math.abs(n.y) > 0.9 ? new Vector3d(1, 0, 0) : new Vector3d(0, 1, 0);
-        // u = up × n（面内、水平），v = n × u（面内、"上"）
-        final Vector3d u = up.cross(n, new Vector3d()).normalize();
-        final Vector3d v = n.cross(u, new Vector3d()).normalize();
+        final Vector3d up = upHint == null || upHint.lengthSquared() < 1.0e-9
+                ? new Vector3d(0, 1, 0) : new Vector3d(upHint).normalize();
+        // 参考方向与法线平行时投影退化 ⇒ 换一个不平行的参考（与原逻辑一致）
+        final Vector3d u;
+        final Vector3d v;
+        if (Math.abs(up.dot(n)) > 0.9) {
+            final Vector3d alt = Math.abs(n.y) > 0.9 ? new Vector3d(1, 0, 0)
+                    : new Vector3d(0, 1, 0);
+            if (Math.abs(alt.dot(n)) > 0.9) {
+                alt.set(0, 0, 1);
+            }
+            u = alt.cross(n, new Vector3d()).normalize();
+            v = n.cross(u, new Vector3d()).normalize();
+        } else {
+            // u = up × n（面内、水平），v = n × u（面内、= up 投影到面内）
+            u = up.cross(n, new Vector3d()).normalize();
+            v = n.cross(u, new Vector3d()).normalize();
+        }
         return new SketchPlane(new Vector3d(faceCenter), u, v);
     }
 

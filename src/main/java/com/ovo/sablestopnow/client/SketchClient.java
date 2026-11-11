@@ -741,6 +741,27 @@ public final class SketchClient {
      *
      * @return 是否真的建了草图
      */
+    /**
+     * 世界 +Y 在 **plot 局部系**里的方向 ✓
+     *
+     * <p>用途：草图平面的 v 轴 = “上方参考投影到面内”。屏幕的竖直由**世界** +Y 决定，
+     * 所以贴面建草图时必须把世界上方换算进局部系；否则结构被物理旋转过时，
+     * 草图 v 轴和屏幕竖直差一个结构旋转 ⇒ 正视时网格在窗口里是斜的（用户实测）。
+     */
+    private static org.joml.Vector3d worldUpLocal(
+            final dev.ryanhcode.sable.sublevel.SubLevel body) {
+        if (body == null) {
+            return new org.joml.Vector3d(0, 1, 0);
+        }
+        final Pose3dc pose = MateTargeting.poseOf(body);
+        if (pose == null) {
+            return new org.joml.Vector3d(0, 1, 0);
+        }
+        final org.joml.Quaterniond inv =
+                new org.joml.Quaterniond(pose.orientation()).invert();
+        return inv.transform(new org.joml.Vector3d(0, 1, 0));
+    }
+
     public static boolean chooseFace(final MateTargeting.BoxHit hit) {
         final net.minecraft.core.BlockPos block = hit.baseBlock();
         final net.minecraft.core.Direction face = hit.baseFace();
@@ -761,7 +782,12 @@ public final class SketchClient {
         final org.joml.Vector3d worldNormal = hit.body() == null
                 ? new org.joml.Vector3d(normal)
                 : MateTargeting.worldAxis(hit.body(), normal);
-        if (!MODE.chooseFace(center, normal)) {
+        // ★ 草图平面的“上方”参考必须是**世界上方在 plot 局部系里的方向**
+        //   （结构被旋转过时，(0,1,0) 不是世界竖直 ⇒ v 轴与屏幕竖直错开 ⇒ 网格是斜的）
+        final org.joml.Vector3d upLocal = hit.body() == null
+                ? new org.joml.Vector3d(0, 1, 0)
+                : worldUpLocal(hit.body());
+        if (!MODE.chooseFace(center, normal, upLocal)) {
             return false;
         }
         SketchRenderer.setEditing(MODE.editingId());

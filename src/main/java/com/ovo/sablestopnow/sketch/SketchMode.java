@@ -373,11 +373,22 @@ public final class SketchMode {
      * @return 是否成功进入编辑（不在选面阶段则返回 false）
      */
     public boolean chooseFace(final Vector3dc faceCenter, final Vector3dc normal) {
+        return chooseFace(faceCenter, normal, null);
+    }
+
+    /**
+     * 选面建草图（带“世界上方”参考）✓
+     *
+     * @param upHint plot 局部的“世界上方”：结构有旋转时由客户端换算进来，
+     *               否则草图 v 轴与屏幕竖直不一致 ⇒ 网格在窗口里是斜的（用户实测）
+     */
+    public boolean chooseFace(final Vector3dc faceCenter, final Vector3dc normal,
+                              final Vector3dc upHint) {
         if (session.stage() != SketchSession.Stage.CHOOSING_PLANE) {
             return false;
         }
         // 原点取面中心：草图的 (0,0) 就落在玩家点的那块面的正中间
-        session.choosePlane(SketchPlane.onFace(faceCenter, normal), "Sketch1");
+        session.choosePlane(SketchPlane.onFace(faceCenter, normal, upHint), "Sketch1");
         planes = List.of();
         hovered = null;
         return true;

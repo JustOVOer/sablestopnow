@@ -27,3 +27,10 @@ side = "BOTH"
 
 [[mixins]]
 config = "sablestopnow.mixins.json"
+#  正交相机（草图编辑时自动开正交，SolidWorks 式体验）
+[[dependencies.sablestopnow]]
+modId="orthocamera"
+type="required"
+versionRange="[0.2.0,)"
+ordering="AFTER"
+side="CLIENT"

@@ -205,6 +205,8 @@ public final class SketchRenderer {
         final List<Solid.Placed> solids = SolidClientState.placed(level);
         // ★ 只有**真的在编辑草图**才虚化模型、关掉模型面拾取 ✓（选基准面阶段不虚化 ✓）
         final boolean sketching = SketchClient.editing();
+        // ★ 正交兼容：进出草图的那一帧切正交（SolidWorks 式），退出时恢复玩家原设置 ✓
+        OrthoCompat.onFrame(sketching);
         // ★ bug 15 自愈：退出草图后 editingId 若还留着（工具切换等路径漏清），
         //   这张草图会一直被当成“工作草图” ⇒ 完全定义绿/辅助线虚线常驻 ✗
         if (!sketching && editingId != null) {

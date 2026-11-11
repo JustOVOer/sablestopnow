@@ -384,6 +384,24 @@ public final class SketchRenderer {
                 }
             }
         }
+        // ★★ bug 15（真正的问题）：被特征**吸收**掉的草图，退出编辑后**不该再画曲线**。
+        //   草图线（无论什么颜色）永远叠在实体上就是“常驻显示”（用户实测）。
+        //   SolidWorks 的约定一样：草图被特征用掉后就隐起来，改它要展开特征或进草图。
+        //   还没被任何特征用掉的**自由草图**仍然画（它是唯一的可见载体）。
+        //   文字/尺寸标注仍然常驻（早前的需求），这里只隐藏**曲线**。
+        final java.util.Set<java.util.UUID> sketchUsed = new java.util.HashSet<>();
+        for (final Solid.Placed p : solids) {
+            final Solid sd = p.solid();
+            if (sd.shape() instanceof Solid.Shape.Plane
+                    || sd.shape() instanceof Solid.Shape.Fillet
+                    || sd.shape() instanceof Solid.Shape.Mirror
+                    || sd.shape() instanceof Solid.Shape.Pattern) {
+                continue; // 派生视图，不代表“草图被吸收”
+            }
+            if (sd.sketchId() != null) {
+                sketchUsed.add(sd.sketchId());
+            }
+        }
         for (final Sketch sketch : sketches) {
             // 同一张草图的"工作副本"已经在上面画过了，别再画一遍（会重影）
             if (working != null && sketch.id().equals(working.id())) {
@@ -396,7 +414,10 @@ public final class SketchRenderer {
             }
             final boolean editing = editingId != null && editingId.equals(sketch.id());
             final float[] color = editing ? EDITING_COLOR : IDLE_COLOR;
-            drawn += drawSketch(vcq, pose, cameraPos, sub.renderPose(), sketch, color);
+            // ★ 被吸收的草图：只留文字，不画曲线 ✓
+            if (!sketchUsed.contains(sketch.id())) {
+                drawn += drawSketch(vcq, pose, cameraPos, sub.renderPose(), sketch, color);
+            }
               // item 3: 退出草图后文字也要常驻（之前只在 working 副本上画）
               drawn += drawSketchTexts(pose, cameraPos, sub.renderPose(), sketch);
             if (editing && previewPoint != null) {

@@ -882,8 +882,12 @@ public final class SketchRenderer {
         //   以前这里是 `continue` 跳过、全靠 HUD 那层屏幕空间虚线 ✗
         //   ⇒ 那层没画（投影失败/被裁/被别的层盖住）时，辅助线就"看不见"或"看着是实线" ✓
         //   ⇒ 现在改在世界空间画虚线段 ✓ 与实体线同一套投影 ⇒ 必然对齐 ✓
-        lines += drawConstruction(vc, pose, cameraPos, renderPose, sketch, session, hovered,
-                isWorking);
+        // ★ bug 15：辅助线是**编辑辅助**，退出草图后不该留在模型视图里 ✓
+        //   （编辑时画虚线；非编辑时不画）
+        if (isWorking) {
+            lines += drawConstruction(vc, pose, cameraPos, renderPose, sketch, session, hovered,
+                    true);
+        }
         return lines;
     }
 
@@ -1395,7 +1399,12 @@ public final class SketchRenderer {
      * 解析失败一律回退默认值（见 {@link Colors}）✓
      */
     public static void reloadColors() {
-        IDLE_COLOR = Colors.sketchLine();
+        // ★★ bug 15 残留的真正原因：配置里的 `sketch_line` 注释就是
+        //   “Sketch line **while editing**（草图线（编辑中））”—— 它是**编辑中**的颜色。
+        //   以前 IDLE_COLOR 也取了它 ⇒ 退出草图后整张草图仍是那支青绿色，
+        //   与“完全定义绿”几乎分不开，看起来就是绿线常驻 ✗
+        //   ⇒ 非编辑状态用**参考几何色**（灰蓝）✓ 语义也正好是“这不是正在编辑的草图”。
+        IDLE_COLOR = Colors.reference();
         EDITING_COLOR = Colors.sketchLine();
         FULLY_DEFINED_COLOR = Colors.fullyDefined();
         SELECTED_COLOR = Colors.selected();

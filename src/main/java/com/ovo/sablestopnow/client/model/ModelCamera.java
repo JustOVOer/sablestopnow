@@ -317,31 +317,36 @@ public final class ModelCamera {
      */
     public static void alignRollForUp(final org.joml.Vector3dc viewNormal,
                                       final org.joml.Vector3dc upWorld) {
-        final org.joml.Vector3d f = new org.joml.Vector3d(viewNormal).negate().normalize();
-        final org.joml.Vector3d y = new org.joml.Vector3d(0, 1, 0);
-        final org.joml.Vector3d u0 = new org.joml.Vector3d(y).fma(-y.dot(f), f);
-        if (u0.lengthSquared() < 1.0e-9) {
-            rollGoal = 0.0f;
-            return;
-        }
-        u0.normalize();
-        final org.joml.Vector3d r0 = new org.joml.Vector3d(f).cross(u0).normalize();
+        // ★ 用**相机自己的基向量**（目标朝向）来算，不用"世界上方投影" ✗
+        //   以前那样在**水平面**（法线 = ±Y）上会退化：正下看时"世界竖直投影"是零向量
+        //   ⇒ 直接放弃 roll（用户实测：顶部基准面进草图仍是 45° 歪）
+        //   相机在 pitch=±90 时自己的 up 是 -Z/+Z（见 rightVector 的退化分支），
+        //   用它就能把 roll 定义清楚 ✓
+        final Vec3 look = viewVector(yawGoal, pitchGoal);
+        final Vec3 right = rightVector(look);
+        final Vec3 up = upVector(look, right);
+        final org.joml.Vector3d f = new org.joml.Vector3d(look.x, look.y, look.z);
         final org.joml.Vector3d u = new org.joml.Vector3d(upWorld);
-        u.fma(-u.dot(f), f);
+        u.fma(-u.dot(f), f); // 投影到屏幕平面
         if (u.lengthSquared() < 1.0e-9) {
             rollGoal = 0.0f;
             return;
         }
         u.normalize();
-        rollGoal = (float) -Math.toDegrees(Math.atan2(u.dot(r0), u.dot(u0)));
+        final double dotR = u.dot(right.x, right.y, right.z);
+        final double dotU = u.dot(up.x, up.y, up.z);
+        rollGoal = (float) -Math.toDegrees(Math.atan2(dotR, dotU));
         // 诊断：目标 roll 变化超过 1° 时打一行（用户实测反馈用；不影响渲染）
         if (Math.abs(rollGoal - lastRollLog) > 1.0f) {
             lastRollLog = rollGoal;
             com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                    "[roll] goal={} u·r0={} u·u0={}",
+                    "[roll] goal={} u·right={} u·up={} look=({},{},{})",
                     String.format(java.util.Locale.ROOT, "%.1f", rollGoal),
-                    String.format(java.util.Locale.ROOT, "%.4f", u.dot(r0)),
-                    String.format(java.util.Locale.ROOT, "%.4f", u.dot(u0)));
+                    String.format(java.util.Locale.ROOT, "%.4f", dotR),
+                    String.format(java.util.Locale.ROOT, "%.4f", dotU),
+                    String.format(java.util.Locale.ROOT, "%.3f", look.x),
+                    String.format(java.util.Locale.ROOT, "%.3f", look.y),
+                    String.format(java.util.Locale.ROOT, "%.3f", look.z));
         }
     }
 
@@ -586,10 +591,19 @@ public final class ModelCamera {
      *
      * <p>必须<b>拷贝</b>投影矩阵：事件给的是渲染管线里的实例，下一帧会被就地改掉。
      */
-    public static void captureFrame(final Matrix4f projection, final Camera camera) {
-        if (projection == null || camera == null) {
+    public static void captureFrame(final Matrix4f projectionArg, final Camera camera) {
+        if (projectionArg == null || camera == null) {
             frameValid = false;
             return;
+        }
+        // ★ 正交：用前置模组**自己那份**投影矩阵（事件里给的不一定是替换后的）✗
+        //   否则画面正交、拾取一直按透视算 ⇒ 正交下"点不中"（用户实测）
+        Matrix4f projection = projectionArg;
+        if (com.ovo.sablestopnow.client.OrthoCompat.isOrthoOn()) {
+            final Matrix4f ortho = com.ovo.sablestopnow.client.OrthoCompat.orthoProjection();
+            if (ortho != null) {
+                projection = ortho;
+            }
         }
         FRAME_PROJECTION.set(projection);
         final Vec3 camPos = camera.getPosition();
@@ -690,6 +704,11 @@ public final class ModelCamera {
      */
     public static Vec3 viewFor(final float yawDeg, final float pitchDeg) {
         return viewVector(yawDeg, pitchDeg);
+    }
+
+    /** **目标**视线方向（还没缓动过去的那一个）✓ —— 用于 roll 门限判断 */
+    public static Vec3 goalLook() {
+        return viewVector(yawGoal, pitchGoal);
     }
 
     private static Vec3 viewVector(final float yawDeg, final float pitchDeg) {

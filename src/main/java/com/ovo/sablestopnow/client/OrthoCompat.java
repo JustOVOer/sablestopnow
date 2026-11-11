@@ -114,6 +114,44 @@ public final class OrthoCompat {
     }
 
     /**
+     * 复刻该模组**当前**使用的正交投影矩阵 ✓（拿不到返回 null）
+     *
+     * <h2>为什么必须自己取</h2>
+     * 它是在 {@code GameRenderer} 的渲染流程里替换投影的；而
+     * {@code RenderLevelStageEvent.getProjectionMatrix()} 给我们的未必是替换后的那个。
+     * 拾取用透视、画面用正交 ⇒ "看着在光标下却点不中"；正交下不同屏幕位置还对应
+     * **不同起点**（平行射线）⇒ 错得更明显（用户实测：正交下鼠标旁一直是同一个点）。
+     *
+     * <p>它自己暴露了 {@code public static Matrix4f createOrthoMatrix(scaleX, scaleY)}，
+     * 而 {@code scale_x/scale_y} 是公开配置字段 ⇒ 用同样的入参复刻同一份矩阵，
+     * 画面与拾取必然同源。
+     */
+    public static org.joml.Matrix4f orthoProjection() {
+        final Object cfg = config();
+        if (cfg == null) {
+            return null;
+        }
+        try {
+            final float sx = readFloat(cfg, "scale_x", 1.0f);
+            final float sy = readFloat(cfg, "scale_y", 1.0f);
+            final Class<?> c = Class.forName(MOD_CLASS);
+            final Method m = c.getMethod("createOrthoMatrix", float.class, float.class);
+            final Object r = m.invoke(null, sx, sy);
+            return r instanceof final org.joml.Matrix4f mm ? new org.joml.Matrix4f(mm) : null;
+        } catch (final Throwable t) {
+            return null;
+        }
+    }
+
+    private static float readFloat(final Object cfg, final String field, final float fallback) {
+        try {
+            return cfg.getClass().getField(field).getFloat(cfg);
+        } catch (final Throwable t) {
+            return fallback;
+        }
+    }
+
+    /**
      * **正交下的滚轮缩放**：改 {@code scale_x/scale_y}，不是相机距离 ✓
      *
      * <p>正交投影里推近/拉远相机不改变物体大小（平行投影与距离无关）⇒

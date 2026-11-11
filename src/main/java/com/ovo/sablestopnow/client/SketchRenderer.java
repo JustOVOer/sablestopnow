@@ -369,7 +369,8 @@ public final class SketchRenderer {
                     .worldAxis(rollSub, working.plane().normal());
             final org.joml.Vector3d rv = com.ovo.sablestopnow.client.MateTargeting
                     .worldAxis(rollSub, working.plane().axisV());
-            final Vec3 look = com.ovo.sablestopnow.client.model.ModelCamera.lookVector();
+            // ★ 门限用**目标**视线：缓动中也不该把 roll 关掉（否则要等相机转到位才生效）✓
+            final Vec3 look = com.ovo.sablestopnow.client.model.ModelCamera.goalLook();
             final double faceOn = -(look.x * rn.x + look.y * rn.y + look.z * rn.z);
             // 诊断：每次进草图只打一行，告诉我们门限实际看到了什么（用户反馈用）
             if (!rollLogged && faceOn > 0.5) {

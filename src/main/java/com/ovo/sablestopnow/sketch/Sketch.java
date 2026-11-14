@@ -156,6 +156,24 @@ public final class Sketch {
     private final List<Entity> entities = new ArrayList<>();
     private final List<Constraint> constraints = new ArrayList<>();
 
+    /**
+     * **结构版本号** ✓ —— 约束/图元增删改时自增。
+     *
+     * <p>用途：{@code SketchDof} 的自由度分析要构建数值雅可比（O(约束行 × 变量)），
+     * 每帧都算会明显掉帧、每次点击刷新左栏再算一次就会"点一下就卡"。
+     * 有了版本号 + 变量值校验和，就能安全地缓存一次计算结果。
+     */
+    private int revision;
+
+    public int revision() {
+        return revision;
+    }
+
+    /** 标记结构发生了变化（约束/图元增删改）✓ */
+    public void bumpRevision() {
+        revision++;
+    }
+
     public Sketch(final UUID id, final UUID body, final String name, final SketchPlane plane) {
         this.id = id;
         this.body = body;
@@ -298,6 +316,7 @@ public final class Sketch {
         }
         final Entity entity = new Entity(kind, vars);
         entities.add(entity);
+        revision++;
         return entity;
     }
 
@@ -464,6 +483,7 @@ public final class Sketch {
         final int idx = entities.indexOf(arc);
         if (idx >= 0) {
             entities.set(idx, marked);
+            revision++;
         }
         return marked;
     }
@@ -616,6 +636,7 @@ public final class Sketch {
         if (!this.entities.remove(entity)) {
             return false;
         }
+        revision++;
         final java.util.Set<Integer> gone = new java.util.HashSet<>();
         for (final int v : entity.vars()) {
             gone.add(v);
@@ -688,6 +709,7 @@ public final class Sketch {
         }
         entities.clear();
         entities.addAll(restoredEntities);
+        revision++;
         constraints.clear();
         constraints.addAll(restoredConstraints);
     }
@@ -921,13 +943,101 @@ public final class Sketch {
     }
 
     public Constraint addConstraint(final int kind, final double value, final int... operands) {
-        final Constraint c = new Constraint(kind, operands, value);
+        // ★★ **尺寸类**约束在"同一组操作数"上只能有一条（用户实测"过定义/无法满足"）：
+        //   · 完全相同的（kind+操作数+值）⇒ 复用，不再加第二条
+        //   · 同 kind+操作数但值不同 ⇒ **原位更新值**（SolidWorks：再标一次 = 改那条）
+        //   这就是"数据坏掉"的来源：点两次/双击/落尺寸后再落一次会塞进两条互相冲突的
+        //   距离约束，求解器随即判成过约束，之后每次改值都失败。
+        //   ⚠ 只对**尺寸类**这么做：几何关系（水平/竖直/重合…）重复只是冗余方程，
+        //     不冲突；而且建图时的自动推理约束会让"再点一次"合理地追加一条。
+        if (isDimensionKind(kind)) {
+            for (int i = 0; i < constraints.size(); i++) {
+                final Constraint c = constraints.get(i);
+                if (c.kind() != kind || !java.util.Arrays.equals(c.operands(), operands)) {
+                    continue;
+                }
+                if (Math.abs(c.value() - value) <= 1.0e-9) {
+                    return c;
+                }
+                final Constraint updated = new Constraint(kind, operands, value);
+                constraints.set(i, updated);
+                revision++;
+                return updated;
+            }
+        }
+        return appendConstraint(new Constraint(kind, operands, value));
+    }
+
+    /** 只增不改（供内部/导入路径使用）✓ */
+    private Constraint appendConstraint(final Constraint c) {
         constraints.add(c);
+        revision++;
         return c;
     }
 
+    /**
+     * 是否是**尺寸类**约束（驱动几何数值的那种）✓
+     *
+     * <p>这类约束同一组操作数上不允许出现两条 —— 两条不同的值会互相冲突，
+     * 正是"过定义 / 求解器无法满足"的来源。
+     */
+    public static boolean isDimensionKind(final int kind) {
+        return switch (kind) {
+            case SketchSolver.DISTANCE, SketchSolver.HORIZONTAL_DISTANCE,
+                 SketchSolver.VERTICAL_DISTANCE, SketchSolver.RADIUS,
+                 SketchSolver.ARC_RADIUS, SketchSolver.LINES_ANGLE,
+                 SketchSolver.POINT_LINE_DISTANCE, SketchSolver.HPOINT_LINE_DISTANCE,
+                 SketchSolver.VPOINT_LINE_DISTANCE, SketchSolver.PARALLEL_LINES_DISTANCE,
+                 SketchSolver.ARC_LENGTH, SketchSolver.ARC_ANGLE -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * **修复历史数据**：把重复约束清掉 ✓
+     *
+     * <p>旧版本允许"同 kind + 同操作数"的约束存在（点两次、双击、落尺寸后再落），
+     * 那些草图一进编辑就过约束、改什么都"无法满足"。这里在进入编辑时做一次清理：
+     * 同 kind + 同操作数只保留**第一条**（顺序不变，避免求解器程序与常量错位）。
+     *
+     * @return 清掉了多少条（0 = 本来就没问题）
+     */
+    public int repairDuplicateConstraints() {
+        final java.util.Map<String, Integer> seen = new java.util.HashMap<>();
+        int removed = 0;
+        for (int i = 0; i < constraints.size(); ) {
+            final Constraint c = constraints.get(i);
+            final String key = c.kind() + "|" + java.util.Arrays.toString(c.operands());
+            if (seen.putIfAbsent(key, i) != null) {
+                constraints.remove(i);
+                removed++;
+            } else {
+                i++;
+            }
+        }
+        if (removed > 0) {
+            revision++;
+        }
+        return removed;
+    }
+
+    /** 找到"同一组操作数 + 同一类型"的已有约束（尺寸创建时用它改成更新而不是新增）✓ */
+    @Nullable
+    public Constraint findConstraint(final int kind, final int... operands) {
+        for (final Constraint c : constraints) {
+            if (c.kind() == kind && java.util.Arrays.equals(c.operands(), operands)) {
+                return c;
+            }
+        }
+        return null;
+    }
+
     public boolean removeConstraint(final Constraint constraint) {
-        return constraints.remove(constraint);
+        final boolean removed = constraints.remove(constraint);
+        if (removed) {
+            revision++;
+        }
+        return removed;
     }
 
     /**
@@ -949,15 +1059,18 @@ public final class Sketch {
             return;
         }
         constraints.remove(index);
+        revision++;
     }
 
     public void replaceConstraint(final int index, final Constraint constraint) {
         constraints.set(index, constraint);
+        revision++;
     }
 
     /** 在指定位置插入约束（配合 {@link #replaceConstraint} 使用）。 */
     public void insertConstraint(final int index, final Constraint constraint) {
         constraints.add(index, constraint);
+        revision++;
     }
 
     /**
@@ -1214,6 +1327,7 @@ public final class Sketch {
         }
         this.entities.clear();
         this.entities.addAll(state.entities());
+        revision++;
         this.constraints.clear();
         this.constraints.addAll(state.constraints());
         this.construction.clear();

@@ -962,7 +962,7 @@ public final class SketchHud {
                 //   6 参数版本假设贴图是 256×256 图集 ⇒ 只采样左上角一小块
                 //   ⇒ 看起来"只有圆盘、没有图标"（用户实测）。
                 g.blit(tex, (int) Math.round(gx - 3.0), (int) Math.round(gy - 3.0),
-                        0, 0, 6, 6, 8, 8);
+                        0, 0, 6, 6, 16, 16);
             }
             GLYPH_HITS.add(new GlyphHit(i, glyph, gx, gy));
         }

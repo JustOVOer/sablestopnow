@@ -51,16 +51,61 @@ public final class SketchDof {
      * 反过来只是显示得保守一点。
      */
     public static boolean[] freeVariablesOf(final Sketch sketch) {
+        // ★ 缓存（用户实测"每次点图元/落尺寸都卡"）：
+        //   自由度分析要构建数值雅可比（O(行×列) 次残差求值），而它被
+        //   **渲染层每帧** 和 **左栏每次重建** 各调一次；删除/创建约束还会让它变贵。
+        //   用「结构版本号 + 变量值校验和」做键 ⇒ 只在几何/拓扑真的变了才算 ✓
+        if (cacheValid(sketch)) {
+            return cacheFree;
+        }
         // ⚠ 只看**仍被图元引用**的变量。删图元时会保留它的变量（否则下标全体错位），
         // 那些孤儿变量不构成自由度 —— 算进去的话"还需要 N 个约束"永远减不下去。
         final int[] active = sketch.usedVariables();
-        final boolean[] reduced = freeVariables(selectColumns(jacobian(sketch), active),
-                active.length);
+        final double[][] jac = jacobian(sketch);
+        final double[][] sel = selectColumns(jac, active);
+        final boolean[] reduced = freeVariables(sel, active.length);
         final boolean[] out = new boolean[sketch.variableCount()];
         for (int i = 0; i < active.length; i++) {
             out[active[i]] = reduced[i];
         }
+        cacheSketch = sketch;
+        cacheRev = sketch.revision();
+        cacheConstraints = sketch.constraints().size();
+        cacheEntities = sketch.entities().size();
+        cacheSum = valueSum(sketch);
+        cacheFree = out;
+        cacheDof = nullspaceDimension(sel, active.length);
         return out;
+    }
+
+    // ---- 自由度缓存（见 freeVariablesOf 的注释） ----
+    private static Sketch cacheSketch;
+    private static int cacheRev = -1;
+    private static int cacheConstraints = -1;
+    private static int cacheEntities = -1;
+    private static double cacheSum = Double.NaN;
+    private static boolean[] cacheFree;
+    private static int cacheDof = -1;
+
+    private static double valueSum(final Sketch sketch) {
+        double sum = 0.0;
+        final int n = sketch.variableCount();
+        for (int i = 0; i < n; i++) {
+            sum += sketch.variable(i) * (1.0 + (i % 7) * 0.125);
+        }
+        return sum;
+    }
+
+    private static boolean cacheValid(final Sketch sketch) {
+        if (sketch == null || cacheFree == null || cacheSketch != sketch) {
+            return false;
+        }
+        if (sketch.revision() != cacheRev
+                || sketch.constraints().size() != cacheConstraints
+                || sketch.entities().size() != cacheEntities) {
+            return false;
+        }
+        return Math.abs(valueSum(sketch) - cacheSum) < 1.0e-9;
     }
 
     /** 从矩阵里挑出指定的列（其余列整体丢掉）。 */
@@ -307,9 +352,9 @@ public final class SketchDof {
 
     /** 整张草图还剩几个自由度（UI 上"还需要 N 个约束"就是它）。 */
     public static int remainingDof(final Sketch sketch) {
-        // 同上：只数仍被引用的变量，孤儿变量不算自由度
-        final int[] active = sketch.usedVariables();
-        return nullspaceDimension(selectColumns(jacobian(sketch), active), active.length);
+        // 走 freeVariablesOf 的缓存：它也算了 nullspaceDimension（总自由度）✓
+        freeVariablesOf(sketch);
+        return cacheDof;
     }
 
     /** 仍被图元引用的变量个数（"还需要 N 个约束"的分母口径）。 */

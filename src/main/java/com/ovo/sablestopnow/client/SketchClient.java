@@ -465,6 +465,34 @@ public final class SketchClient {
         //   只在提示条里说一句"无法满足"玩家很容易错过（用户实测："草稿未变红"）。
         final var solved = MODE.lastSolve();
         if (solved == null || !solved.ok()) {
+            // ★ 诊断（用户要求确认"是不是草图数据有问题"）：
+            //   失败时把**与该尺寸共享操作数**的所有约束打出来 —— 如果有两条同 kind
+            //   同操作数的，说明数据里确实有重复（进入编辑时的 repair 会清掉）。
+            try {
+                final StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < work.constraints().size(); i++) {
+                    final var o = work.constraints().get(i);
+                    boolean share = false;
+                    for (final int a : o.operands()) {
+                        for (final int b : c.operands()) {
+                            if (a == b) {
+                                share = true;
+                            }
+                        }
+                    }
+                    if (share) {
+                        sb.append(" [").append(i).append(':').append(o.kind())
+                                .append('=').append(String.format(java.util.Locale.ROOT,
+                                        "%.4f", o.value())).append(']');
+                    }
+                }
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                        "[sketch-solve] unsat: kind={} new={} constraints={} sharing={}",
+                        c.kind(), String.format(java.util.Locale.ROOT, "%.4f", signedValue),
+                        work.constraints().size(), sb);
+            } catch (final Throwable ignored) {
+                // 诊断失败不能影响主流程
+            }
             com.ovo.sablestopnow.client.model.ModelMode.prompt("model.dim.unsatisfied");
             return false;
         }
@@ -834,6 +862,18 @@ public final class SketchClient {
      * 先向服务端拉一次 —— 直接进编辑。改完点「完成草图」时整张发回去。
      */
     public static void edit(final Sketch sketch) {
+        // ★ 进入编辑前先**修复历史数据**：旧版本允许同 kind+同操作数的约束重复存在，
+        //   那些草图画什么都"过定义/无法满足"（用户怀疑"草图数据坏了"，确实如此）。
+        //   注意必须在 MODE.edit 之前修，MODE 会从这张草图拷贝出工作副本 ✓
+        if (sketch != null) {
+            final int repaired = sketch.repairDuplicateConstraints();
+            if (repaired > 0) {
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                        "[sketch] repaired {} duplicate constraints in sketch {}",
+                        repaired, sketch.id().toString().substring(0, 8));
+                com.ovo.sablestopnow.network.SketchNetworking.sendSave(sketch);
+            }
+        }
         MODE.edit(sketch);
         SketchRenderer.setEditing(sketch.id());
         // ★ 用户要求：**从右侧栏进入草图时也要自动正视** ✓

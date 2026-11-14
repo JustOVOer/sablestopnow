@@ -672,7 +672,15 @@ public final class ModelInput {
                 ModelUi.refreshLeftPanel();
                 return;
             }
-            if (com.ovo.sablestopnow.client.SketchClient.click(mc)) {
+            // ★ 诊断：草图点击耗时（用户反馈"每次点击都卡"，用它确认是不是点击本身慢）
+            final long clickT0 = System.nanoTime();
+            final boolean sketchClicked = com.ovo.sablestopnow.client.SketchClient.click(mc);
+            final long clickMs = (System.nanoTime() - clickT0) / 1_000_000L;
+            if (clickMs >= 8L) {
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                        "[perf] sketchClick={}ms", clickMs);
+            }
+            if (sketchClicked) {
                 // 选中基准面之后必须重建左栏：状态已从「选面」变成「编辑中」，
                 // 不刷新的话左栏还停在"点击一个基准面开始画草图"（实测反馈过）。
                 ModelUi.refreshLeftPanel();

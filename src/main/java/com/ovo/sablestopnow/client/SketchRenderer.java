@@ -138,6 +138,29 @@ public final class SketchRenderer {
     private static UUID editingId;
     /** roll 诊断：每次进草图只打一行日志 ✓ */
     private static boolean rollLogged;
+
+    /** 诊断：每帧"画草图"耗时聚合（1 Hz 打一次，用户反馈卡顿时看这条）✓ */
+    private static long perfAccNs;
+    private static int perfFrames;
+    private static long perfLogMs;
+
+    private static void perfSketchFrame(final long ns) {
+        perfAccNs += ns;
+        perfFrames++;
+        final long now = System.currentTimeMillis();
+        if (now - perfLogMs < 1000L) {
+            return;
+        }
+        if (perfFrames > 0) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[perf] sketchDraw avg={}ms frames={}",
+                    String.format(java.util.Locale.ROOT, "%.2f",
+                            perfAccNs / 1.0e6 / perfFrames), perfFrames);
+        }
+        perfAccNs = 0L;
+        perfFrames = 0;
+        perfLogMs = now;
+    }
     /** 正在编辑时鼠标落点的预览位置（平面内坐标）。 */
     @Nullable
     private static double[] previewPoint;
@@ -410,6 +433,7 @@ public final class SketchRenderer {
             final ClientSubLevel wsub = byId.get(working.body());
             if (wsub != null) {
                 // ★ 草图线宽只在**画草图内容**时生效；画完恢复，避免污染基准面/其它图元 ✓
+                final long perfT0 = System.nanoTime();
                 final double prevBar = barScale;
                 barScale = sketchBarScale;
                 // ★ 需求 ②：**常驻背景网格** ✓ 必须先画（在图元下面）✓
@@ -438,6 +462,7 @@ public final class SketchRenderer {
                     drawPreview(vcq, pose, cameraPos, wsub.renderPose(), working);
                 }
                 barScale = prevBar;
+                perfSketchFrame(System.nanoTime() - perfT0);
             }
         }
         // ★★ bug 15（真正的问题）：被特征**吸收**掉的草图，退出编辑后**不该再画曲线**。
@@ -1765,7 +1790,11 @@ public final class SketchRenderer {
         final double midU = (u1 + u2) * 0.5;
         final double midV = (v1 + v2) * 0.5;
         final double perp = (session.hoverU() - midU) * du + (session.hoverV() - midV) * dv;
-        final double off = Math.max(DIM_OFFSET, perp);
+        // ★ 允许负偏移：光标移到尺寸线的另一侧时，预览线也要跟过去 ✓
+        //   （原来的 Math.max(DIM_OFFSET, perp) 把它永远钉在正侧，用户实测"只能在一侧"）
+        final double off = Math.abs(perp) < DIM_OFFSET
+                ? (perp < 0.0 ? -DIM_OFFSET : DIM_OFFSET)
+                : perp;
         final double a1 = u1 + du * off;
         final double b1 = v1 + dv * off;
         final double a2 = u2 + du * off;

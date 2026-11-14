@@ -109,6 +109,27 @@ public final class SketchClient {
      *
      * @return 是否成功进入（结构还没同步过来时返回 false）
      */
+    /**
+     * **确保求解器已加载** ✓
+     *
+     * <p>求解器原来只在 {@link #begin(UUID)} 里注入；从树里进草图、点模型面进草图
+     * 都不走 begin ⇒ solver 一直是 null ⇒ `solve()` 返回 null ⇒ 界面把
+     * "根本没求解"报成"求解器无法满足/过定义"（用户实测就是这么来的）。
+     * 现在所有入口都调这里补齐，加载失败才真的降级为"只画不求解"。
+     */
+    private static void ensureSolver() {
+        if (MODE.hasSolver()) {
+            return;
+        }
+        try {
+            MODE.setSolver(com.ovo.sablestopnow.sketch.SketchSolver.bundled());
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch] solver loaded lazily");
+        } catch (final Throwable t) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.warn(
+                    "[sablestopnow] 草图求解器加载失败，草图将只画不求解", t);
+        }
+    }
+
     public static boolean begin(final UUID bodyId) {
         final ClientSubLevel sub = find(bodyId);
         if (sub == null) {
@@ -187,6 +208,7 @@ public final class SketchClient {
 
     /** 鼠标移动：更新高亮 / 落点预览。 */
     public static void hover(final Minecraft mc) {
+        ensureSolver();
         if (!MODE.active()) {
             return;
         }
@@ -540,6 +562,7 @@ public final class SketchClient {
     private static double lastClickY = Double.NaN;
 
     public static boolean click(final Minecraft mc) {
+        ensureSolver();
         if (!MODE.active()) {
             return false;
         }
@@ -862,6 +885,7 @@ public final class SketchClient {
      * 先向服务端拉一次 —— 直接进编辑。改完点「完成草图」时整张发回去。
      */
     public static void edit(final Sketch sketch) {
+        ensureSolver();
         // ★ 进入编辑前先**修复历史数据**：旧版本允许同 kind+同操作数的约束重复存在，
         //   那些草图画什么都"过定义/无法满足"（用户怀疑"草图数据坏了"，确实如此）。
         //   注意必须在 MODE.edit 之前修，MODE 会从这张草图拷贝出工作副本 ✓
@@ -916,6 +940,7 @@ public final class SketchClient {
     }
 
     public static boolean chooseFace(final MateTargeting.BoxHit hit) {
+        ensureSolver();
         final net.minecraft.core.BlockPos block = hit.baseBlock();
         final net.minecraft.core.Direction face = hit.baseFace();
         if (block == null || face == null) {
@@ -1037,6 +1062,7 @@ public final class SketchClient {
     public static boolean choosePlaneAt(final java.util.UUID body,
                                         final org.joml.Vector3dc origin,
                                         final org.joml.Vector3dc normal) {
+        ensureSolver();
         if (!MODE.chooseFace(new org.joml.Vector3d(origin), new org.joml.Vector3d(normal))) {
             return false;
         }
@@ -1047,6 +1073,7 @@ public final class SketchClient {
 
     public static boolean choosePlaneAt(final org.joml.Vector3dc origin,
                                         final org.joml.Vector3dc normal) {
+        ensureSolver();
         if (origin == null || normal == null) {
             return false;
         }
@@ -1061,6 +1088,7 @@ public final class SketchClient {
 
     public static boolean chooseModelFace(
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit) {
+        ensureSolver();
         // 只有**平面**能当基准面 ✓（曲面可以高亮，但不能建草图 ✓）
         if (hit == null || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE
                 || !hit.face().planar()) {

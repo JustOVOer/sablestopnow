@@ -68,6 +68,19 @@ public final class SketchMode {
         this.solver = value;
     }
 
+    /**
+     * 是否已经有求解器 ✓
+     *
+     * <p>**为什么需要这个查询**（用户实测"尺寸落下正常但提示无法满足/过定义"）：
+     * 求解器只在 {@code SketchClient.begin()} 里注入，而"从树里进草图 / 点模型面进草图"
+     * 这些入口不走 begin ⇒ solver 一直是 null ⇒ {@link #solve()} 直接返回 null ⇒
+     * 调用方把"根本没求解"误报成"求解器无法满足" ✗。
+     * 客户端各入口现在都会调 {@code SketchClient.ensureSolver()} 补齐。
+     */
+    public boolean hasSolver() {
+        return solver != null;
+    }
+
     @Nullable
     public SketchSolver.Result lastSolve() {
         return lastSolve;

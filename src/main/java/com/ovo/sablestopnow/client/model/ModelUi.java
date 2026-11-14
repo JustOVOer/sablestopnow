@@ -1522,6 +1522,10 @@ public final class ModelUi {
     @Nullable
     private static String lastLeftSignature;
 
+    /** 诊断：左栏每秒重建次数（用户怀疑"每次点击都触发重建"）✓ */
+    private static int perfPanelBuilds;
+    private static long perfPanelLogMs;
+
     /** 草图尺寸输入框的当前值（静态：左栏重建时不能丢）。 */
     private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> sketchDimension =
             com.ovo.sablestopnow.client.gui.lib.Prop.of("sketch.dimension", 10.0);
@@ -4327,6 +4331,15 @@ public final class ModelUi {
             return;
         }
         lastLeftSignature = signature;
+        // ★ 诊断：左栏每秒重建几次（用户怀疑"每次点击都触发重建"；>5 就说明在抖）
+        perfPanelBuilds++;
+        final long perfNow = System.currentTimeMillis();
+        if (perfNow - perfPanelLogMs >= 1000L) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[perf] leftPanel rebuilds/s={}", perfPanelBuilds);
+            perfPanelBuilds = 0;
+            perfPanelLogMs = perfNow;
+        }
         body.clear();
         final String tool = ModelMode.tool();
 

@@ -939,14 +939,14 @@ public final class SketchHud {
             final int slot = perEntity.merge(anchorKey(owner), 1, Integer::sum) - 1;
             // ★ 用户要求：图标更小 + 有背景 + 悬停变色 + 字形来自 mod 资源 ✓
             //   背景：普通=深色半透明，悬停=草绿，选中=金色描边（与"选中"语义一致）
-            final double gx = screen[0] + 6.0 + slot * 8.0;
-            final double gy = screen[1] - 6.0;
+            final double gx = screen[0] + 8.0 + slot * 13.0;
+            final double gy = screen[1] - 8.0;
             final boolean picked = session.selectedConstraint() == i;
             final double mdx = com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() - gx;
             final double mdy = com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() - gy;
-            final boolean hoveredGlyph = mdx * mdx + mdy * mdy <= 25.0;
+            final boolean hoveredGlyph = mdx * mdx + mdy * mdy <= 56.25;
             // ★ 用户要求：**正方形**图标 + 正方形底 + 再小一点；选中态也用同一套图标 ✓
-            final float half = 3.5f;
+            final float half = 7.0f;
             final int bg = picked ? 0xCC8A6A1E
                     : (hoveredGlyph ? 0xCC6B8E23 : 0x99101420);
             com.ovo.sablestopnow.client.gui.lib.UiVector.roundRect(g,
@@ -961,8 +961,8 @@ public final class SketchHud {
                 // ⚠ 必须用 **8 参数** blit 并显式给贴图尺寸（8×8）：
                 //   6 参数版本假设贴图是 256×256 图集 ⇒ 只采样左上角一小块
                 //   ⇒ 看起来"只有圆盘、没有图标"（用户实测）。
-                g.blit(tex, (int) Math.round(gx - 3.0), (int) Math.round(gy - 3.0),
-                        0, 0, 6, 6, 16, 16);
+                g.blit(tex, (int) Math.round(gx - 6.0), (int) Math.round(gy - 6.0),
+                        0, 0, 12, 12, 12, 12);
             }
             GLYPH_HITS.add(new GlyphHit(i, glyph, gx, gy));
         }

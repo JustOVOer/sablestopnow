@@ -396,12 +396,18 @@ public final class ModelCamera {
      * 只要有一点不一致就会出现「看着点在光标下、却点不中」。
      */
     public static Vec3 rayDirection(final Minecraft mc) {
+        return rayDirectionAt(mc, com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd(),
+                com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd());
+    }
+
+    /** 指定**屏幕坐标**（GUI 像素）的射线方向 ✓  拾取容差要拿"旁边 1 像素"做差分 */
+    public static Vec3 rayDirectionAt(final Minecraft mc, final double mx, final double my) {
         final int w = mc.getWindow().getGuiScaledWidth();
         final int h = mc.getWindow().getGuiScaledHeight();
         ensureVerdict(mc);
         if (w > 0 && h > 0 && useMatrices) {
-            final double ndcX = 2.0 * com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() / w - 1.0;
-            final double ndcY = 1.0 - 2.0 * com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() / h;
+            final double ndcX = 2.0 * mx / w - 1.0;
+            final double ndcY = 1.0 - 2.0 * my / h;
             final Vector4f near = FRAME_INVERSE.transform(new Vector4f((float) ndcX, (float) ndcY, -1.0f, 1.0f));
             final Vector4f far = FRAME_INVERSE.transform(new Vector4f((float) ndcX, (float) ndcY, 1.0f, 1.0f));
             if (Math.abs(near.w) > 1.0e-6f && Math.abs(far.w) > 1.0e-6f) {
@@ -607,7 +613,7 @@ public final class ModelCamera {
                 usedOrtho = true;
             }
         }
-        com.ovo.sablestopnow.client.OrthoCompat.logProjectionOnce(usedOrtho);
+        com.ovo.sablestopnow.client.OrthoCompat.noteProjection(usedOrtho);
         FRAME_PROJECTION.set(projection);
         final Vec3 camPos = camera.getPosition();
         // world → camera：先平移 -camPos，再乘相机朝向的共轭（与 MC 的 prepareCullFrustum 完全一致）
@@ -682,12 +688,18 @@ public final class ModelCamera {
      */
     @Nullable
     public static Vec3 rayOrigin(final Minecraft mc) {
+        return rayOriginAt(mc, com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd(),
+                com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd());
+    }
+
+    /** 指定**屏幕坐标**（GUI 像素）的射线起点 ✓ */
+    public static Vec3 rayOriginAt(final Minecraft mc, final double mx, final double my) {
         final int w = mc.getWindow().getGuiScaledWidth();
         final int h = mc.getWindow().getGuiScaledHeight();
         ensureVerdict(mc);
         if (w > 0 && h > 0 && useMatrices) {
-            final double ndcX = 2.0 * com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() / w - 1.0;
-            final double ndcY = 1.0 - 2.0 * com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() / h;
+            final double ndcX = 2.0 * mx / w - 1.0;
+            final double ndcY = 1.0 - 2.0 * my / h;
             final Vector4f near = FRAME_INVERSE.transform(
                     new Vector4f((float) ndcX, (float) ndcY, -1.0f, 1.0f));
             if (Math.abs(near.w) > 1.0e-6f) {
@@ -695,6 +707,40 @@ public final class ModelCamera {
             }
         }
         return position();
+    }
+
+    /**
+     * **一个 GUI 像素对应多少世界格**（在相机轨道中心的深度上量）✓
+     *
+     * <p>用途：线宽、拾取容差都要"屏幕上恒定"，否则拉远/正交缩放后线细到看不见、
+     * 容差粗到点哪儿都算选中。正交与透视在这里统一  都用本帧的逆矩阵量：
+     * 在**同 NDC 深度**上取相邻两像素的世界距离，透视下随深度变、正交下恒定 ✓
+     */
+    public static double worldPerPixel(final Minecraft mc) {
+        final int w = mc.getWindow().getGuiScaledWidth();
+        final int h = mc.getWindow().getGuiScaledHeight();
+        if (w <= 0 || h <= 0) {
+            return 0.0;
+        }
+        ensureVerdict(mc);
+        if (!useMatrices) {
+            final double fov = mc.options.fov().get();
+            final double tanHalf = Math.tan(Math.toRadians(fov) * 0.5);
+            return 2.0 * tanHalf * Math.max(1.0, distance) / h;
+        }
+        final Vector4f probe = new Vector4f((float) target.x, (float) target.y, (float) target.z, 1.0f);
+        FRAME_VIEW_PROJECTION.transform(probe);
+        final float ndcZ = probe.w > 1.0e-6f ? probe.z / probe.w : 0.0f;
+        final Vector4f p0 = FRAME_INVERSE.transform(new Vector4f(-1.0f, 0.0f, ndcZ, 1.0f));
+        final Vector4f p1 = FRAME_INVERSE.transform(
+                new Vector4f(-1.0f + 2.0f / w, 0.0f, ndcZ, 1.0f));
+        if (Math.abs(p0.w) < 1.0e-6f || Math.abs(p1.w) < 1.0e-6f) {
+            return 0.0;
+        }
+        final double dx = (double) p1.x / p1.w - (double) p0.x / p0.w;
+        final double dy = (double) p1.y / p1.w - (double) p0.y / p0.w;
+        final double dz = (double) p1.z / p1.w - (double) p0.z / p0.w;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     // ============ 基向量 ============

@@ -216,6 +216,11 @@ public final class SketchRenderer {
         }
         // ★ item 2：每帧从配置刷新颜色（8 次解析，开销可忽略）✓
         reloadColors();
+        //  线条粗细：屏幕上恒定（半宽 2px） 拉远/正交缩放后不再细到看不见 ✓
+        final double wppBar = com.ovo.sablestopnow.client.model.ModelCamera.worldPerPixel(mc);
+        if (wppBar > 0.0) {
+            barScale = Math.max(0.35, Math.min(8.0, (2.0 * wppBar) / BAR_WIDTH_HALF));
+        }
         // ★ 模型视图：每帧更新"面/棱/点"的悬停拾取 ✓（画草图时不拾取模型面 ✓）
         if (!sketching) {
             com.ovo.sablestopnow.client.model.FeatureHover.update(mc);

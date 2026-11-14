@@ -200,20 +200,48 @@ public final class SketchClient {
         final Pose3dc pose = sub.renderPose();
         final Vector3d localFrom = toLocalPoint(pose, from);
         final Vector3d localDir = toLocalDir(pose, dir);
-        // 拾取容差跟着相机距离走：屏幕上的可点范围恒定，拉远不会点不中、拉近不会误选一片。
-        final var posePos = pose.position();
-        final double distance = Math.sqrt(
-                Math.pow(from.x - posePos.x(), 2)
-                        + Math.pow(from.y - posePos.y(), 2)
-                        + Math.pow(from.z - posePos.z(), 2));
-        MODE.setPickTolerance(Math.max(0.12, distance * 0.02));
+        // 指针在草图平面上的位置（先算它：拾取容差要用它做**像素差分**）✓
+        final Vector3d uv = MODE.planePoint(localFrom, localDir);
+        // ★★ 拾取容差：**屏幕上恒定**（6 像素在草图平面上的世界长度）✓
+        //   以前是 `max(0.12, |射线起点 − 结构原点| * 0.02)` —— 结构原点可能在几百格
+        //   之外（plot 局部原点，不是模型中心）⇒ 容差会变成几格 ⇒ 鼠标放哪儿都吸到
+        //   同一个图元（用户实测：鼠标旁一直显示"点1"）。这也解释了为什么它跟正交
+        //   投影的改动无关：容差本身就和画面尺度脱钩了。
+        //   现在用"旁边 1 像素"的平面点差分 ⇒ 容差天然是 6px，透视/正交/缩放都对 ✓
+        double tol = lastPickTolerance;
+        if (uv != null) {
+            final double mx = com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd();
+            final double my = com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd();
+            final Vec3 from1 = ModelCamera.rayOriginAt(mc, mx + 1.0, my);
+            final Vec3 dir1 = ModelCamera.rayDirectionAt(mc, mx + 1.0, my);
+            final Vector3d uv1 = MODE.planePoint(toLocalPoint(pose, from1),
+                    toLocalDir(pose, dir1));
+            if (uv1 != null) {
+                tol = 6.0 * Math.hypot(uv1.x - uv.x, uv1.y - uv.y);
+            }
+        }
+        tol = Math.max(0.01, Math.min(0.6, tol));
+        MODE.setPickTolerance(tol);
+        lastPickTolerance = tol;
         MODE.hover(localFrom, localDir);
+        lastDiagUv = uv;
+        lastDiagFrom = localFrom;
+        lastDiagDir = localDir;
+        final Sketch.Entity hovNow = MODE.hoveredEntity();
+        if (hovNow == null ? lastHoverDesc != null : !hovNow.equals(lastHoverEntity)) {
+            lastHoverEntity = hovNow;
+            lastHoverDesc = describeEntity(hovNow);
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[diag-hover] entity={} uv=({},{}) tol={}", lastHoverDesc,
+                    String.format(java.util.Locale.ROOT, "%.3f", uv == null ? 0 : uv.x),
+                    String.format(java.util.Locale.ROOT, "%.3f", uv == null ? 0 : uv.y),
+                    String.format(java.util.Locale.ROOT, "%.4f", tol));
+        }
 
         // 编辑阶段顺便把鼠标落点交给渲染器画橡皮筋。
         // ⚠ 用 MODE.previewUv() 而不是这里的原始 uv：预览要显示的是**真按下去会用的点**，
         // 已经过关键点吸附与水平/竖直推理。喂原始 uv 的话，预览会落在光标处、
         // 松手却吸到别处 —— 看起来就是"预览在骗人"。
-        final Vector3d uv = MODE.planePoint(localFrom, localDir);
         lastCursorUv = uv; // 拖动尺寸要用"指针在平面上的位置" ✓ 与命中同一套坐标 ✓
         final double[] preview = MODE.previewUv();
         // ★ 把"真按下去会用的点"推进会话 ✓（与上面注释同一口径 ✓ 不用原始 uv ✗）
@@ -235,6 +263,74 @@ public final class SketchClient {
     /** 指针在草图平面上的 uv ✓（每帧由 {@link #hover} 更新 ✓ 拖动标签用 ✓）。 */
     @Nullable
     private static Vector3d lastCursorUv;
+
+    // ================= 诊断快照（用户要求：日志抓全，一次测试定位问题） =================
+    private static double lastPickTolerance = 0.15;
+    @Nullable
+    private static Vector3d lastDiagUv;
+    @Nullable
+    private static Vector3d lastDiagFrom;
+    @Nullable
+    private static Vector3d lastDiagDir;
+    @Nullable
+    private static Sketch.Entity lastHoverEntity;
+    @Nullable
+    private static String lastHoverDesc;
+
+    /** 图元的简短描述（诊断日志用）✓ */
+    private static String describeEntity(@Nullable final Sketch.Entity e) {
+        if (e == null) {
+            return "none";
+        }
+        final int[] v = e.vars();
+        final StringBuilder sb = new StringBuilder(e.kind().name());
+        sb.append('(');
+        for (int i = 0; i < Math.min(4, v.length); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(v[i]);
+        }
+        return sb.append(')').toString();
+    }
+
+    /**
+     * 一行诊断快照：草图阶段 / 指针 uv / 拾取容差 / 当前悬停图元 ✓
+     * 由 {@code ModelDiag} 每秒拼进总日志。
+     */
+    public static String diagSummary(final Minecraft mc) {
+        if (!MODE.active() || MODE.session() == null) {
+            return "sketch=off";
+        }
+        final String f3 = "%.3f";
+        final StringBuilder sb = new StringBuilder(120);
+        sb.append("sketch=").append(MODE.session().stage());
+        if (lastDiagUv != null) {
+            sb.append(" uv=(")
+                    .append(String.format(java.util.Locale.ROOT, f3, lastDiagUv.x)).append(',')
+                    .append(String.format(java.util.Locale.ROOT, f3, lastDiagUv.y)).append(')');
+        }
+        if (lastDiagFrom != null) {
+            sb.append(" from=(")
+                    .append(String.format(java.util.Locale.ROOT, "%.2f", lastDiagFrom.x)).append(',')
+                    .append(String.format(java.util.Locale.ROOT, "%.2f", lastDiagFrom.y)).append(',')
+                    .append(String.format(java.util.Locale.ROOT, "%.2f", lastDiagFrom.z)).append(')');
+        }
+        if (lastDiagDir != null) {
+            sb.append(" dir=(")
+                    .append(String.format(java.util.Locale.ROOT, f3, lastDiagDir.x)).append(',')
+                    .append(String.format(java.util.Locale.ROOT, f3, lastDiagDir.y)).append(',')
+                    .append(String.format(java.util.Locale.ROOT, f3, lastDiagDir.z)).append(')');
+        }
+        sb.append(" tol=").append(String.format(java.util.Locale.ROOT, "%.4f", lastPickTolerance));
+        sb.append(" hover=").append(lastHoverDesc == null ? "none" : lastHoverDesc);
+        sb.append(" mouse=(")
+                .append(String.format(java.util.Locale.ROOT, "%.0f",
+                        com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd())).append(',')
+                .append(String.format(java.util.Locale.ROOT, "%.0f",
+                        com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd())).append(')');
+        return sb.toString();
+    }
 
     /** 指针的平面 uv ✓；还没算出来时返回 null ✓。 */
     @Nullable

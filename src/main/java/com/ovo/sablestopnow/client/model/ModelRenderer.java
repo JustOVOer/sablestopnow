@@ -66,6 +66,7 @@ public final class ModelRenderer {
             // 记下**本帧真正用过的**投影/视图矩阵：屏幕空间的标记与拾取射线都按它们算，
             // 于是「画在哪」和「点在哪」永远是同一套变换（见 ModelCamera.projectToScreen）。
             ModelCamera.captureFrame(event.getProjectionMatrix(), event.getCamera());
+            ModelDiag.tick(mc); //  每秒一行完整诊断（用户要求日志抓全）
             // 每帧刷新：鼠标下的参考 + 界面的周期刷新
             ModelMode.refreshHover(mc);
             ModelUi.tickRefresh();

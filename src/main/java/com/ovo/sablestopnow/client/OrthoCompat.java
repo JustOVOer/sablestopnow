@@ -151,17 +151,36 @@ public final class OrthoCompat {
         }
     }
 
-    /** 正交投影复刻的诊断：只打一次，确认反射到底成没成 ✓ */
-    private static boolean projLogged;
+    /** 当前拾取用的投影来源（诊断用）✓ */
+    private static boolean projectionIsOwn;
+    private static Boolean projectionLogged;
 
-    /** 在 captureFrame 里调一次，告诉日志"这一帧拾取用的是哪份投影" */
-    public static void logProjectionOnce(final boolean usedOrtho) {
-        if (projLogged) {
-            return;
+    /** 在 captureFrame 里每帧调一次：记录来源，**变化时**打日志 ✓ */
+    public static void noteProjection(final boolean usedOrtho) {
+        projectionIsOwn = usedOrtho;
+        if (projectionLogged == null || projectionLogged != usedOrtho) {
+            projectionLogged = usedOrtho;
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[ortho] captureFrame projection={}", usedOrtho ? "ortho(own)" : "event");
         }
-        projLogged = true;
-        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                "[ortho] captureFrame projection={}", usedOrtho ? "ortho(own)" : "event");
+    }
+
+    /** 诊断快照：正交状态 + 缩放 ✓ */
+    public static String stateSummary() {
+        final Object cfg = config();
+        if (cfg == null) {
+            return "absent";
+        }
+        if (!readEnabled(cfg)) {
+            return "off";
+        }
+        return String.format(java.util.Locale.ROOT, "on(scale=%.3f,%.3f)",
+                readFloat(cfg, "scale_x", 0.0f), readFloat(cfg, "scale_y", 0.0f));
+    }
+
+    /** 诊断快照：这一帧拾取用的投影是"复刻的正交"还是"事件给的" ✓ */
+    public static String projectionSource() {
+        return projectionIsOwn ? "ortho(own)" : "event";
     }
 
     /**

@@ -100,6 +100,13 @@ public final class SketchHud {
 
     /** 当前应当显示的位置 ✓（有覆盖用覆盖 ✓ 否则用算出来的锚点 ✓）。 */
     private static double[] labelUv(final com.ovo.sablestopnow.sketch.SketchMeasure.Dimension d) {
+        // ★ 数字永远落在 3D 尺寸线的**中点**（两条界线之间）✓
+        //   3D 渲染层每帧发布；拖拽只改变尺寸线的偏移，数字跟着尺寸线走（用户要求）。
+        final double[] anchor3d =
+                com.ovo.sablestopnow.client.SketchRenderer.dimTextAnchor(d.constraintIndex());
+        if (anchor3d != null) {
+            return anchor3d;
+        }
         final double[] ov = LABEL_OVERRIDE.get(d.constraintIndex());
         return ov != null ? ov : new double[] {d.anchorU(), d.anchorV()};
     }
@@ -204,7 +211,7 @@ public final class SketchHud {
         row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
         // ★ 需求 5：**确定类按键悬停底色 = 草绿** ✓（"确定和删除键…确定改草绿，删除/取消改红色" ✓）
         final var okBtn = new com.ovo.sablestopnow.client.gui.lib.Button(
-                Component.translatable("model.dim.edit_ok"), () -> field.endEdit(true));
+                Component.translatable("model.dim.edit_ok"), () -> field.commitNow());
         okBtn.sweepColor = 0xFF6B8E23; // 点击扫光 = 草绿 ✓（用户要的是**点击后刷过去**的颜色）
         row.add(okBtn);
         // ★ 用户要求 ✓：第二个键从「取消」改成「**删除**」——
@@ -574,16 +581,15 @@ public final class SketchHud {
                                 if (vl > 6.0) {
                                     final double nnx = vx / vl;
                                     final double nny = vy / vl;
-                                    extLine(g, pt[0] + nnx * 4.0, pt[1] + nny * 4.0,
-                                            fx + nnx * 6.0, fy + nny * 6.0, lineArgb);
+                                    // (3D 负责界线)
                                 }
                             }
                         }
                     }
                     // 尺寸线本体 + 两端箭头（用统一库的矢量绘制 ✓ 不手写 fill ✗）
                     // ★ 箭头改成**开放式 V 形** ✓（参考图 1/2/3/4 全是这种 ✓ 我原来画的是实心圆点 ✗）
-                    dimArrow(g, ax, ay, bx, by, dimLineArgb);
-                    dimArrow(g, bx, by, ax, ay, dimLineArgb);
+                    // (3D 负责箭头)
+                    // (3D 负责箭头)
                     // ★ 尺寸线**在文字处断开** ✓（参考图 1 最清楚：左段 + 文字 + 右段 ✓ 我原来线穿过文字 ✗）
                     //   做法 ✓：量出文字半宽 ⇒ 把尺寸线画成两段 ✓ 中间留白给文字 ✓
                     final double segLen = Math.hypot(bx - ax, by - ay);
@@ -594,15 +600,13 @@ public final class SketchHud {
                         final double my2 = (ay + by) * 0.5;
                         // 用文字实际宽度决定断口 ✓（按标签在线的哪一侧不影响断口 ✓）
                         final double half = 19.0; // 三位小数（如 "5.000"）的半个文字宽 + 余量 ✓（此处 text 还没声明 ✓ 所以用等价常量 ✓）
-                        crispLine(g, ax, ay,
-                                mx2 - ux * half, my2 - uy * half, 1.5f, dimLineArgb);
-                        crispLine(g,
-                                mx2 + ux * half, my2 + uy * half, bx, by, 1.5f, lineArgb);
+                        // (3D 负责尺寸线)
+                        // (3D 负责尺寸线)
                     } else {
                         // 空间太窄 ⇒ 整条画出来 ✓（文字会落在旁边 ✓ 与参考图 3/4 的"外侧文字"一致 ✓）
                         shortLine = true;
                         if (segLen > 1.0e-6) { lineDirX = (bx - ax) / segLen; lineDirY = (by - ay) / segLen; }
-                        crispLine(g, ax, ay, bx, by, 1.5f, lineArgb);
+                        // (3D 负责尺寸线)
                     }
                 }
             }

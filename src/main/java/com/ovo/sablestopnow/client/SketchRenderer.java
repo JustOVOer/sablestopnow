@@ -1685,6 +1685,7 @@ public final class SketchRenderer {
             return 0;
         }
         final float[] white = {1.0f, 1.0f, 1.0f};
+        DIM_TEXT_ANCHORS.clear();
         final StringBuilder diag = new StringBuilder("dims=" + dims.size());
         for (final var d : dims) {
             if (d.labelKey() != null && d.labelKey().contains("angle")) {
@@ -1742,6 +1743,9 @@ public final class SketchRenderer {
             final double b1 = v1 + dv;
             final double a2 = u2 + du;
             final double b2 = v2 + dv;
+            // ★ 发布尺寸线中点：HUD 把数字放在这里 ⇒ 永远处在两条界线之间 ✓
+            DIM_TEXT_ANCHORS.put(d.constraintIndex(),
+                    new double[] {(a1 + a2) * 0.5, (b1 + b2) * 0.5});
             // 尺寸线本体
             seg3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2, white);
             drawn++;
@@ -1765,6 +1769,15 @@ public final class SketchRenderer {
             com.ovo.sablestopnow.SablestopNow.LOGGER.info("[dim3d] {}", diagText);
         }
         return drawn;
+    }
+
+    /** 每帧发布的尺寸线中点（平面 uv）✓ —— HUD 把数字放在这里（两界线之间）。 */
+    private static final java.util.Map<Integer, double[]> DIM_TEXT_ANCHORS = new java.util.HashMap<>();
+
+    /** 尺寸线中点；没有（非线性尺寸等）= null ✓ */
+    public static double[] dimTextAnchor(final int constraintIndex) {
+        final double[] a = DIM_TEXT_ANCHORS.get(constraintIndex);
+        return a == null ? null : new double[] {a[0], a[1]};
     }
 
     private static String lastDim3dDiag = "";

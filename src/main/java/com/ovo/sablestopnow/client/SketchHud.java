@@ -851,6 +851,20 @@ public final class SketchHud {
      * <p>位置 ✓：图元的**代表点**（线取中点 ✓ 点取自身 ✓ 圆/弧取圆心 ✓）投影到屏幕后偏 8px ✓；
      * 同一图元上的多个约束沿 x 方向依次错开 ✓ 免得叠在一起 ✗。
      */
+    /** 约束图标资源（8×8 白色字形，背景由 HUD 画）✓ —— 用户要求"做进 mod 的资源里" */
+    private static final String[] GLYPH_FILES = {
+        null, "horizontal", "vertical", "parallel", "perpendicular",
+        "equal", "midpoint", "coincident", "fixed"};
+
+    @Nullable
+    private static net.minecraft.resources.ResourceLocation glyphTexture(final int glyph) {
+        if (glyph < 1 || glyph >= GLYPH_FILES.length || GLYPH_FILES[glyph] == null) {
+            return null;
+        }
+        return net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("sablestopnow",
+                "textures/gui/constraint/" + GLYPH_FILES[glyph] + ".png");
+    }
+
     private static void drawConstraintGlyphs(final net.minecraft.client.gui.GuiGraphics g,
                                              final Minecraft mc) {
         GLYPH_HITS.clear(); // 每帧重建 ✓ 相机一动就更新 ✓
@@ -896,14 +910,27 @@ public final class SketchHud {
                 continue;
             }
             final int slot = perEntity.merge(anchorKey(owner), 1, Integer::sum) - 1;
-            final double gx = screen[0] + 8.0 + slot * 11.0;
-            final double gy = screen[1] - 8.0;
+            // ★ 用户要求：图标更小 + 有背景 + 悬停变色 + 字形来自 mod 资源 ✓
+            //   背景：普通=深色半透明，悬停=草绿，选中=金色描边（与"选中"语义一致）
+            final double gx = screen[0] + 7.0 + slot * 9.0;
+            final double gy = screen[1] - 7.0;
             final boolean picked = session.selectedConstraint() == i;
-            com.ovo.sablestopnow.client.gui.lib.UiVector.constraintGlyph(g, gx, gy, glyph,
-                    picked ? 0xFFFFCC55 : 0xDD7FE3FF);
+            final double mdx = com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() - gx;
+            final double mdy = com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() - gy;
+            final boolean hoveredGlyph = mdx * mdx + mdy * mdy <= 30.0;
+            final int bg = picked ? 0xCC8A6A1E
+                    : (hoveredGlyph ? 0xCC6B8E23 : 0x99101420);
+            com.ovo.sablestopnow.client.gui.lib.UiVector.disc(g, gx, gy, 5.0, bg);
             if (picked) {
-                // 选中态 ✓：套一个圈（用户要求"可选中"✓ 必须看得出选了谁 ✓）
-                com.ovo.sablestopnow.client.gui.lib.UiVector.ring(g, gx, gy, 7.0, 1.5, 0xFFFFCC55);
+                com.ovo.sablestopnow.client.gui.lib.UiVector.ring(g, gx, gy, 5.6, 1.0, 0xFFFFCC55);
+            }
+            final net.minecraft.resources.ResourceLocation tex = glyphTexture(glyph);
+            if (tex != null) {
+                g.blit(tex, (int) Math.round(gx - 4.0), (int) Math.round(gy - 4.0), 0, 0, 8, 8);
+            } else {
+                // 兜底：资源没加载到时退回矢量字形（不至于一个图标都看不到）
+                com.ovo.sablestopnow.client.gui.lib.UiVector.constraintGlyph(g, gx, gy, glyph,
+                        0xFFFFFFFF);
             }
             GLYPH_HITS.add(new GlyphHit(i, glyph, gx, gy));
         }

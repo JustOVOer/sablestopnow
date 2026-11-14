@@ -434,20 +434,30 @@ public final class SketchClient {
             return false;
         }
         final var c = work.constraints().get(constraintIndex);
+        // ★ 保留原约束值的**符号**：水平/竖直距离在求解器里是**有符号**的，
+        //   而显示给玩家看的是绝对值。改值时若直接写 +|v|，当几何本来是负向时
+        //   约束就与几何方向冲突 ⇒ 求解器"无法满足、已回滚"（用户实测）。
+        final double signedValue = c.value() == 0.0
+                ? value
+                : (c.value() < 0.0 ? -Math.abs(value) : Math.abs(value));
         work.replaceConstraint(constraintIndex,
-                new com.ovo.sablestopnow.sketch.Sketch.Constraint(c.kind(), c.operands(), value));
+                new com.ovo.sablestopnow.sketch.Sketch.Constraint(c.kind(), c.operands(),
+                        signedValue));
         com.ovo.sablestopnow.SablestopNow.LOGGER.info(
                 "[sketch-solve] edit: idx={} kind={} old={} new={}",
                 constraintIndex, c.kind(),
                 String.format(java.util.Locale.ROOT, "%.4f", c.value()),
-                String.format(java.util.Locale.ROOT, "%.4f", value));
+                String.format(java.util.Locale.ROOT, "%.4f", signedValue));
         MODE.solve();
-        logSolve("edit-after", c.kind(), value,
+        logSolve("edit-after", c.kind(), signedValue,
                 c.operands() == null ? -1 : c.operands().length);
-        // ★ 明确反馈 ✓：改值后若求解器**没满足**（或触发塌陷回滚 ✓）⇒ 提示 ✓
+        // ★ 明确反馈 ✓：改值后若求解器**没满足**（或触发塌陷回滚 ✓）⇒ 提示 + **草图闪红** ✓
         //   为什么必须提示 ✗✓：否则就是用户实测的"确定后却没有改变"✗ —— 玩家分不清"没生效"和"做不到"✗
+        //   为什么闪红 ✗✓：回滚后几何恢复原样、残差重新为 0 ⇒ DOF 判据看不出失败，
+        //   只在提示条里说一句"无法满足"玩家很容易错过（用户实测："草稿未变红"）。
         final var solved = MODE.lastSolve();
         if (solved == null || !solved.ok()) {
+            com.ovo.sablestopnow.client.SketchRenderer.flashConflict(2500L);
             com.ovo.sablestopnow.client.model.ModelMode.prompt("model.dim.unsatisfied");
             return false;
         }

@@ -3599,6 +3599,10 @@ public final class ModelUi {
                 "[feature-edit] update id={} idx={} shape={}",
                 updated.id(), updated.index(), next.getClass().getSimpleName());
         editingSolidId = null;
+        // ★ 用户实测 bug：编辑完特征再点"完成"后，左栏会**常驻**"上移/下移/贴图/删除"
+        //   面板并抢走整个左栏（无法切到别的界面）。根因就是这里只清了 editingSolidId，
+        //   而那个面板的显示条件是 selectedSolidId != null ⇒ 必须一并清掉 ✓
+        selectedSolidId = null;
         // ★ 更新完就退出工具：主按钮若还在，再点一下会**新建一个重复特征**
         ModelMode.setTool(ModelTools.NONE);
         ModelMode.clearPicks();
@@ -5156,6 +5160,9 @@ public final class ModelUi {
             if (!applyLeftEditor()) {
                 return; // 参数不完整/退化 ⇒ 提示已经给出，保持编辑态
             }
+            // ★ 同 commitShape：完成编辑后必须清掉"选中的特征"，
+            //   否则左栏会常驻特征操作面板（上移/下移/贴图/删除），挡住其它界面。
+            selectedSolidId = null;
             ModelMode.setTool(ModelTools.NONE);
             ModelMode.clearPicks();
             afterEdit();

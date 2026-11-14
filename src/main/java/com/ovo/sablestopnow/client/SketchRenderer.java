@@ -128,6 +128,24 @@ public final class SketchRenderer {
      */
     private static final float[] CONFLICT_COLOR = {1.0f, 0.32f, 0.30f};
 
+    /** 选中的**约束**所涉及的变量（供图元高亮；每帧由 drawSketch 填）✓ */
+    private static final java.util.Set<Integer> CONSTRAINT_HL_VARS = new java.util.HashSet<>();
+    /** 约束高亮色（与 HUD 约束图标的选中色一致）✓ */
+    private static final float[] CONSTRAINT_HL_COLOR = {1.0f, 0.80f, 0.33f};
+
+    /**
+     * 尺寸改值失败（求解器无法满足）时让草图**闪红**一段时间 ✓
+     *
+     * <p>用户实测："提示求解器无法满足、已回滚，但是草稿未变红" ——
+     * 回滚后几何恢复原样、残差重新为 0 ⇒ DOF 判据看不出异常。
+     * 所以失败本身要在画面上留一个短暂的红，玩家才知道"这次改值没生效"。
+     */
+    private static long conflictUntilMs;
+
+    public static void flashConflict(final long ms) {
+        conflictUntilMs = System.currentTimeMillis() + Math.max(0L, ms);
+    }
+
     /** 正在编辑的草图 id；由草图 UI 设置。 */
     @Nullable
     private static UUID editingId;
@@ -838,6 +856,18 @@ public final class SketchRenderer {
             // 宁可统一标成"有冲突"也不要照常标颜色骗人。
             conflicted = SketchDof.maxResidual(live) > 1.0e-6;
         }
+        // ★ 选中约束 ⇒ 高亮它涉及的所有图元（用户要求："约束被选中时高亮对应的图元"）✓
+        CONSTRAINT_HL_VARS.clear();
+        if (session != null) {
+            final int selCon = session.selectedConstraint();
+            final var cons = sketch.constraints();
+            if (selCon >= 0 && selCon < cons.size()) {
+                for (final int ov : cons.get(selCon).operands()) {
+                    CONSTRAINT_HL_VARS.add(ov);
+                }
+            }
+        }
+        final boolean conflictFlash = System.currentTimeMillis() < conflictUntilMs;
         for (final Sketch.Entity entity : sketch.entities()) {
             if (sketch.isConstruction(entity)) { continue; } // ★ 辅助线交给屏幕空间**虚线**画 ✓ 否则实线叠虚线看起来还是实线 ✗
             final int[] v = entity.vars();
@@ -850,6 +880,11 @@ public final class SketchRenderer {
                 //   ⇒ 这里保持普通悬停色；"会选到这个点"由下面那层 marker 方框表示 ✓
                 //     （悬停到点时 SketchMode 会把 snapAt 指到它 ⇒ marker 画方框 ✓）
                 entityColor = HOVER_COLOR;
+            } else if (conflictFlash) {
+                // 刚刚有尺寸改值失败（已回滚）⇒ 整张草图闪红，明确告诉玩家"没生效"✓
+                entityColor = CONFLICT_COLOR;
+            } else if (hasConstraintVar(v)) {
+                entityColor = CONSTRAINT_HL_COLOR;
             } else if (dofFree == null) {
                 entityColor = color;
             } else if (conflicted) {
@@ -961,6 +996,19 @@ public final class SketchRenderer {
         return lines;
     }
 
+    /** 这个图元是否参与了**当前选中的约束** ✓（选中约束 ⇒ 高亮对应图元） */
+    private static boolean hasConstraintVar(final int[] vars) {
+        if (CONSTRAINT_HL_VARS.isEmpty() || vars == null) {
+            return false;
+        }
+        for (final int v : vars) {
+            if (CONSTRAINT_HL_VARS.contains(v)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * 画所有**辅助线**（构造几何）为虚线 ✓（需求 ①）。
      *
@@ -986,6 +1034,8 @@ public final class SketchRenderer {
                 consColor = SELECTED_COLOR;
             } else if (entity.equals(hovered)) {
                 consColor = HOVER_COLOR;
+            } else if (hasConstraintVar(entity.vars())) {
+                consColor = CONSTRAINT_HL_COLOR; // ★ 选中的约束涉及辅助线时也高亮 ✓
             } else {
                 consColor = CONSTRUCTION_COLOR;
             }

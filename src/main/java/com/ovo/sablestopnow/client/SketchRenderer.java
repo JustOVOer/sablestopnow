@@ -143,21 +143,44 @@ public final class SketchRenderer {
     private static long perfAccNs;
     private static int perfFrames;
     private static long perfLogMs;
+    /** 分段累计（诊断卡顿位置）：网格 / 图元 / 尺寸 / 预览 */
+    private static long perfGridNs;
+    private static long perfEntNs;
+    private static long perfDimNs;
+    private static long perfPrevNs;
 
-    private static void perfSketchFrame(final long ns) {
+    private static void perfSketchFrame(final long ns, final long grid, final long ents,
+                                        final long dims, final long prev) {
         perfAccNs += ns;
         perfFrames++;
+        perfGridNs += grid;
+        perfEntNs += ents;
+        perfDimNs += dims;
+        perfPrevNs += prev;
         final long now = System.currentTimeMillis();
         if (now - perfLogMs < 1000L) {
             return;
         }
         if (perfFrames > 0) {
             com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                    "[perf] sketchDraw avg={}ms frames={}",
+                    "[perf] sketchDraw avg={}ms grid={} ent={} dim={} prev={} frames={}",
                     String.format(java.util.Locale.ROOT, "%.2f",
-                            perfAccNs / 1.0e6 / perfFrames), perfFrames);
+                            perfAccNs / 1.0e6 / perfFrames),
+                    String.format(java.util.Locale.ROOT, "%.2f",
+                            perfGridNs / 1.0e6 / perfFrames),
+                    String.format(java.util.Locale.ROOT, "%.2f",
+                            perfEntNs / 1.0e6 / perfFrames),
+                    String.format(java.util.Locale.ROOT, "%.2f",
+                            perfDimNs / 1.0e6 / perfFrames),
+                    String.format(java.util.Locale.ROOT, "%.2f",
+                            perfPrevNs / 1.0e6 / perfFrames),
+                    perfFrames);
         }
         perfAccNs = 0L;
+        perfGridNs = 0L;
+        perfEntNs = 0L;
+        perfDimNs = 0L;
+        perfPrevNs = 0L;
         perfFrames = 0;
         perfLogMs = now;
     }
@@ -443,12 +466,19 @@ public final class SketchRenderer {
                 final VertexConsumer vcGrid = gridBuf.getBuffer(ModRenderTypes.SKETCH_GRID);
                 drawSketchGrid(vcGrid, pose, cameraPos, wsub.renderPose(), working);
                 gridBuf.endBatch();
+                final long tGrid = System.nanoTime() - perfT0;
+                final long e0 = System.nanoTime();
                 drawn += drawSketch(vcq, pose, cameraPos, wsub.renderPose(), working, EDITING_COLOR);
+                final long tEnt = System.nanoTime() - e0;
                 // ★ 智能尺寸的**3D 预览**（和草图线同一套 quadLine，不再用 HUD 像素）✓
+                final long p0 = System.nanoTime();
                 drawn += drawSmartPreview3D(vcq, pose, cameraPos, wsub.renderPose(), working);
+                final long tPrev = System.nanoTime() - p0;
                 // ★ bug ⑤：文字改到**最后**画（见方法尾部 pendingTexts），避免被后画的内容盖住
                 pendingTexts.add(new Object[] {working, wsub.renderPose(), pose, cameraPos});
+                final long d0 = System.nanoTime();
                 drawn += drawDimensions3D(vcq, pose, cameraPos, wsub.renderPose(), working);
+                final long tDim = System.nanoTime() - d0;
                 // 旋转轴的高亮画在草图之后：它是"参考"，被图元压住就白画了
                 drawn += drawRevolveAxis(vcq, pose, cameraPos, wsub.renderPose(), working);
                 // 吸附生效时在**吸附到的那个关键点**上打标记。
@@ -462,7 +492,7 @@ public final class SketchRenderer {
                     drawPreview(vcq, pose, cameraPos, wsub.renderPose(), working);
                 }
                 barScale = prevBar;
-                perfSketchFrame(System.nanoTime() - perfT0);
+                perfSketchFrame(System.nanoTime() - perfT0, tGrid, tEnt, tDim, tPrev);
             }
         }
         // ★★ bug 15（真正的问题）：被特征**吸收**掉的草图，退出编辑后**不该再画曲线**。

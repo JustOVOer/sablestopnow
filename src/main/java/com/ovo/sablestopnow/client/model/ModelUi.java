@@ -3882,11 +3882,12 @@ public final class ModelUi {
             final TreeView.TreeItem row;
             if (coupling instanceof com.ovo.sablestopnow.server.CouplingData.RatioGroup group) {
                 row = new TreeView.TreeItem("ratio:" + bodyId + ":" + group.id())
-                        .label(Component.literal("比例 | Ratio (" + group.members().size() + ")"));
+                        .label(Component.translatable("model.coupling.ratio").append(Component.literal(" (" + group.members().size() + ")")));
             } else if (coupling instanceof com.ovo.sablestopnow.server.CouplingData.GearCoupling gear) {
                 row = new TreeView.TreeItem("gear:" + bodyId + ":" + gear.id())
-                        .label(Component.literal("齿轮 | Gear " + gear.teethA() + ":" + gear.teethB()
-                                + (gear.reversed() ? " R" : "")));
+                        .label(Component.translatable("model.coupling.gear").append(
+                                Component.literal(" " + gear.teethA() + ":" + gear.teethB()
+                                        + (gear.reversed() ? " R" : ""))));
             } else {
                 continue;
             }

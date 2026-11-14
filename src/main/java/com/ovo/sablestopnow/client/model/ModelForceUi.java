@@ -196,7 +196,8 @@ public final class ModelForceUi {
         pullFromServer(true);
         final UUID id = point.id();
 
-        body.add(new Label(() -> Component.literal("施力点 " + shortId(point.id()))).shadow(true));
+        body.add(new Label(() -> Component.translatable("model.force.point")
+                .append(Component.literal(" " + shortId(point.id())))).shadow(true));
         body.add(new Label(() -> Component.translatable("model.force.at",
                 String.format("%.1f, %.1f, %.1f", point.localPoint().x, point.localPoint().y,
                         point.localPoint().z))).color(0xFF8FA0D8));

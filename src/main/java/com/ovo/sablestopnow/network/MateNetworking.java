@@ -105,7 +105,7 @@ public final class MateNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(net.minecraft.network.chat.Component.literal("Invalid packet"));
+                context.disconnect(net.minecraft.network.chat.Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();

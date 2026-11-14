@@ -152,7 +152,7 @@ public final class ForceNetworking {
             final Player player = context.player();
             // 与其它功能同一道闸：手里没有物理手杖就当成非法包
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();

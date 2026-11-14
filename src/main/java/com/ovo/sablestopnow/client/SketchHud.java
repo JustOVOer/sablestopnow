@@ -294,6 +294,37 @@ public final class SketchHud {
         return best;
     }
 
+    // ---- 诊断：HUD 三个绘制阶段的分段耗时（1 Hz）----
+    private static long hudDimNs;
+    private static long hudPrevNs;
+    private static long hudGlyphNs;
+    private static int hudFrames;
+    private static long hudLogMs;
+
+    private static void perfHud(final long dim, final long prev, final long glyph) {
+        hudDimNs += dim;
+        hudPrevNs += prev;
+        hudGlyphNs += glyph;
+        hudFrames++;
+        final long now = System.currentTimeMillis();
+        if (now - hudLogMs < 1000L) {
+            return;
+        }
+        if (hudFrames > 0) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[perf] hud dim={}ms prev={}ms glyph={}ms frames={}",
+                    String.format(java.util.Locale.ROOT, "%.2f", hudDimNs / 1.0e6 / hudFrames),
+                    String.format(java.util.Locale.ROOT, "%.2f", hudPrevNs / 1.0e6 / hudFrames),
+                    String.format(java.util.Locale.ROOT, "%.2f", hudGlyphNs / 1.0e6 / hudFrames),
+                    hudFrames);
+        }
+        hudDimNs = 0L;
+        hudPrevNs = 0L;
+        hudGlyphNs = 0L;
+        hudFrames = 0;
+        hudLogMs = now;
+    }
+
     private SketchHud() {
     }
 
@@ -309,13 +340,18 @@ public final class SketchHud {
             return;
         }
         // 尺寸标签先画：它是"贴在世界里的"，跟光标无关，不该被下面的提前 return 跳过
+        final long hu0 = System.nanoTime();
         drawDimensionLabels(event.getGuiGraphics(), mc);
+        final long huDim = System.nanoTime();
         // 智能尺寸的**实时预览**（半透明 ✓ 跟着指针 ✓ 自动捕捉方位 ✓ 锁定态画环 ✓）
         drawSmartPreview(event.getGuiGraphics(), mc);
+        final long huPrev = System.nanoTime();
         // 吸附到网格时**把那条格线画出来**（虚线 ✓ 用户要求 ✓）
         drawSnapOverlay(event.getGuiGraphics(), mc);
         // 图元旁的**约束小图标** ✓（SolidWorks 的几何关系图标 ✓ 用户要求 ✓）
         drawConstraintGlyphs(event.getGuiGraphics(), mc);
+        final long huGlyph = System.nanoTime();
+        perfHud(huDim - hu0, huPrev - huDim, huGlyph - huPrev);
         // ★ 需求 (4)：左栏候选按钮随**指针预览**实时联动 ✓（只改 toggled ✓ 不重建 ✓）
         com.ovo.sablestopnow.client.model.ModelUi.syncSmartCandidateToggles();
         // ★ 草图 → 树 的高亮同步 ✓（用户要求"草图和右侧树状图联动" ✓ 反方向 ✓）
@@ -946,7 +982,7 @@ public final class SketchHud {
             final double mdy = com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() - gy;
             final boolean hoveredGlyph = mdx * mdx + mdy * mdy <= 56.25;
             // ★ 用户要求：**正方形**图标 + 正方形底 + 再小一点；选中态也用同一套图标 ✓
-            final float half = 7.0f;
+            final float half = 6.5f; // 1313 底板（用户指定：阴影面积再小一点）
             final int bg = picked ? 0xCC8A6A1E
                     : (hoveredGlyph ? 0xCC6B8E23 : 0x99101420);
             com.ovo.sablestopnow.client.gui.lib.UiVector.roundRect(g,

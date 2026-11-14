@@ -116,7 +116,7 @@ public class SubLevelHeatMapManagerMixin {
                 .append(message)
                 .append(Component.literal(" "))
                 .append(confirmCmd)
-                .append(Component.literal(" 或 "))
+                .append(Component.translatable("sablestopnow.split.or"))
                 .append(denyCmd);
 
         level.getServer().getPlayerList().broadcastSystemMessage(full, false);

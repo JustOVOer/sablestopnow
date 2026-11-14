@@ -222,7 +222,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
@@ -251,7 +251,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
@@ -283,7 +283,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             StaffEnhanceServer.moveGroup(player.getUUID(), this.centerGoal, this.rot);
@@ -314,7 +314,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
@@ -343,7 +343,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
@@ -375,7 +375,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
@@ -407,7 +407,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
@@ -528,7 +528,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
@@ -610,7 +610,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
@@ -649,7 +649,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
@@ -713,7 +713,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             final ServerLevel level = (ServerLevel) context.level();
@@ -745,7 +745,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             StaffScaleData.update((ServerLevel) context.level(), player.getUUID(), this.factor);
@@ -776,7 +776,7 @@ public final class StaffEnhanceNetworking {
         public void handle(final PacketContext context) {
             final Player player = context.player();
             if (!PhysicsStaffItem.isHolding(player)) {
-                context.disconnect(Component.literal("Invalid packet"));
+                context.disconnect(Component.translatable("sablestopnow.net.invalid_packet"));
                 return;
             }
             StaffScaleData.place((ServerLevel) context.level(), player.getUUID(), this.factor, this.center);

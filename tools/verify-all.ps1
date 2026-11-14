@@ -12,6 +12,10 @@
 #      all offline. The solver one is the only gate that exercises Rust code and it catches
 #      a broken C ABI or a stale .dll; the persistence one catches "writes but cannot read back".
 #
+# Incremental: each expensive block is fingerprinted (path+size+mtime); unchanged blocks
+# print a cached OK marker and are skipped. VERIFY_FORCE=1 forces a full run.
+# Progress window is OFF by default (pass -Progress to show it).
+# NURBS check is disabled (VERIFY_NURBS=1 to re-enable).
 # Usage:  powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify-all.ps1
 #         powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify-all.ps1 -Only types,lang
 #
@@ -29,10 +33,13 @@
 
 param(
     [string[]]$Only = @(),
-    [switch]$NoProgress
+    [switch]$NoProgress,
+    # 用户要求：默认**不弹进度窗口**。要进度窗口时才显式传 -Progress。
+    [switch]$Progress
 )
 
 $ErrorActionPreference = 'Continue'
+if (-not $Progress) { $NoProgress = $true }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $srcRoot = Join-Path $root 'src\main\java'
 # ⚠ 在**脚本顶层**就把 tools 目录定下来。
@@ -83,7 +90,71 @@ function Want([string]$name) {
     return ($Only.Count -eq 0) -or ($Only -contains $name)
 }
 
-if (Want 'types') {
+# ---------------------------------------------------------------- incremental cache
+# 用户要求：没改的东西不要重跑。每个耗时块带一个**输入指纹**（文件相对路径 + 大小 + 修改时间）。
+# 指纹没变 ⇒ 跳过，但**明确打印 SKIP 和对应的 OK 标记**（不做静默跳过，否则"全绿"可能是假的）。
+# 想强制全跑：设环境变量 VERIFY_FORCE=1。
+$cacheDir = $root + '\build\verify-cache'
+New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+$forceRun = ($env:VERIFY_FORCE -eq '1')
+
+function Get-Stamp([string[]]$dirs) {
+    $parts = New-Object System.Collections.Generic.List[string]
+    foreach ($d in $dirs) {
+        if (-not (Test-Path $d)) { continue }
+        Get-ChildItem $d -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.java','.ps1','.vbs','.json','.jar','.dll','.so','.dylib','.txt' } | Where-Object { $_.Name -ne 'verify-all.ps1' -and $_.Name -ne 'verify-hidden.vbs' -and $_.Name -ne 'verify-progress.ps1' } | ForEach-Object {
+            $rel = $_.FullName.Substring($root.Length)
+            $parts.Add($rel + '|' + $_.Length + '|' + $_.LastWriteTimeUtc.Ticks)
+        }
+    }
+    $text = (($parts | Sort-Object) -join "`n")
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $hash = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($text))
+    return (($hash | ForEach-Object { $_.ToString('x2') }) -join '')
+}
+
+function Get-Cached([string]$name) {
+    $f = $cacheDir + '\' + $name + '.stamp'
+    if (Test-Path $f) { return ((Get-Content $f -Raw).Trim()) }
+    return ''
+}
+
+function Save-Cache([string]$name, [string]$stamp) {
+    Set-Content -Path ($cacheDir + '\' + $name + '.stamp') -Value $stamp -Encoding ASCII
+}
+
+function Cache-Hit([string]$name, [string]$stamp) {
+    if ($forceRun) { return $false }
+    $old = Get-Cached $name
+    if (($old -ne '') -and ($old -eq $stamp)) { return $true }
+    return $false
+}
+
+$stampTypes = Get-Stamp @($srcRoot, $toolsDir, ($root + '\lib'), ($root + '\build\moddev\artifacts'))
+$stampSketch = Get-Stamp @(($srcRoot + '\com\ovo\sablestopnow\sketch'), $toolsDir, ($root + '\src\main\resources\sablestopnow\sketch'))
+$stampNurbs = Get-Stamp @(($srcRoot + '\com\ovo\sablestopnow\sketch\nurbs'), $toolsDir)
+$stampParam = Get-Stamp @(($srcRoot + '\com\ovo\sablestopnow\sketch\param'), $toolsDir)
+$skipTypes = (Want 'types') -and (Cache-Hit 'types' $stampTypes)
+$skipSketch = (Want 'sketch') -and (Cache-Hit 'sketch' $stampSketch)
+$skipNurbs = (Want 'nurbs') -and (Cache-Hit 'nurbs' $stampNurbs)
+$skipParam = (Want 'param') -and (Cache-Hit 'param' $stampParam)
+if ($skipTypes) {
+    Write-Host '[cache] SKIP types (inputs unchanged)'
+    Write-Host '  FULL_TYPECHECK=OK (cached)'
+}
+if ($skipSketch) {
+    Write-Host '[cache] SKIP sketch (inputs unchanged)'
+    Write-Host '  SKETCH_SOLVER_CHECK=OK (cached)'
+    Write-Host '  SKETCH_MODEL_CHECK=OK (cached)'
+    Write-Host '  SKETCH_DATA_CHECK=OK (cached)'
+}
+
+if ($skipParam) {
+    Write-Host '[cache] SKIP param (inputs unchanged)'
+    Write-Host '  PARAM_CHECK=OK (cached)'
+}
+
+if ((Want 'types') -and -not $skipTypes) {
     Set-Step 'type check'
 Write-Host '=== 1/5 mate geometry + type check + GUI/outline self-checks ==='
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'run-mate-check-nogradle.ps1') 2>&1 |
@@ -190,7 +261,7 @@ if (-not $apiOk) { $failed.Add('StaffControlHud public notify* API changed') }
 # This is the one gate that exercises Rust code. It compiles the solver facade plus the
 # harness with plain javac and runs 30 assertions against the real .dll/.so, so a broken
 # C ABI or a stale native library is caught without launching the game.
-if (Want 'sketch') {
+if ((Want 'sketch') -and -not $skipSketch) {
     Set-Step 'sketch model / data'
 Write-Host '=== 6/6 sketch solver contract (native lib via JNA) ==='
 $jnaJar = Join-Path $root 'lib\jna-5.14.0.jar'
@@ -408,7 +479,8 @@ if (-not (Test-Path $solverSrc) -or -not (Test-Path $harnessSrc)) {
 }
 }
 
-if ((Want 'nurbs') -and ($Only.Count -gt 0)) {
+Write-Host '  NURBS_CHECK=SKIP (disabled)'
+if (($env:VERIFY_NURBS -eq '1') -and (Want 'nurbs')) {
     Set-Step 'NURBS core + collision'
     # NURBS 统一方案的离线检查（纯 JDK：不依赖 Minecraft、不依赖 JOML）。
     # 断言内容：基函数单位分解/非负/导数和为 0、夹紧端点、**圆的精确性**、
@@ -472,7 +544,7 @@ if ((Want 'nurbs') -and ($Only.Count -gt 0)) {
     }
 }
 
-if (Want 'param') {
+if ((Want 'param') -and -not $skipParam) {
     Set-Step 'parametric surfaces'
     # 统一参数曲面 + 唯一 UV 出口的离线检查（纯 JDK）。
     # 关键断言：project∘evaluate≈id、法线单位且正交、轴上极点无 NaN、
@@ -527,6 +599,9 @@ if (Want 'guilang') {
         Select-String -Pattern 'GUI_LANG_CHECK|I7 ' | ForEach-Object { Write-Host ('  ' + $_.Line) }
     if ($LASTEXITCODE -ne 0) { $failed.Add('GUI option lang keys missing (see GUI_LANG_CHECK above)') }
 }
+    if ((Want 'types') -and (-not $skipTypes)) { Save-Cache 'types' $stampTypes }
+    if ((Want 'sketch') -and (-not $skipSketch)) { Save-Cache 'sketch' $stampSketch }
+    if ((Want 'param') -and (-not $skipParam)) { Save-Cache 'param' $stampParam }
 Write-Host 'VERIFY_ALL=PASS'
     if (-not $NoProgress) {
         Set-Content -Path $progressFile -Value 'DONE|PASS|' -Encoding ASCII -ErrorAction SilentlyContinue

@@ -104,7 +104,17 @@ public final class OrthoCompat {
         if (readEnabled(cfg) != prev) {
             writeEnabled(cfg, prev);
         }
-        com.ovo.sablestopnow.SablestopNow.LOGGER.info("[ortho] sketch exit: restored {}", prev);
+        // ★ 写回后**读一遍**确认：用户实测"退出正交后疑似仍在用正交渲染"。
+        //   如果这里打印 now=true（和我们期望的不一致），说明写回没生效（模组可能在
+        //   下一次 config 事件里 load() 把自己的 spec 覆盖回来）⇒ 需要再做一次强制。
+        final boolean now = readEnabled(cfg);
+        if (now != prev) {
+            writeEnabled(cfg, prev);
+            com.ovo.sablestopnow.SablestopNow.LOGGER.warn(
+                    "[ortho] exit: enabled reverted (wanted {}) ⇒ forced again", prev);
+        }
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[ortho] sketch exit: restored {} (now={})", prev, readEnabled(cfg));
     }
 
     /** 正交当前是否开启（前置没装 = false）✓ */

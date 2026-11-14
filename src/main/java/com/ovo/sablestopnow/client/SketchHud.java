@@ -104,6 +104,17 @@ public final class SketchHud {
         return ov != null ? ov : new double[] {d.anchorU(), d.anchorV()};
     }
 
+    /**
+     * 标签被拖到的位置（平面 uv）；没拖过 = {@code null} ✓
+     *
+     * <p>给 3D 尺寸线用：SolidWorks 里拖尺寸数字会**把整条尺寸线、箭头、界线一起拖走**，
+     * 而 HUD 只负责数字。渲染层拿这个覆盖位置算出"尺寸线该偏多少"。
+     */
+    public static double[] labelOverride(final int constraintIndex) {
+        final double[] ov = LABEL_OVERRIDE.get(constraintIndex);
+        return ov == null ? null : new double[] {ov[0], ov[1]};
+    }
+
     // ================= 双击改值浮层 ✓（SolidWorks：双击尺寸数字 ⇒ 弹框改值 ⇒ 实时驱动 ✓）=======
 
     /** 浮层的层名 ✓（具名层 ⇒ 任何地方都能按名字开关 ✓ 不需要 UiContext ✓ 见 ModelInput ✓）。 */

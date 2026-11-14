@@ -216,11 +216,13 @@ public final class SketchRenderer {
         }
         // ★ item 2：每帧从配置刷新颜色（8 次解析，开销可忽略）✓
         reloadColors();
-        //  线条粗细：屏幕上恒定（半宽 2px） 拉远/正交缩放后不再细到看不见 ✓
+        // ★ 草图线宽：**只作用于草图内容**（目标半宽 3 像素）。
+        //   ⚠ 以前写成全局 barScale ⇒ 基准面线框也被一起加粗了（用户实测回归）✗
+        //   ⇒ 这里只"算好"，真正设置/恢复放在画草图的前后（见 working 块）。
         final double wppBar = com.ovo.sablestopnow.client.model.ModelCamera.worldPerPixel(mc);
-        if (wppBar > 0.0) {
-            barScale = Math.max(0.35, Math.min(8.0, (2.0 * wppBar) / BAR_WIDTH_HALF));
-        }
+        final double sketchBarScale = wppBar > 0.0
+                ? Math.max(0.6, Math.min(10.0, (3.0 * wppBar) / BAR_WIDTH_HALF))
+                : 1.0;
         // ★ 模型视图：每帧更新"面/棱/点"的悬停拾取 ✓（画草图时不拾取模型面 ✓）
         if (!sketching) {
             com.ovo.sablestopnow.client.model.FeatureHover.update(mc);
@@ -402,6 +404,9 @@ public final class SketchRenderer {
         if (working != null) {
             final ClientSubLevel wsub = byId.get(working.body());
             if (wsub != null) {
+                // ★ 草图线宽只在**画草图内容**时生效；画完恢复，避免污染基准面/其它图元 ✓
+                final double prevBar = barScale;
+                barScale = sketchBarScale;
                 // ★ 需求 ②：**常驻背景网格** ✓ 必须先画（在图元下面）✓
                 //   独立缓冲源：从同一个 BufferSource 取第二个 RenderType 会结束掉前一个 builder ✓
                 final MultiBufferSource.BufferSource gridBuf =
@@ -425,6 +430,7 @@ public final class SketchRenderer {
                 if (previewPoint != null) {
                     drawPreview(vcq, pose, cameraPos, wsub.renderPose(), working);
                 }
+                barScale = prevBar;
             }
         }
         // ★★ bug 15（真正的问题）：被特征**吸收**掉的草图，退出编辑后**不该再画曲线**。
@@ -1716,6 +1722,20 @@ public final class SketchRenderer {
                 } else {
                     dv = DIM_OFFSET;
                 }
+            }
+            // ★ SolidWorks：拖尺寸数字 ⇒ **整条尺寸线**（尺寸线本体 + 箭头 + 界线）跟着走 ✓
+            //   以前只有 HUD 数字在动，尺寸线还钉在原处（用户实测）。
+            //   做法：取"标签被拖到的位置相对默认锚点"的位移在**偏移方向**上的分量，加到偏移量上。
+            final double[] labelOv =
+                    com.ovo.sablestopnow.client.SketchHud.labelOverride(d.constraintIndex());
+            final double offLen = Math.hypot(du, dv);
+            if (labelOv != null && offLen > 1.0e-6) {
+                final double nx = du / offLen;
+                final double ny = dv / offLen;
+                final double perp = (labelOv[0] - d.anchorU()) * nx
+                        + (labelOv[1] - d.anchorV()) * ny;
+                du = nx * (offLen + perp);
+                dv = ny * (offLen + perp);
             }
             // 尺寸线两端（几何点 + 偏移）✓
             final double a1 = u1 + du;

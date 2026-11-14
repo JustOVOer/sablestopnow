@@ -133,19 +133,6 @@ public final class SketchRenderer {
     /** 约束高亮色（与 HUD 约束图标的选中色一致）✓ */
     private static final float[] CONSTRAINT_HL_COLOR = {1.0f, 0.80f, 0.33f};
 
-    /**
-     * 尺寸改值失败（求解器无法满足）时让草图**闪红**一段时间 ✓
-     *
-     * <p>用户实测："提示求解器无法满足、已回滚，但是草稿未变红" ——
-     * 回滚后几何恢复原样、残差重新为 0 ⇒ DOF 判据看不出异常。
-     * 所以失败本身要在画面上留一个短暂的红，玩家才知道"这次改值没生效"。
-     */
-    private static long conflictUntilMs;
-
-    public static void flashConflict(final long ms) {
-        conflictUntilMs = System.currentTimeMillis() + Math.max(0L, ms);
-    }
-
     /** 正在编辑的草图 id；由草图 UI 设置。 */
     @Nullable
     private static UUID editingId;
@@ -433,6 +420,8 @@ public final class SketchRenderer {
                 drawSketchGrid(vcGrid, pose, cameraPos, wsub.renderPose(), working);
                 gridBuf.endBatch();
                 drawn += drawSketch(vcq, pose, cameraPos, wsub.renderPose(), working, EDITING_COLOR);
+                // ★ 智能尺寸的**3D 预览**（和草图线同一套 quadLine，不再用 HUD 像素）✓
+                drawn += drawSmartPreview3D(vcq, pose, cameraPos, wsub.renderPose(), working);
                 // ★ bug ⑤：文字改到**最后**画（见方法尾部 pendingTexts），避免被后画的内容盖住
                 pendingTexts.add(new Object[] {working, wsub.renderPose(), pose, cameraPos});
                 drawn += drawDimensions3D(vcq, pose, cameraPos, wsub.renderPose(), working);
@@ -867,7 +856,6 @@ public final class SketchRenderer {
                 }
             }
         }
-        final boolean conflictFlash = System.currentTimeMillis() < conflictUntilMs;
         for (final Sketch.Entity entity : sketch.entities()) {
             if (sketch.isConstruction(entity)) { continue; } // ★ 辅助线交给屏幕空间**虚线**画 ✓ 否则实线叠虚线看起来还是实线 ✗
             final int[] v = entity.vars();
@@ -880,9 +868,6 @@ public final class SketchRenderer {
                 //   ⇒ 这里保持普通悬停色；"会选到这个点"由下面那层 marker 方框表示 ✓
                 //     （悬停到点时 SketchMode 会把 snapAt 指到它 ⇒ marker 画方框 ✓）
                 entityColor = HOVER_COLOR;
-            } else if (conflictFlash) {
-                // 刚刚有尺寸改值失败（已回滚）⇒ 整张草图闪红，明确告诉玩家"没生效"✓
-                entityColor = CONFLICT_COLOR;
             } else if (hasConstraintVar(v)) {
                 entityColor = CONSTRAINT_HL_COLOR;
             } else if (dofFree == null) {
@@ -1717,6 +1702,87 @@ public final class SketchRenderer {
     private static final double DIM_OVER = 0.12;
     private static final double DIM_ARROW = 0.15;
 
+    /** 智能尺寸预览色（原 HUD 的黄色预览，改成 3D 后保持同一观感）✓ */
+    private static final float[] SMART_PREVIEW_COLOR = {1.0f, 0.82f, 0.35f};
+
+    /**
+     * **智能尺寸的 3D 预览** ✓（用户要求：不要屏幕像素画，和草图线同一套渲染）
+     *
+     * <p>几何规则与已放置的尺寸完全一致（尺寸线 + 两条界线 + 两个 V 形箭头），
+     * 只是颜色不同、尺寸线的偏移量跟着指针走 ⇒ 松手落下的位置就是预览看到的位置。
+     */
+    private static int drawSmartPreview3D(final VertexConsumer vcq, final PoseStack.Pose pose,
+                                          final Vec3 cameraPos, final Pose3dc renderPose,
+                                          final Sketch sketch) {
+        final var session = SketchClient.mode().session();
+        if (session == null
+                || session.tool() != SketchSession.Tool.DIMENSION) {
+            return 0;
+        }
+        final var picked = session.selection();
+        if (picked.isEmpty() || picked.size() > 2) {
+            return 0;
+        }
+        final var shown = com.ovo.sablestopnow.sketch.SketchMeasure.preview(
+                sketch, picked, session.hoverU(), session.hoverV(), session.lockedVariant());
+        if (shown == null) {
+            return 0;
+        }
+        // 角度尺寸的几何是圆弧：暂由 HUD 那份画（3D 版另做）⇒ 这里不画，避免两套叠着
+        final String lk = shown.labelKey() == null ? "" : shown.labelKey();
+        if (lk.contains("angle")) {
+            return 0;
+        }
+        final double[] ends = com.ovo.sablestopnow.sketch.SketchMeasure.endpointsOfVars(
+                sketch, shown.solverKind(), shown.vars());
+        if (ends == null) {
+            return 0;
+        }
+        final double u1 = ends[0];
+        final double v1 = ends[1];
+        final double u2 = ends[2];
+        final double v2 = ends[3];
+        // 偏移方向：与已放置尺寸同一规则（水平沿 v、竖直沿 u、其它沿垂直连线）
+        final double du;
+        final double dv;
+        if (lk.contains("horizontal")) {
+            du = 0.0;
+            dv = 1.0;
+        } else if (lk.contains("vertical")) {
+            du = 1.0;
+            dv = 0.0;
+        } else {
+            final double ex = u2 - u1;
+            final double ey = v2 - v1;
+            final double el = Math.hypot(ex, ey);
+            if (el < 1.0e-6) {
+                return 0;
+            }
+            du = -ey / el;
+            dv = ex / el;
+        }
+        // 尺寸线偏移 = 指针相对中点在法线方向上的投影（不小于一格最小量）
+        final double midU = (u1 + u2) * 0.5;
+        final double midV = (v1 + v2) * 0.5;
+        final double perp = (session.hoverU() - midU) * du + (session.hoverV() - midV) * dv;
+        final double off = Math.max(DIM_OFFSET, perp);
+        final double a1 = u1 + du * off;
+        final double b1 = v1 + dv * off;
+        final double a2 = u2 + du * off;
+        final double b2 = v2 + dv * off;
+        int drawn = 0;
+        seg3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2, SMART_PREVIEW_COLOR);
+        drawn++;
+        ext3(vcq, pose, cameraPos, renderPose, sketch, u1, v1, a1, b1, SMART_PREVIEW_COLOR);
+        ext3(vcq, pose, cameraPos, renderPose, sketch, u2, v2, a2, b2, SMART_PREVIEW_COLOR);
+        drawn += 2;
+        drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2,
+                SMART_PREVIEW_COLOR);
+        drawn += arrow3(vcq, pose, cameraPos, renderPose, sketch, a2, b2, a1, b1,
+                SMART_PREVIEW_COLOR);
+        return drawn;
+    }
+
     /**
      * **3D 尺寸线** ✓ —— 尺寸线 / 界线 / 箭头都按"草图平面里的几何"算，
      * 再换算到世界并画成细长四边形（与背景网格同一种呈现 ✓）。
@@ -1828,6 +1894,23 @@ public final class SketchRenderer {
     public static double[] dimTextAnchor(final int constraintIndex) {
         final double[] a = DIM_TEXT_ANCHORS.get(constraintIndex);
         return a == null ? null : new double[] {a[0], a[1]};
+    }
+
+    /** 约束被删除后搬移以"约束下标"为键的图元状态 ✓（下标会整体前移一位） */
+    public static void onConstraintRemoved(final int index) {
+        if (index < 0) {
+            return;
+        }
+        final java.util.Map<Integer, double[]> next = new java.util.HashMap<>();
+        for (final var e : DIM_TEXT_ANCHORS.entrySet()) {
+            final int k = e.getKey();
+            if (k == index) {
+                continue;
+            }
+            next.put(k > index ? k - 1 : k, e.getValue());
+        }
+        DIM_TEXT_ANCHORS.clear();
+        DIM_TEXT_ANCHORS.putAll(next);
     }
 
     private static String lastDim3dDiag = "";

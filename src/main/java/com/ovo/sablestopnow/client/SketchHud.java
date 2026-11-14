@@ -122,6 +122,28 @@ public final class SketchHud {
         return ov == null ? null : new double[] {ov[0], ov[1]};
     }
 
+    /**
+     * 约束被删除后**搬移**以“约束下标”为键的 HUD 状态 ✓
+     *
+     * <p>删除一条约束会让后面所有下标前移一位；不搬的话拖拽覆盖位置会套到别的尺寸上，
+     * 甚至用旧下标去索引已删除的约束 —— 这正是"删除尺寸约束时崩溃"的来源之一。
+     */
+    public static void onConstraintRemoved(final int index) {
+        if (index < 0) {
+            return;
+        }
+        final java.util.Map<Integer, double[]> next = new java.util.HashMap<>();
+        for (final var e : LABEL_OVERRIDE.entrySet()) {
+            final int k = e.getKey();
+            if (k == index) {
+                continue; // 删掉的那条
+            }
+            next.put(k > index ? k - 1 : k, e.getValue());
+        }
+        LABEL_OVERRIDE.clear();
+        LABEL_OVERRIDE.putAll(next);
+    }
+
     // ================= 双击改值浮层 ✓（SolidWorks：双击尺寸数字 ⇒ 弹框改值 ⇒ 实时驱动 ✓）=======
 
     /** 浮层的层名 ✓（具名层 ⇒ 任何地方都能按名字开关 ✓ 不需要 UiContext ✓ 见 ModelInput ✓）。 */
@@ -698,6 +720,11 @@ public final class SketchHud {
                     shown.value(), -1, true);
             return; // 不再走下面的线性预览 ✓
         }
+        //  线性/半径类预览已改由 SketchRenderer.drawSmartPreview3D 用 3D 棒绘制 ✓
+        //   HUD 只保留**角度**预览（圆弧几何 3D 版另做）
+        if (true) {
+            return;
+        }
         final double[] pends = com.ovo.sablestopnow.sketch.SketchMeasure
                 .endpointsOfVars(working, shown.solverKind(), shown.vars());
         if (psub != null && pends != null) {
@@ -912,25 +939,30 @@ public final class SketchHud {
             final int slot = perEntity.merge(anchorKey(owner), 1, Integer::sum) - 1;
             // ★ 用户要求：图标更小 + 有背景 + 悬停变色 + 字形来自 mod 资源 ✓
             //   背景：普通=深色半透明，悬停=草绿，选中=金色描边（与"选中"语义一致）
-            final double gx = screen[0] + 7.0 + slot * 9.0;
-            final double gy = screen[1] - 7.0;
+            final double gx = screen[0] + 6.0 + slot * 8.0;
+            final double gy = screen[1] - 6.0;
             final boolean picked = session.selectedConstraint() == i;
             final double mdx = com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() - gx;
             final double mdy = com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() - gy;
-            final boolean hoveredGlyph = mdx * mdx + mdy * mdy <= 30.0;
+            final boolean hoveredGlyph = mdx * mdx + mdy * mdy <= 25.0;
+            // ★ 用户要求：**正方形**图标 + 正方形底 + 再小一点；选中态也用同一套图标 ✓
+            final float half = 3.5f;
             final int bg = picked ? 0xCC8A6A1E
                     : (hoveredGlyph ? 0xCC6B8E23 : 0x99101420);
-            com.ovo.sablestopnow.client.gui.lib.UiVector.disc(g, gx, gy, 5.0, bg);
+            com.ovo.sablestopnow.client.gui.lib.UiVector.roundRect(g,
+                    (float) gx - half, (float) gy - half, half * 2f, half * 2f, 1.5f, bg);
             if (picked) {
-                com.ovo.sablestopnow.client.gui.lib.UiVector.ring(g, gx, gy, 5.6, 1.0, 0xFFFFCC55);
+                com.ovo.sablestopnow.client.gui.lib.UiVector.roundRectOutline(g,
+                        (float) gx - half, (float) gy - half, half * 2f, half * 2f, 1.5f,
+                        1.0f, 0xFFFFCC55);
             }
             final net.minecraft.resources.ResourceLocation tex = glyphTexture(glyph);
             if (tex != null) {
-                g.blit(tex, (int) Math.round(gx - 4.0), (int) Math.round(gy - 4.0), 0, 0, 8, 8);
-            } else {
-                // 兜底：资源没加载到时退回矢量字形（不至于一个图标都看不到）
-                com.ovo.sablestopnow.client.gui.lib.UiVector.constraintGlyph(g, gx, gy, glyph,
-                        0xFFFFFFFF);
+                // ⚠ 必须用 **8 参数** blit 并显式给贴图尺寸（8×8）：
+                //   6 参数版本假设贴图是 256×256 图集 ⇒ 只采样左上角一小块
+                //   ⇒ 看起来"只有圆盘、没有图标"（用户实测）。
+                g.blit(tex, (int) Math.round(gx - 3.0), (int) Math.round(gy - 3.0),
+                        0, 0, 6, 6, 8, 8);
             }
             GLYPH_HITS.add(new GlyphHit(i, glyph, gx, gy));
         }

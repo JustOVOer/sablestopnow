@@ -417,6 +417,14 @@ public final class SketchClient {
             return false;
         }
         work.removeConstraint(constraintIndex);
+        // ★ 删除后**立刻清掉选中**：否则键盘 Delete 的重复事件会沿下标继续删下去
+        //   （用户实测"删除尺寸约束时崩溃 / 大量卡顿"）✓
+        if (session.selectedConstraint() >= constraintIndex) {
+            session.selectConstraint(-1);
+        }
+        // ★ 以"约束下标"为键的 HUD/渲染状态要整体前移，否则拖拽位置会套到别的尺寸上 ✓
+        com.ovo.sablestopnow.client.SketchHud.onConstraintRemoved(constraintIndex);
+        com.ovo.sablestopnow.client.SketchRenderer.onConstraintRemoved(constraintIndex);
         MODE.solve();
         logSolve("delete-after", 0, 0.0, 0);
         com.ovo.sablestopnow.client.model.ModelMode.prompt("model.dim.deleted");
@@ -457,7 +465,6 @@ public final class SketchClient {
         //   只在提示条里说一句"无法满足"玩家很容易错过（用户实测："草稿未变红"）。
         final var solved = MODE.lastSolve();
         if (solved == null || !solved.ok()) {
-            com.ovo.sablestopnow.client.SketchRenderer.flashConflict(2500L);
             com.ovo.sablestopnow.client.model.ModelMode.prompt("model.dim.unsatisfied");
             return false;
         }

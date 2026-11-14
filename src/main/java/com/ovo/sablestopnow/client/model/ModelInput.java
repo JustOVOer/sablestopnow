@@ -620,13 +620,19 @@ public final class ModelInput {
                 return;
             }            // ★ 点在**约束小图标**上 ⇒ 选中该约束 ✓（再按 Delete 删掉 ✓ SolidWorks 的做法 ✓）
             if (com.ovo.sablestopnow.client.SketchClient.mode().session() != null) {
-                final var g = com.ovo.sablestopnow.client.SketchHud.pickGlyph(
-                        dimGuiX(mc), dimGuiY(mc), 10.0);
-                if (g != null) {
-                    com.ovo.sablestopnow.client.SketchClient.mode().session()
-                            .selectConstraint(g.constraintIndex());
-                    ModelMode.prompt("model.sketch.constraint_selected");
-                    return; // 消费掉 ✓ 不要顺手清选择/放置 ✗
+                // ★★ 用户要求：**尺寸的选中/改值/拖动优先级在约束之上** ——
+                //   光标下有尺寸标签时，不要把这次点击抢成"选中约束图标" ✓
+                final boolean onLabel = com.ovo.sablestopnow.client.SketchHud.pickLabel(
+                        dimGuiX(mc), dimGuiY(mc), 14.0) != null;
+                if (!onLabel) {
+                    final var g = com.ovo.sablestopnow.client.SketchHud.pickGlyph(
+                            dimGuiX(mc), dimGuiY(mc), 10.0);
+                    if (g != null) {
+                        com.ovo.sablestopnow.client.SketchClient.mode().session()
+                                .selectConstraint(g.constraintIndex());
+                        ModelMode.prompt("model.sketch.constraint_selected");
+                        return; // 消费掉 ✓ 不要顺手清选择/放置 ✗
+                    }
                 }
                 com.ovo.sablestopnow.client.SketchClient.mode().session().selectConstraint(-1);
             }            // ★ 按在**已有尺寸标签**上 ⇒ 这次按下是"拖标签"✓ 不是"放置新尺寸"✗

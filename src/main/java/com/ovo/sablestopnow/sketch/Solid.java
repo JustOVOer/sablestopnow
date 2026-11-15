@@ -1984,15 +1984,13 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     viewNormal = cloneDirection(se.planeNormal(), rot).normalize();
                 }
                 final Placed placed = new Placed(view, boxes, edges, mesh, viewNormal);
-                // ★ 特征图**不重建**：源空间建一次图，再按同一个仿射变换整体搬过来。
-                //   克隆的顶点数可能很大（40k 面），重建分桶/合并远比变换一遍贵。
-                final Features.Graph srcGraph = Features.ofMeshCached(src.id(), se.mesh());
-                final Features.Graph cloneGraph = Features.transform(srcGraph, clone.id(),
+                // ★ 特征图**不在渲染线程重建**：登记"源图 + 变换"，等 Features 的后台
+                //   线程第一次取图时再做（40k 级网格也不会卡住创建）。
+                Features.putTransform(placed, src.id(), se.mesh(),
                         p -> clonePoint(p, center, rot, cl.scale(),
                                 cl.tx(), cl.ty(), cl.tz()),
                         d -> cloneDirection(d, rot),
                         cl.scale());
-                Features.put(placed, cloneGraph);
                 out.add(placed);
             }
         }

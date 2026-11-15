@@ -379,15 +379,129 @@ public final class Features {
     /** 取（或建）一个实体的特征图 ✓。 */
     public static Graph of(final Solid.Placed placed) {
         if (placed == null) {
-            return new Graph(null, List.of(), List.of(), List.of());
+            return EMPTY;
         }
         final Graph cached = CACHE.get(placed);
         if (cached != null) {
             return cached;
         }
-        final Graph built = build(placed);
-        CACHE.put(placed, built);
-        return built;
+        if (FAILED.contains(placed)) {
+            return EMPTY;
+        }
+        // ★ **绝不在渲染线程建图**：大模型（40k 多边形 CSG 网格）的焊接/分桶/合并
+        //   会让游戏卡几分钟（用户实测未响应）。这里只入队；建完之前返回空图，
+        //   悬停/边框暂时没有，等后台线程完成后下一帧自然出现。
+        schedule(placed);
+        return EMPTY;
+    }
+
+    /** 空图（后台还没建好时用）✓。 */
+    private static final Graph EMPTY = new Graph(null, List.of(), List.of(), List.of());
+
+    /** 后台建图线程（单线程：顺序建，避免和渲染抢 CPU、也避免并发改静态缓存）✓。 */
+    private static final java.util.concurrent.ExecutorService WORKER =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                final Thread t = new Thread(r, "sablestopnow-features");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /** 已入队 / 已失败（按对象身份）✓。 */
+    private static final java.util.Set<Solid.Placed> PENDING =
+            java.util.Collections.synchronizedSet(
+                    java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
+    private static final java.util.Set<Solid.Placed> FAILED =
+            java.util.Collections.synchronizedSet(
+                    java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
+
+    /** 清空失败标记（进入模型视图重试时用）✓。 */
+    public static void clearFailures() {
+        FAILED.clear();
+    }
+
+    private static void schedule(final Solid.Placed placed) {
+        if (!PENDING.add(placed)) {
+            return;
+        }
+        WORKER.execute(() -> {
+            try {
+                buildInto(placed);
+            } catch (final Throwable t) {
+                FAILED.add(placed);
+                System.err.println("[features] background build failed: " + t);
+            } finally {
+                PENDING.remove(placed);
+            }
+        });
+    }
+
+    /** 真正建图：如果登记过"源图 + 变换"，就复用源图；否则从 placed.mesh 重建。 */
+    private static void buildInto(final Solid.Placed placed) {
+        if (placed == null || CACHE.get(placed) != null) {
+            return;
+        }
+        final TransformSpec spec = TRANSFORMS.remove(placed);
+        final Graph graph;
+        if (spec != null) {
+            final Graph source = ofMeshCached(spec.sourceId(), spec.mesh());
+            graph = transform(source, placed.solid().id(),
+                    spec.point(), spec.direction(), spec.areaScale());
+        } else {
+            graph = build(placed);
+        }
+        CACHE.put(placed, graph);
+    }
+
+    /**
+     * 后台把一批实体建好（进入模型视图前调用）✓。
+     *
+     * <p>返回 future 供调用方在完成后切 UI；建图过程中游戏线程不被占用。
+     */
+    public static java.util.concurrent.CompletableFuture<Void> prepareAll(
+            final java.util.List<Solid.Placed> placedList) {
+        final java.util.List<Solid.Placed> snapshot =
+                placedList == null ? List.of() : new java.util.ArrayList<>(placedList);
+        return java.util.concurrent.CompletableFuture.runAsync(() -> {
+            for (final Solid.Placed p : snapshot) {
+                if (p == null || CACHE.get(p) != null || FAILED.contains(p)) {
+                    continue;
+                }
+                try {
+                    buildInto(p);
+                } catch (final Throwable t) {
+                    FAILED.add(p);
+                    System.err.println("[features] prepare failed: " + t);
+                }
+            }
+        }, WORKER);
+    }
+
+    /** 派生副本的图变换登记（源网格 + 变换），由后台线程真正执行 ✓。 */
+    private record TransformSpec(java.util.UUID sourceId, SolidMesh.Mesh mesh,
+                                 java.util.function.UnaryOperator<Vector3d> point,
+                                 java.util.function.UnaryOperator<Vector3d> direction,
+                                 double areaScale) {
+    }
+
+    private static final Map<Solid.Placed, TransformSpec> TRANSFORMS =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /**
+     * 登记"这个副本的图 = 源图做一次变换"。
+     *
+     * <p>不在渲染线程立即变换；第一次 {@link #of} 时由后台线程做。
+     */
+    public static void putTransform(
+            final Solid.Placed placed,
+            final java.util.UUID sourceId,
+            final SolidMesh.Mesh sourceMesh,
+            final java.util.function.UnaryOperator<Vector3d> point,
+            final java.util.function.UnaryOperator<Vector3d> direction,
+            final double areaScale) {
+        if (placed == null) {
+            return;
+        }
+        TRANSFORMS.put(placed, new TransformSpec(sourceId, sourceMesh, point, direction, areaScale));
     }
 
     /**
@@ -713,31 +827,135 @@ public final class Features {
     }
 
     /**
-     * 合并共线且首尾相接的短段 ⇒ 长直线 ✓（CSG/弦盒会把一条边切成很多小段 ✗）
+     * 合并共线且相接/重叠的短段 ⇒ 长直线 ✓。
      *
-     * <p>做法：反复找"共享端点 + 方向几乎一致（|×| < 1e-3）"的两段并成一段 ✓
+     * <p>★ 2026-11 重写：旧实现是"反复两两扫描，合并一次就从头再来"
+     * ⇒ 40k 多边形的 CSG 网格会产生几万段边界，复杂度接近 O(n³)，
+     * 实测 Render thread 在 `mergeCollinear` 里卡几分钟、游戏未响应（用户报告）。
+     *
+     * <p>现在按**无限直线**分组（方向 + 到原点的垂足），组内按参数 t 排序后
+     * 一次扫过合并区间 ⇒ O(n log n)。圆弧段方向各不相同，不会被错误合并；
+     * 直线边即使被 CSG 切成很多段也会重新接成一条。
      */
     private static void mergeCollinear(final List<double[]> raw, final List<double[]> out) {
-        final List<double[]> work = new ArrayList<>(raw);
-        boolean merged = true;
-        while (merged) {
-            merged = false;
-            outer:
-            for (int i = 0; i < work.size(); i++) {
-                for (int j = i + 1; j < work.size(); j++) {
-                    final double[] a = work.get(i);
-                    final double[] b = work.get(j);
-                    final double[] m = tryMerge(a, b);
-                    if (m != null) {
-                        work.set(i, m);
-                        work.remove(j);
-                        merged = true;
-                        break outer;
-                    }
+        if (raw.isEmpty()) {
+            return;
+        }
+        final Map<String, List<double[]>> byLine = new HashMap<>();
+        for (final double[] s : raw) {
+            final double dx = s[3] - s[0];
+            final double dy = s[4] - s[1];
+            final double dz = s[5] - s[2];
+            final double len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (len < 1.0e-9) {
+                continue;
+            }
+            double ux = dx / len;
+            double uy = dy / len;
+            double uz = dz / len;
+            // 统一方向：相反朝向的段必须落到同一个 key
+            if (ux < 0.0 || (ux == 0.0 && uy < 0.0)
+                    || (ux == 0.0 && uy == 0.0 && uz < 0.0)) {
+                ux = -ux;
+                uy = -uy;
+                uz = -uz;
+            }
+            // 直线上离原点最近的点（同一条直线的两段应得到几乎相同的点）
+            final double t = s[0] * ux + s[1] * uy + s[2] * uz;
+            final double px = s[0] - t * ux;
+            final double py = s[1] - t * uy;
+            final double pz = s[2] - t * uz;
+            final String key = Math.round(ux * 10000.0) + ","
+                    + Math.round(uy * 10000.0) + "," + Math.round(uz * 10000.0) + "|"
+                    + Math.round(px * 1000.0) + "," + Math.round(py * 1000.0) + ","
+                    + Math.round(pz * 1000.0);
+            byLine.computeIfAbsent(key, k -> new ArrayList<>()).add(s);
+        }
+        for (final List<double[]> group : byLine.values()) {
+            if (group.size() == 1) {
+                out.add(group.get(0));
+                continue;
+            }
+            final double[] first = group.get(0);
+            double ux = first[3] - first[0];
+            double uy = first[4] - first[1];
+            double uz = first[5] - first[2];
+            final double len = Math.sqrt(ux * ux + uy * uy + uz * uz);
+            if (len < 1.0e-9) {
+                out.add(first);
+                continue;
+            }
+            ux /= len;
+            uy /= len;
+            uz /= len;
+            if (ux < 0.0 || (ux == 0.0 && uy < 0.0)
+                    || (ux == 0.0 && uy == 0.0 && uz < 0.0)) {
+                ux = -ux;
+                uy = -uy;
+                uz = -uz;
+            }
+            // {t0, t1, x0,y0,z0, x1,y1,z1}
+            final List<double[]> intervals = new ArrayList<>(group.size());
+            for (final double[] s : group) {
+                final double ta = s[0] * ux + s[1] * uy + s[2] * uz;
+                final double tb = s[3] * ux + s[4] * uy + s[5] * uz;
+                if (Math.abs(ta - tb) < 1.0e-9) {
+                    continue;
+                }
+                if (ta <= tb) {
+                    intervals.add(new double[] {ta, tb, s[0], s[1], s[2], s[3], s[4], s[5]});
+                } else {
+                    intervals.add(new double[] {tb, ta, s[3], s[4], s[5], s[0], s[1], s[2]});
                 }
             }
+            intervals.sort((a, b) -> Double.compare(a[0], b[0]));
+            final double eps = 1.0e-4;
+            double curT0 = 0.0;
+            double curT1 = -Double.MAX_VALUE;
+            double curX0 = 0;
+            double curY0 = 0;
+            double curZ0 = 0;
+            double curX1 = 0;
+            double curY1 = 0;
+            double curZ1 = 0;
+            boolean have = false;
+            for (final double[] seg : intervals) {
+                if (!have) {
+                    have = true;
+                    curT0 = seg[0];
+                    curT1 = seg[1];
+                    curX0 = seg[2];
+                    curY0 = seg[3];
+                    curZ0 = seg[4];
+                    curX1 = seg[5];
+                    curY1 = seg[6];
+                    curZ1 = seg[7];
+                    continue;
+                }
+                if (seg[0] <= curT1 + eps) {
+                    // 相接/重叠：延长终点（起点已按 t0 排序，不会更小）
+                    if (seg[1] > curT1) {
+                        curT1 = seg[1];
+                        curX1 = seg[5];
+                        curY1 = seg[6];
+                        curZ1 = seg[7];
+                    }
+                    continue;
+                }
+                out.add(new double[] {curX0, curY0, curZ0, curX1, curY1, curZ1});
+                curT0 = seg[0];
+                curT1 = seg[1];
+                curX0 = seg[2];
+                curY0 = seg[3];
+                curZ0 = seg[4];
+                curX1 = seg[5];
+                curY1 = seg[6];
+                curZ1 = seg[7];
+            }
+            if (have) {
+                out.add(new double[] {curX0, curY0, curZ0, curX1, curY1, curZ1});
+            }
         }
-        out.addAll(work);
     }
 
     /** 两段共线且相接 ⇒ 合并成一段；否则 null ✓。 */

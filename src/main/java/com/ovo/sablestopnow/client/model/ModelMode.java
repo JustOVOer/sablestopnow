@@ -56,6 +56,12 @@ public final class ModelMode {
 
     private static int staffMissingTicks;
 
+    // ---- 进入模型视图前的**后台建图**（不占用渲染线程）----
+    private static boolean graphPreparing;
+    private static volatile boolean graphPrepared;
+    private static volatile boolean graphFailed;
+    private static int graphToken;
+
     /**
      * 模型模式下「光标是否应当保持自由」。
      *
@@ -161,6 +167,10 @@ public final class ModelMode {
         // 键位：Y 开关模型模式；M 打开/关闭右侧树状图；Tab 切换自由光标
         if (modeKey) {
             if (!on) {
+                if (graphPreparing) {
+                    cancelGraphPrepare();
+                    return;
+                }
                 // 需求：模型视图只能从「普通模式」进入（多选/整组拖拽进行中不允许切进来，
                 // 否则那套模式的选中队列、拖拽目标会和新界面互相打架）
                 final com.ovo.sablestopnow.client.StaffControl.Mode current =
@@ -170,11 +180,23 @@ public final class ModelMode {
                     prompt("model.prompt.need_normal");
                     return;
                 }
+                beginGraphPrepare(mc);
+                return;
             }
-            setOn(!on);
+            setOn(false);
             return;
         }
         if (!on) {
+            // 建图完成 ⇒ 现在才真正进入模型视图（用户要求：建完再进）
+            if (graphPreparing && graphPrepared) {
+                graphPreparing = false;
+                if (graphFailed) {
+                    chat("model.prompt.graph_failed");
+                } else {
+                    setOn(true);
+                    chat("model.prompt.graph_ready");
+                }
+            }
             return;
         }
         if (treeKey) {
@@ -188,6 +210,42 @@ public final class ModelMode {
         healCursor(mc);
         // 相机平滑与鼠标拖动**按帧**推进（见 ModelRenderer）：客户端 tick 只有 20Hz，
         // 在 20Hz 上采样鼠标位移再插值，手感一定是「一顿一顿」的。
+    }
+
+    /** 开始后台建图：聊天框提示，完成后由 {@link #tick()} 真正进入模型视图。 */
+    private static void beginGraphPrepare(final Minecraft mc) {
+        graphPreparing = true;
+        graphPrepared = false;
+        graphFailed = false;
+        final int token = ++graphToken;
+        chat("model.prompt.graph_building");
+        com.ovo.sablestopnow.sketch.Features.clearFailures();
+        final java.util.List<com.ovo.sablestopnow.sketch.Solid.Placed> placed =
+                com.ovo.sablestopnow.sketch.SolidClientState.placed(mc.level);
+        com.ovo.sablestopnow.sketch.Features.prepareAll(placed).whenComplete((v, t) -> {
+            if (token != graphToken) {
+                return; // 被取消/重开
+            }
+            graphFailed = t != null;
+            graphPrepared = true;
+        });
+    }
+
+    /** 取消本次建图（Y 再按一次）。后台任务会自然结束，结果被 token 丢弃。 */
+    private static void cancelGraphPrepare() {
+        graphToken++;
+        graphPreparing = false;
+        graphPrepared = false;
+        graphFailed = false;
+        chat("model.prompt.graph_cancelled");
+    }
+
+    /** 普通聊天框消息（不是 action bar）✓。 */
+    public static void chat(final String key, final Object... args) {
+        final Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.displayClientMessage(Component.translatable(key, args), false);
+        }
     }
 
     /** 关掉任意 Screen 之后把「该自由的光标」放回来（见 {@link #freeCursor} 的说明）。 */
@@ -406,6 +464,10 @@ public final class ModelMode {
         picked.clear();
         tool = ModelTools.NONE;
         freeCursor = true;
+        graphToken++;
+        graphPreparing = false;
+        graphPrepared = false;
+        graphFailed = false;
         ModelCamera.forget();
         SablestopNow.LOGGER.debug("model mode reset");
     }

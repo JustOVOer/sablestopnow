@@ -1033,7 +1033,52 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
 
     /** 一个**被选中特征**的求值结果（只含选中的材料/切割/圆角，供克隆使用）✓ */
     public record SelectedEval(Solid source, List<double[]> boxes, List<Vector3d[]> edges,
-                               SolidMesh.Mesh mesh, Vector3d planeNormal) {
+                               SolidMesh.Mesh mesh, Vector3d planeNormal,
+                               @org.jetbrains.annotations.Nullable double[] bounds) {
+    }
+
+    /** 实际包围盒：盒子分解优先；旋转体没有盒子分解 ⇒ 退回网格/线框顶点。 */
+    @org.jetbrains.annotations.Nullable
+    private static double[] selectedBounds(final List<double[]> boxes,
+                                           final List<Vector3d[]> edges,
+                                           final SolidMesh.Mesh mesh) {
+        final double[] byBoxes = Extrude.bounds(boxes);
+        if (byBoxes != null) {
+            return byBoxes;
+        }
+        double minX = Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double minZ = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+        double maxZ = -Double.MAX_VALUE;
+        boolean any = false;
+        if (mesh != null && !mesh.isEmpty()) {
+            for (final SolidMesh.Vertex v : mesh.vertices()) {
+                final Vector3d p = v.position();
+                minX = Math.min(minX, p.x);
+                minY = Math.min(minY, p.y);
+                minZ = Math.min(minZ, p.z);
+                maxX = Math.max(maxX, p.x);
+                maxY = Math.max(maxY, p.y);
+                maxZ = Math.max(maxZ, p.z);
+                any = true;
+            }
+        }
+        if (!any) {
+            for (final Vector3d[] e : edges) {
+                for (final Vector3d p : e) {
+                    minX = Math.min(minX, p.x);
+                    minY = Math.min(minY, p.y);
+                    minZ = Math.min(minZ, p.z);
+                    maxX = Math.max(maxX, p.x);
+                    maxY = Math.max(maxY, p.y);
+                    maxZ = Math.max(maxZ, p.z);
+                    any = true;
+                }
+            }
+        }
+        return any ? new double[] {minX, minY, minZ, maxX, maxY, maxZ} : null;
     }
 
     /**
@@ -1077,8 +1122,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 if (sk == null) {
                     continue;
                 }
-                out.add(new SelectedEval(s, s.boxes(sk), s.edges(sk), s.mesh(sk),
-                        sk.plane() == null ? null : sk.plane().normal()));
+                final List<double[]> bx = s.boxes(sk);
+                final List<Vector3d[]> ed = s.edges(sk);
+                final SolidMesh.Mesh me = s.mesh(sk);
+                out.add(new SelectedEval(s, bx, ed, me,
+                        sk.plane() == null ? null : sk.plane().normal(),
+                        selectedBounds(bx, ed, me)));
             }
             return out;
         }
@@ -1086,7 +1135,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         for (final Placed p : placeAll(subset, sketches)) {
             final Solid s = p.solid();
             if (s.shape() instanceof Shape.Extrusion || s.shape() instanceof Shape.Revolution) {
-                out.add(new SelectedEval(s, p.boxes(), p.edges(), p.mesh(), p.planeNormal()));
+                out.add(new SelectedEval(s, p.boxes(), p.edges(), p.mesh(), p.planeNormal(),
+                        selectedBounds(p.boxes(), p.edges(), p.mesh())));
             }
         }
         final long ms = (System.nanoTime() - t0) / 1_000_000L;
@@ -1836,7 +1886,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     evaluateSelected(solids, sketches, cl.sources());
             final List<double[]> allBoxes = new ArrayList<>();
             for (final SelectedEval se : selected) {
-                allBoxes.addAll(se.boxes());
+                final double[] b = se.bounds();
+                if (b != null) {
+                    allBoxes.add(b);
+                }
             }
             if (allBoxes.isEmpty()) {
                 continue;
@@ -1854,7 +1907,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         cl.scale(), cl.tx(), cl.ty(), cl.tz());
                 final SolidMesh.Mesh mesh = cloneMesh(se.mesh(), center, rot,
                         cl.scale(), cl.tx(), cl.ty(), cl.tz());
-                if (boxes.isEmpty() || edges.isEmpty()) {
+                if (edges.isEmpty() && (mesh == null || mesh.isEmpty())) {
                     continue;
                 }
                 final Solid view = new Solid(clone.id(), clone.body(), src.sketchId(),

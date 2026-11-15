@@ -37,12 +37,15 @@ public final class CloneTool {
     /** 预览几何缓存：只有"选中的特征/草图/贴图"变了才重跑求值（CSG 很贵）。 */
     private static String previewSig = "";
     private static List<Solid.SelectedEval> previewSelected = List.of();
+    /** 参数没变就不重复把成千上万条线框做变换（每帧都会调 preview）。 */
+    private static String lastSegSig = "";
 
     public static void reset() {
         SOURCES.clear();
         body = null;
         previewSig = "";
         previewSelected = List.of();
+        lastSegSig = "";
         FeaturePreview.clear();
     }
 
@@ -193,7 +196,10 @@ public final class CloneTool {
         ensurePlaced(level);
         final List<double[]> boxes = new ArrayList<>();
         for (final Solid.SelectedEval se : previewSelected) {
-            boxes.addAll(se.boxes());
+            final double[] b = se.bounds();
+            if (b != null) {
+                boxes.add(b);
+            }
         }
         return boxes.isEmpty() ? null : Solid.centerOfBoxes(boxes);
     }
@@ -219,11 +225,21 @@ public final class CloneTool {
         ensurePlaced(level);
         final List<double[]> srcBoxes = new ArrayList<>();
         for (final Solid.SelectedEval se : previewSelected) {
-            srcBoxes.addAll(se.boxes());
+            final double[] b = se.bounds();
+            if (b != null) {
+                srcBoxes.add(b);
+            }
         }
         if (srcBoxes.isEmpty()) {
             return;
         }
+        final String segSig = body + "|" + previewSig + "|"
+                + String.format(java.util.Locale.ROOT, "%.4f,%.4f,%.4f,%.3f,%.3f,%.3f,%.4f",
+                        tx, ty, tz, rx, ry, rz, scale);
+        if (segSig.equals(lastSegSig) && FeaturePreview.active()) {
+            return; // 参数没变：保留上一帧的预览，别再逐条变换
+        }
+        lastSegSig = segSig;
         final Vector3d center = Solid.centerOfBoxes(srcBoxes);
         final Matrix3d rot = Solid.cloneRotation(rx, ry, rz);
         final double s = Math.max(0.05, Math.min(16.0, scale));

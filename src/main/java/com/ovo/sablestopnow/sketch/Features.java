@@ -95,12 +95,21 @@ public final class Features {
         for (int i = 0; i < n; i++) {
             aspects[i] = aspect(faces.get(i));
         }
-        // ★ 普通大面的法线（"主导平面"）：普通面上的碎片与它**严格共面**，
-        //   绝不允许这些碎片并进圆角/曲面组（用户实测的"尖三角形泄漏"）。
-        final List<Vector3d> dominants = new ArrayList<>();
+        // ★ 普通大面的法线（"主导平面"）：**按同法线的总面积**统计，
+        //   而不是看单个面 —— 普通面被 CSG 切成碎片后，碎片面积小，但同一法线的
+        //   总面积仍然很大 ⇒ 仍能挡住碎片并入圆角曲面（用户实测的"尖三角形泄漏"）。
+        //   圆角条带每一小面的法线都不同，各自面积也小 ⇒ 不会被误当成主导平面。
+        final Map<String, Vector3d> normalByKey = new HashMap<>();
+        final Map<String, Double> areaByKey = new HashMap<>();
         for (final Face face : faces) {
-            if (face.area() >= DOMINANT_AREA) {
-                dominants.add(face.normal());
+            final String key = quant(face.normal());
+            normalByKey.putIfAbsent(key, face.normal());
+            areaByKey.merge(key, face.area(), Double::sum);
+        }
+        final List<Vector3d> dominants = new ArrayList<>();
+        for (final Map.Entry<String, Double> e : areaByKey.entrySet()) {
+            if (e.getValue() >= DOMINANT_AREA) {
+                dominants.add(normalByKey.get(e.getKey()));
             }
         }
         final int[] dominantOf = new int[n];
@@ -327,7 +336,7 @@ public final class Features {
      * "圆角面泄漏，把普通面的一部分当成圆角面"✗。碎片与大平面**严格共面**
      *（法线点积 ≈ 1），而圆角条带的每一小面相对大平面都有半个分段角，所以能区分 ✓
      */
-    private static final double DOMINANT_AREA = 0.15;
+    private static final double DOMINANT_AREA = 0.30;
     /** 判断"严格共面"的点积容差（约 0.08°）。 */
     private static final double DOMINANT_DOT = 1.0 - 1.0e-6;
 

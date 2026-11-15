@@ -1031,6 +1031,71 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                            List<double[]> boxes) {
     }
 
+    /** 一个**被选中特征**的求值结果（只含选中的材料/切割/圆角，供克隆使用）✓ */
+    public record SelectedEval(Solid source, List<double[]> boxes, List<Vector3d[]> edges,
+                               SolidMesh.Mesh mesh, Vector3d planeNormal) {
+    }
+
+    /**
+     * 只对**选中的特征**求值（克隆专用）✓。
+     *
+     * <p>为什么不能用主 {@link #placeAll} 的结果：那是一个 body 的最终结果，
+     * 包含**所有**切割与圆角 —— 只勾一个拉伸时会把整条结构的特征都克隆出来
+     *（用户实测"只能选拉伸，但是却把所有特征都克隆了"）。
+     *
+     * <p>实现上分两条路：
+     * <ul>
+     *   <li>没有选中切割/圆角 ⇒ 直接取材料特征**自己的**几何（不跑 CSG，快）；</li>
+     *   <li>选中了切割/圆角 ⇒ 把这些特征单独喂给 {@link #placeAll}（只在这一小撮
+     *       特征之间做布尔/倒圆，语义正确，也不会把没选的切割带进来）✓</li>
+     * </ul>
+     */
+    public static List<SelectedEval> evaluateSelected(
+            final Collection<Solid> solids,
+            final Collection<Sketch> sketches,
+            final Collection<UUID> selectedIds) {
+        if (solids == null || selectedIds == null || selectedIds.isEmpty()) {
+            return List.of();
+        }
+        final List<Solid> subset = new ArrayList<>();
+        boolean needCsg = false;
+        for (final Solid s : solids) {
+            if (!selectedIds.contains(s.id())) {
+                continue;
+            }
+            if (s.shape() instanceof Shape.Extrusion || s.shape() instanceof Shape.Revolution) {
+                subset.add(s);
+            } else if (s.shape() instanceof Shape.Cut || s.shape() instanceof Shape.Fillet) {
+                subset.add(s);
+                needCsg = true;
+            }
+        }
+        final List<SelectedEval> out = new ArrayList<>();
+        if (!needCsg) {
+            for (final Solid s : subset) {
+                final Sketch sk = s.resolve(sketches);
+                if (sk == null) {
+                    continue;
+                }
+                out.add(new SelectedEval(s, s.boxes(sk), s.edges(sk), s.mesh(sk),
+                        sk.plane() == null ? null : sk.plane().normal()));
+            }
+            return out;
+        }
+        final long t0 = System.nanoTime();
+        for (final Placed p : placeAll(subset, sketches)) {
+            final Solid s = p.solid();
+            if (s.shape() instanceof Shape.Extrusion || s.shape() instanceof Shape.Revolution) {
+                out.add(new SelectedEval(s, p.boxes(), p.edges(), p.mesh(), p.planeNormal()));
+            }
+        }
+        final long ms = (System.nanoTime() - t0) / 1_000_000L;
+        if (ms >= 100L) {
+            trace("clone: evaluateSelected features=" + subset.size() + " ms=" + ms);
+        }
+        return out;
+    }
+
     /** 把一批实体解析成"实体 + 它的盒子 + 它的渲染线框 + 贴图网格"，供渲染与碰撞共用。 */
     public static List<Placed> placeAll(final Collection<Solid> solids,
                                         final Collection<Sketch> sketches) {
@@ -1758,36 +1823,36 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
             }
         }
-        // ★ **克隆特征**：与阵列一样复制选中的特征，但只输出**一个副本**。
-        //   几何取主循环算好的**评估后**几何（已扣切割、已倒圆角）⇒ 克隆体与源看起来完全一致；
-        //   然后绕"所有源的公共包围盒中心"缩放/旋转，再整体平移。
+        // ★ **克隆特征**：只复制**选中的特征**，并且只把**选中的切割/圆角**作用到副本上。
+        //   以前直接用主循环的 evalById ⇒ 那是一个 body 的“全部切割 + 全部圆角”结果，
+        //   于是只勾了一个拉伸却把整条结构的特征全克隆了（用户实测）。
+        //   现在走 evaluateSelected：没勾切割/圆角就取材料自己的几何（不跑 CSG），
+        //   勾了才在选中集合内部做布尔/倒圆 ✓
         for (final Solid clone : solids) {
             if (!(clone.shape() instanceof final Shape.Clone cl) || cl.sources().isEmpty()) {
                 continue;
             }
+            final List<SelectedEval> selected =
+                    evaluateSelected(solids, sketches, cl.sources());
             final List<double[]> allBoxes = new ArrayList<>();
-            for (final UUID sid : cl.sources()) {
-                final Eval e = evalById.get(sid);
-                if (e != null) {
-                    allBoxes.addAll(e.boxes());
-                }
+            for (final SelectedEval se : selected) {
+                allBoxes.addAll(se.boxes());
+            }
+            if (allBoxes.isEmpty()) {
+                continue;
             }
             final Vector3d center = centerOfBoxes(allBoxes);
             final org.joml.Matrix3d rot = cloneRotation(cl.rx(), cl.ry(), cl.rz());
-            for (final UUID sid : cl.sources()) {
-                final Solid src = byId.get(sid);
-                final Eval e = evalById.get(sid);
-                if (src == null || e == null) {
-                    continue;
-                }
-                final List<double[]> boxes = new ArrayList<>(e.boxes().size());
-                for (final double[] b : e.boxes()) {
+            for (final SelectedEval se : selected) {
+                final Solid src = se.source();
+                final List<double[]> boxes = new ArrayList<>(se.boxes().size());
+                for (final double[] b : se.boxes()) {
                     boxes.add(cloneBox(b, center, rot, cl.scale(),
                             cl.tx(), cl.ty(), cl.tz()));
                 }
-                final List<Vector3d[]> edges = cloneEdges(e.edges(), center, rot,
+                final List<Vector3d[]> edges = cloneEdges(se.edges(), center, rot,
                         cl.scale(), cl.tx(), cl.ty(), cl.tz());
-                final SolidMesh.Mesh mesh = cloneMesh(e.mesh(), center, rot,
+                final SolidMesh.Mesh mesh = cloneMesh(se.mesh(), center, rot,
                         cl.scale(), cl.tx(), cl.ty(), cl.tz());
                 if (boxes.isEmpty() || edges.isEmpty()) {
                     continue;
@@ -1796,9 +1861,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         clone.index(), src.shape(), src.appearance());
                 // 贴图投影法线也要跟着旋转（否则旋转后的克隆体贴图方向不对）
                 Vector3d viewNormal = null;
-                final Sketch srcSk = src.resolve(sketches);
-                if (srcSk != null && srcSk.plane() != null) {
-                    viewNormal = cloneDirection(srcSk.plane().normal(), rot).normalize();
+                if (se.planeNormal() != null) {
+                    viewNormal = cloneDirection(se.planeNormal(), rot).normalize();
                 }
                 out.add(new Placed(view, boxes, edges, mesh, viewNormal));
             }

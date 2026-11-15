@@ -2,6 +2,8 @@ package com.ovo.sablestopnow.client.model;
 
 import com.ovo.sablestopnow.SablestopNow;
 import com.ovo.sablestopnow.network.SolidNetworking;
+import com.ovo.sablestopnow.sketch.Sketch;
+import com.ovo.sablestopnow.sketch.SketchClientState;
 import com.ovo.sablestopnow.sketch.Solid;
 import com.ovo.sablestopnow.sketch.SolidClientState;
 import net.minecraft.client.Minecraft;
@@ -32,9 +34,15 @@ public final class CloneTool {
     private static final List<UUID> SOURCES = new ArrayList<>();
     private static UUID body;
 
+    /** 预览几何缓存：只有"选中的特征/草图/贴图"变了才重跑求值（CSG 很贵）。 */
+    private static String previewSig = "";
+    private static List<Solid.SelectedEval> previewSelected = List.of();
+
     public static void reset() {
         SOURCES.clear();
         body = null;
+        previewSig = "";
+        previewSelected = List.of();
         FeaturePreview.clear();
     }
 
@@ -129,20 +137,63 @@ public final class CloneTool {
     }
 
     /**
+     * 按**当前选中的特征**准备一份只包含它们的 Placed 列表。
+     *
+     * <p>关键：不能直接用 {@link SolidClientState#placed(Level)} —— 那是整个 body
+     * 的最终结果（包含所有切割/圆角），只勾一个拉伸时会把它一起克隆出来
+     *（用户实测"只选拉伸却把所有特征都克隆了"）。这里把选中的材料/切割/圆角
+     * 单独喂给 {@link Solid#placeAll}，与 {@code Shape.Clone} 求值时的口径一致。
+     *
+     * <p>CSG 很贵 ⇒ 只在"选中集合 / 特征 / 草图"变化时重算，拖动平移/旋转/缩放
+     * 滑条时直接复用这份几何（只做变换）。
+     */
+    private static void ensurePlaced(final Level level) {
+        if (level == null) {
+            return;
+        }
+        final List<Solid> all = SolidClientState.ofBody(level, body);
+        final List<Sketch> sketches = SketchClientState.current(level);
+        final StringBuilder sig = new StringBuilder();
+        sig.append(body).append('|');
+        for (final Solid s : all) {
+            if (SOURCES.contains(s.id())) {
+                sig.append(s.id()).append(':').append(s.hashCode()).append(';');
+            }
+        }
+        for (final Sketch k : sketches) {
+            sig.append(k.id()).append(':')
+                    .append(java.util.Arrays.hashCode(k.variables())).append(':')
+                    .append(k.constraints().size()).append(':')
+                    .append(k.entities().size()).append(';');
+        }
+        final String now = sig.toString();
+        if (now.equals(previewSig)) {
+            return;
+        }
+        previewSig = now;
+        final long t0 = System.nanoTime();
+        previewSelected = Solid.evaluateSelected(all, sketches, SOURCES);
+        final long ms = (System.nanoTime() - t0) / 1_000_000L;
+        if (ms >= 100L) {
+            SablestopNow.LOGGER.info("[perf] clone preview geometry ms={} sources={}",
+                    ms, SOURCES.size());
+        }
+    }
+
+    /**
      * 所有选中特征的**公共中心**（实际几何包围盒中心）。
      *
-     * <p>用 {@code Placed.boxes()} 而不是草图包围盒：切割/圆角会把实际形体缩进去，
+     * <p>用选中特征求值后的 {@code boxes} 而不是草图包围盒：切割/圆角会把实际形体缩进去，
      * 用草图包围盒算出来的中心会偏。没有源/几何时返回 null。
      */
     public static Vector3d center(final Level level) {
         if (level == null || SOURCES.isEmpty()) {
             return null;
         }
+        ensurePlaced(level);
         final List<double[]> boxes = new ArrayList<>();
-        for (final Solid.Placed p : SolidClientState.placed(level)) {
-            if (SOURCES.contains(p.solid().id())) {
-                boxes.addAll(p.boxes());
-            }
+        for (final Solid.SelectedEval se : previewSelected) {
+            boxes.addAll(se.boxes());
         }
         return boxes.isEmpty() ? null : Solid.centerOfBoxes(boxes);
     }
@@ -150,8 +201,8 @@ public final class CloneTool {
     /**
      * 预览：黄色 = 克隆副本，青色 = 公共中心的三轴短十字。
      *
-     * <p>源线框用 {@code Placed.edges()}：它已经包含切割后的真实棱与圆角的边，
-     * 与最终克隆体一致（阵列预览用的是源实体自己的边，切割需要单独补）。
+     * <p>源线框来自"只选中那些特征"的求值结果：选了切割/圆角就带上，
+     * 没选就不带 —— 和真正创建出来的克隆体一致。
      */
     public static void preview(final double tx, final double ty, final double tz,
                                final double rx, final double ry, final double rz,
@@ -165,12 +216,10 @@ public final class CloneTool {
         if (level == null) {
             return;
         }
-        final List<Solid.Placed> placed = SolidClientState.placed(level);
+        ensurePlaced(level);
         final List<double[]> srcBoxes = new ArrayList<>();
-        for (final Solid.Placed p : placed) {
-            if (SOURCES.contains(p.solid().id())) {
-                srcBoxes.addAll(p.boxes());
-            }
+        for (final Solid.SelectedEval se : previewSelected) {
+            srcBoxes.addAll(se.boxes());
         }
         if (srcBoxes.isEmpty()) {
             return;
@@ -178,13 +227,10 @@ public final class CloneTool {
         final Vector3d center = Solid.centerOfBoxes(srcBoxes);
         final Matrix3d rot = Solid.cloneRotation(rx, ry, rz);
         final double s = Math.max(0.05, Math.min(16.0, scale));
-        // ① 产物预览：每个源特征的线框做同一套变换
+        // ① 产物预览：每个选中的材料特征线框做同一套变换
         final List<FeaturePreview.Seg> segs = new ArrayList<>();
-        for (final Solid.Placed p : placed) {
-            if (!SOURCES.contains(p.solid().id())) {
-                continue;
-            }
-            for (final Vector3d[] e : p.edges()) {
+        for (final Solid.SelectedEval se : previewSelected) {
+            for (final Vector3d[] e : se.edges()) {
                 segs.add(new FeaturePreview.Seg(
                         Solid.clonePoint(e[0], center, rot, s, tx, ty, tz),
                         Solid.clonePoint(e[1], center, rot, s, tx, ty, tz)));

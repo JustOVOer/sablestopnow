@@ -95,6 +95,18 @@ public final class Features {
         for (int i = 0; i < n; i++) {
             aspects[i] = aspect(faces.get(i));
         }
+        // ★ 普通大面的法线（"主导平面"）：普通面上的碎片与它**严格共面**，
+        //   绝不允许这些碎片并进圆角/曲面组（用户实测的"尖三角形泄漏"）。
+        final List<Vector3d> dominants = new ArrayList<>();
+        for (final Face face : faces) {
+            if (face.area() >= DOMINANT_AREA) {
+                dominants.add(face.normal());
+            }
+        }
+        final int[] dominantOf = new int[n];
+        for (int i = 0; i < n; i++) {
+            dominantOf[i] = dominantIndex(faces.get(i).normal(), dominants);
+        }
         // 顶点 → 共用它的面（按 1e-4 量化，和特征图的焊接同一口径）
         final Map<String, List<Integer>> byVertex = new HashMap<>();
         for (int i = 0; i < n; i++) {
@@ -108,18 +120,33 @@ public final class Features {
                 byVertex.computeIfAbsent(key, x -> new ArrayList<>()).add(i);
             }
         }
+        // ★ 只合并**至少共享两个顶点（一条边）**的面：只蹭到一个角的面不并
+        //   （尖三角形常常只是搭在一个顶点上，以前按"共享任一顶点"就把它并进来了）。
+        final Map<Long, int[]> pairCount = new HashMap<>();
         for (final List<Integer> around : byVertex.values()) {
             for (int i = 0; i < around.size(); i++) {
                 for (int j = i + 1; j < around.size(); j++) {
                     final int a = around.get(i);
                     final int b = around.get(j);
-                    if (find(parent, a) == find(parent, b)) {
-                        continue;
-                    }
-                    if (canMerge(faces.get(a), faces.get(b), aspects[a], aspects[b])) {
-                        union(parent, a, b);
-                    }
+                    final int lo = Math.min(a, b);
+                    final int hi = Math.max(a, b);
+                    final long key = ((long) lo << 32) | (hi & 0xFFFFFFFFL);
+                    pairCount.computeIfAbsent(key, x -> new int[1])[0]++;
                 }
+            }
+        }
+        for (final Map.Entry<Long, int[]> e : pairCount.entrySet()) {
+            if (e.getValue()[0] < 2) {
+                continue; // 只共享一个顶点 ⇒ 不是同一条边
+            }
+            final int a = (int) (e.getKey() >>> 32);
+            final int b = (int) (e.getKey() & 0xFFFFFFFFL);
+            if (find(parent, a) == find(parent, b)) {
+                continue;
+            }
+            if (canMerge(faces.get(a), faces.get(b), aspects[a], aspects[b],
+                    dominantOf[a], dominantOf[b])) {
+                union(parent, a, b);
             }
         }
         final Map<Integer, List<Integer>> groups = new HashMap<>();
@@ -165,12 +192,20 @@ public final class Features {
 
     /** 合并判据：法线近 + 至少一块是窄条/小面 + 尺度相差不大（防止圆角条带吞并大平面）。 */
     private static boolean canMerge(final Face a, final Face b,
-                                    final double aspectA, final double aspectB) {
+                                    final double aspectA, final double aspectB,
+                                    final int dominantA, final int dominantB) {
         if (!a.planar() || !b.planar()) {
             return false;
         }
         if (a.normal().dot(b.normal()) < SMOOTH_COS) {
             return false;
+        }
+        // ★ 只要有一块与某个普通大面严格共面，它就只能和**同一个普通面**合并。
+        //   普通面的碎片法线 = 大面法线，而圆角小面相对大面有半个分段角 ⇒ 不会误并。
+        if (dominantA != -1 || dominantB != -1) {
+            if (dominantA != dominantB) {
+                return false;
+            }
         }
         final double minArea = Math.min(a.area(), b.area());
         final double maxArea = Math.max(a.area(), b.area());
@@ -180,6 +215,16 @@ public final class Features {
         final boolean small = a.area() < SMOOTH_SMALL_AREA && b.area() < SMOOTH_SMALL_AREA;
         final boolean thin = aspectA >= SMOOTH_MIN_ASPECT && aspectB >= SMOOTH_MIN_ASPECT;
         return small || thin;
+    }
+
+    /** 法线与某个"普通大面"严格共面时返回其下标；否则 -1。 */
+    private static int dominantIndex(final Vector3d normal, final List<Vector3d> dominants) {
+        for (int i = 0; i < dominants.size(); i++) {
+            if (normal.dot(dominants.get(i)) >= DOMINANT_DOT) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /** 面的两个最大平面跨度之比（长条 ≫ 1，方块 ≈ 1）。 */
@@ -274,6 +319,17 @@ public final class Features {
     private static final double SMOOTH_MIN_ASPECT = 2.0;
     /** 面积比上限：避免小圆角条带吞并大平面。 */
     private static final double SMOOTH_MAX_AREA_RATIO = 8.0;
+    /**
+     * "主导平面"的面积阈值：达到它的原始面被视为普通大面。
+     *
+     * <p>它的法线用于挡住**普通平面上的碎片**：这些碎片（CSG 产生的尖三角形/细条）
+     * 面积可能很小、也可能很窄，光看"窄条/小面"会把它们并进圆角曲面 ⇒ 用户实测
+     * "圆角面泄漏，把普通面的一部分当成圆角面"✗。碎片与大平面**严格共面**
+     *（法线点积 ≈ 1），而圆角条带的每一小面相对大平面都有半个分段角，所以能区分 ✓
+     */
+    private static final double DOMINANT_AREA = 0.15;
+    /** 判断"严格共面"的点积容差（约 0.08°）。 */
+    private static final double DOMINANT_DOT = 1.0 - 1.0e-6;
 
     private static boolean sameSeg(final Vector3d[] e, final double[] seg) {
         return (Math.abs(e[0].x - seg[0]) < 1.0e-6 && Math.abs(e[0].y - seg[1]) < 1.0e-6

@@ -74,16 +74,32 @@ public final class SolidClientState {
     private static List<Solid.Placed> placedCache = List.of();
 
     /**
-     * 实体的"已放置"几何（盒子/线框/网格）✓ —— **带缓存**。
+     * **按物理结构分组的二级缓存**。
      *
-     * <p>★ 修实测"含贝塞尔的切割创建后大量卡顿"✗：
-     * 这个方法被**渲染每帧**调用，而它内部会跑 {@link Solid#placeAll}（切割还要跑 CSG BSP）
-     * ⇒ 每帧一次布尔运算 ⇒ 直接卡成幻灯片 ✗
-     * ⇒ 按"内容签名"（实体 id/序号/hash + 草图变量与约束数）缓存 ✓ 只在真的变了才重算 ✓
+     * <p>为什么需要它：{@link Solid#placeAll} 一次处理**整个维度**的实体，
+     * 而放置/克隆一个特征只会改变**一个结构**。以前随便加一个特征都会把
+     * 所有结构的切割/圆角 CSG 全部重跑一遍 —— 实测一个 24 实体的复杂结构会让
+     * 创建克隆卡住好几秒（用户反馈"克隆创建出现长时间卡顿"）。
+     *
+     * <p>现在先按 body 分组、各自算签名：只有内容真的变了的 body 才重算，
+     * 其它 body 直接复用上一次的 Placed（Placed 实例复用也让 Features 的缓存继续有效）。
      */
+    private static final Map<String, BodyCache> BODY_CACHE = new HashMap<>();
+
+    private record BodyCache(String sig, List<Solid.Placed> placed) {
+    }
+
     public static List<Solid.Placed> placed(final ResourceLocation dimension) {
         final List<Solid> solids = in(dimension);
         final List<Sketch> sketches = SketchClientState.in(dimension);
+        // 草图签名：变量/约束/图元数量（与旧实现一致）
+        final StringBuilder sketchSig = new StringBuilder();
+        for (final Sketch k : sketches) {
+            sketchSig.append(k.id()).append(':')
+                    .append(java.util.Arrays.hashCode(k.variables())).append(':')
+                    .append(k.constraints().size()).append(':')
+                    .append(k.entities().size()).append(';');
+        }
         final StringBuilder sb = new StringBuilder(64);
         for (final Solid s : solids) {
             // ★ 修实测"点选材质后没有生效"✗：签名必须包含**外观/贴图**（整条 Solid 的哈希）
@@ -91,20 +107,109 @@ public final class SolidClientState {
             sb.append(s.id()).append(':').append(s.index()).append(':')
                     .append(s.shape().hashCode()).append(':').append(s.hashCode()).append(';');
         }
-        sb.append('|');
-        for (final Sketch k : sketches) {
-            sb.append(k.id()).append(':')
-                    .append(java.util.Arrays.hashCode(k.variables())).append(':')
-                    .append(k.constraints().size()).append(':')
-                    .append(k.entities().size()).append(';');
-        }
-        final String sig = sb.toString();
+        final String sig = sb.append('|').append(sketchSig).toString();
         if (sig.equals(placedSig)) {
             return placedCache;
         }
         placedSig = sig;
-        placedCache = Solid.placeAll(solids, sketches);
+
+        // ★ 跨 body 的引用（镜像/阵列/克隆的源、圆角棱、基准面源）会让"按 body 分头求值"
+        //   看不到别的 body ⇒ 这种情况退回整维度一次算（正确优先，慢一点也只在改模型时）。
+        if (hasCrossBodyRefs(solids)) {
+            BODY_CACHE.clear();
+            placedCache = List.copyOf(Solid.placeAll(solids, sketches));
+            return placedCache;
+        }
+
+        // 按 body 分组（保持首次出现顺序）
+        final java.util.LinkedHashMap<UUID, List<Solid>> groups = new java.util.LinkedHashMap<>();
+        for (final Solid s : solids) {
+            groups.computeIfAbsent(s.body(), k -> new ArrayList<>()).add(s);
+        }
+        final Map<String, BodyCache> next = new HashMap<>();
+        final List<Solid.Placed> out = new ArrayList<>(solids.size());
+        for (final Map.Entry<UUID, List<Solid>> e : groups.entrySet()) {
+            final String bodySig = bodySignature(e.getValue(), sketchSig);
+            final String key = dimension + "#" + e.getKey();
+            final BodyCache cached = BODY_CACHE.get(key);
+            final List<Solid.Placed> part;
+            if (cached != null && cached.sig().equals(bodySig)) {
+                part = cached.placed();
+            } else {
+                final long t0 = System.nanoTime();
+                part = List.copyOf(Solid.placeAll(e.getValue(), sketches));
+                final long ms = (System.nanoTime() - t0) / 1_000_000L;
+                if (ms >= 100L) {
+                    Solid.trace("perf: placed body=" + e.getKey()
+                            + " solids=" + e.getValue().size() + " ms=" + ms);
+                }
+            }
+            next.put(key, new BodyCache(bodySig, part));
+            out.addAll(part);
+        }
+        BODY_CACHE.clear();
+        BODY_CACHE.putAll(next);
+        placedCache = List.copyOf(out);
         return placedCache;
+    }
+
+    /** 一个 body 的内容签名（实体 + 全局草图签名）。 */
+    private static String bodySignature(final List<Solid> bodySolids, final StringBuilder sketchSig) {
+        final StringBuilder sb = new StringBuilder(64);
+        for (final Solid s : bodySolids) {
+            sb.append(s.id()).append(':').append(s.index()).append(':')
+                    .append(s.shape().hashCode()).append(':').append(s.hashCode()).append(';');
+        }
+        return sb.append('|').append(sketchSig).toString();
+    }
+
+    /** 有没有跨 body 的特征引用（有就退回整维度求值）。 */
+    private static boolean hasCrossBodyRefs(final List<Solid> solids) {
+        final Map<UUID, UUID> bodyOf = new HashMap<>();
+        for (final Solid s : solids) {
+            bodyOf.put(s.id(), s.body());
+        }
+        for (final Solid s : solids) {
+            final UUID own = s.body();
+            if (s.shape() instanceof final Solid.Shape.Fillet f) {
+                for (final Solid.Shape.EdgeRef ref : f.edges()) {
+                    if (ref.solidId() != null && !java.util.Objects.equals(bodyOf.get(ref.solidId()), own)) {
+                        return true;
+                    }
+                }
+            }
+            if (s.shape() instanceof final Solid.Shape.Mirror m) {
+                if (m.planeSolidId() != null
+                        && !java.util.Objects.equals(bodyOf.get(m.planeSolidId()), own)) {
+                    return true;
+                }
+                for (final UUID src : m.sources()) {
+                    if (!java.util.Objects.equals(bodyOf.get(src), own)) {
+                        return true;
+                    }
+                }
+            }
+            if (s.shape() instanceof final Solid.Shape.Pattern p) {
+                for (final UUID src : p.sources()) {
+                    if (!java.util.Objects.equals(bodyOf.get(src), own)) {
+                        return true;
+                    }
+                }
+            }
+            if (s.shape() instanceof final Solid.Shape.Clone c) {
+                for (final UUID src : c.sources()) {
+                    if (!java.util.Objects.equals(bodyOf.get(src), own)) {
+                        return true;
+                    }
+                }
+            }
+            if (s.shape() instanceof final Solid.Shape.Plane p
+                    && p.sourceSolid() != null
+                    && !java.util.Objects.equals(bodyOf.get(p.sourceSolid()), own)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static List<Solid.Placed> placed(final Level level) {

@@ -4925,11 +4925,26 @@ public final class ModelUi {
                   if (lv != null && b0 != null) {
                       for (final com.ovo.sablestopnow.sketch.Solid sd
                               : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
-                          // 只列**材料特征**：切割/圆角/镜像/阵列/克隆已经或不能作为独立源
-                          if (!(sd.shape()
-                                  instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Extrusion)
-                                  && !(sd.shape()
-                                  instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Revolution)) {
+                          // 材料特征始终可选；切割也列出（勾上才会作用到副本）；
+                          // 圆角只在"被倒圆的材料特征"已勾上时显示（与阵列面板同一套依赖规则）
+                          final boolean material = sd.shape()
+                                  instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Extrusion
+                                  || sd.shape()
+                                  instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Revolution;
+                          final boolean cut = sd.shape()
+                                  instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut;
+                          boolean filletOk = false;
+                          if (sd.isFillet()) {
+                              final java.util.Set<java.util.UUID> deps = filletDeps(sd);
+                              filletOk = !deps.isEmpty();
+                              for (final java.util.UUID dep : deps) {
+                                  if (!CloneTool.hasSource(dep)) {
+                                      filletOk = false;
+                                      break;
+                                  }
+                              }
+                          }
+                          if (!material && !cut && !filletOk) {
                               continue;
                           }
                           final com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> prop =

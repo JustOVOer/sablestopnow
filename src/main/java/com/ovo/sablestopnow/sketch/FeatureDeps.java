@@ -120,7 +120,18 @@ public final class FeatureDeps {
                 }
             }
         }
-        // ⑦ 切割必须在第一个实心特征之后
+        // ⑦ 克隆的源特征必须排在它之前 ✓
+        for (final Solid s : solids) {
+            if (s.shape() instanceof final Solid.Shape.Clone cl) {
+                for (final java.util.UUID src : cl.sources()) {
+                    final Integer si = indexOf.get(src);
+                    if (si != null && si > s.index()) {
+                        return "model.order.clone_before_source";
+                    }
+                }
+            }
+        }
+        // ⑧ 切割必须在第一个实心特征之后
         final List<Node> ordered = nodes(solids);
         boolean materialSeen = false;
         for (final Node n : ordered) {

@@ -156,7 +156,7 @@ public final class ModelInput {
             final String toolNow = ModelMode.tool();
         final boolean featureTool = ModelTools.PLANE.equals(toolNow)
                 || ModelTools.FILLET.equals(toolNow) || ModelTools.MIRROR.equals(toolNow)
-                || ModelTools.PATTERN.equals(toolNow);
+                || ModelTools.PATTERN.equals(toolNow) || ModelTools.CLONE.equals(toolNow);
         if (!featureTool && com.ovo.sablestopnow.client.SketchClient.active()) {
 
                 com.ovo.sablestopnow.client.SketchClient.rightClick();
@@ -422,6 +422,22 @@ public final class ModelInput {
      * 四个特征的**点击分流** ✓：在草图分支之前处理，返回 true = 已消费 ✓
      */
     private static boolean handleFeatureToolClick() {
+        // ★ 镜像/阵列/克隆：**还没选物理结构**时，这一次点击先用来选结构。
+        //   用户要求：进入后如果没选，提示没有选择，并允许当场点结构上的方块或模型面。
+        if (com.ovo.sablestopnow.client.model.ModelUi.toolAwaitingBody()) {
+            final java.util.UUID body =
+                    com.ovo.sablestopnow.client.model.ModelUi.featureToolHoverBody();
+            if (body != null) {
+                com.ovo.sablestopnow.client.model.ModelUi.pickStructureForTool(body);
+            } else {
+                ModelMode.prompt("model.prompt.pick_structure");
+            }
+            return true;
+        }
+        // 克隆没有"点棱定方向"这一步；参数全在左栏，点世界只当作浏览/不误清选择。
+        if (com.ovo.sablestopnow.client.model.ModelTools.CLONE.equals(ModelMode.tool())) {
+            return true;
+        }
         // item 10: pattern tool - click edges to add directions
         if (com.ovo.sablestopnow.client.model.ModelTools.PATTERN.equals(ModelMode.tool())) {
               com.ovo.sablestopnow.SablestopNow.LOGGER.info(

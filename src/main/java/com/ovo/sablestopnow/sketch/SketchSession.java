@@ -451,27 +451,11 @@ public final class SketchSession {
     }
 
     /**
-     * **从动（参考）尺寸模式** ✓（SolidWorks：驱动尺寸可以勾成"从动"✓ 只显示、不驱动几何 ✓）。
-     *
-     * <p>语义落地 ✓：开启时"标注"**不落约束** ✗；若该测量**已经有**约束 ⇒ **删掉它** ✓
-     * ⇒ 于是它退成 {@code referenceDimensions} 里的参考尺寸 ✓ 灰 + 括号 ✓✓（不需要新数据结构 ✓）。
-     */
-    private boolean referenceMode;
-
-    /**
      * **吸附即约束** ✓（用户要求 ✓ 对齐 SolidWorks 的"自动添加约束"✓ 默认开 ✓ 可关 ✗）。
      *
      * <p>关掉之后吸附仍然只是"落点对齐"✓ 但不写约束 ✓ —— 想画自由尺寸时会需要 ✓。
      */
     private boolean snapConstraints = true;
-
-    /**
-     * **尺寸链**模式 ✓（SolidWorks 的 Baseline 尺寸 ✓ 需求 (3) 的一条 ✓）。
-     *
-     * <p>语义 ✓：放置一条尺寸后**不清空选择** ✓ ⇒ 下一个被点的图元会**加到同一个基准上** ✓
-     * ⇒ 于是"基准线 → 后面每个图元"依次成链 ✓（点空白放置 ✓ 点图元加选 ✓ 与已有手势完全一致 ✓）。
-     */
-    private boolean chainMode;
 
     /**
      * **辅助线绘制模式** ✓（用户要求 ✓ 直接绘制辅助线，而不是把已有图元"转"成辅助线 ✗）。
@@ -612,14 +596,6 @@ public final class SketchSession {
         this.constructionDraw = false;
     }
 
-    public boolean chainMode() {
-        return this.chainMode;
-    }
-
-    public void setChainMode(final boolean value) {
-        this.chainMode = value;
-    }
-
     /**
      * 当前**选中的约束**下标 ✓（-1 = 没选中 ✓）—— 用户点图元旁的小图标选中它 ✓ 再删掉 ✓
      * （SolidWorks：点几何关系图标 ⇒ 高亮 ⇒ Delete 删除 ✓）。
@@ -652,14 +628,6 @@ public final class SketchSession {
 
     public void setSnapConstraints(final boolean value) {
         this.snapConstraints = value;
-    }
-
-    public boolean referenceMode() {
-        return this.referenceMode;
-    }
-
-    public void setReferenceMode(final boolean value) {
-        this.referenceMode = value;
     }
 
     public Tool tool() {

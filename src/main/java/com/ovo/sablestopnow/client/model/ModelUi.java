@@ -285,6 +285,13 @@ public final class ModelUi {
                             startTool(ModelTools.PATTERN);
                         }, "model.tool.pattern.hint",
                         ModelTools.PATTERN.equals(tool)));
+                pager.addItem(featureIconButton("model.tool.clone", "clone",
+                        () -> {
+                            cutMode = false;
+                            com.ovo.sablestopnow.client.model.CloneTool.reset();
+                            startTool(ModelTools.CLONE);
+                        }, "model.tool.clone.hint",
+                        ModelTools.CLONE.equals(tool)));
                 pager.addItem(featureIconButton("model.tool.mirror", "mirror",
                         () -> {
                             cutMode = false;
@@ -855,13 +862,6 @@ public final class ModelUi {
         //   作用对象 = 当前**选中的图元** ✓（选中一条线再点 ⇒ 它变辅助线/变回实体 ✓）
         //   外观 ✓ 世界渲染画实线 + 我在 SketchHud 叠一层**虚线** ✓（用户确认：辅助线就是虚线 ✓）
         //   ⚠ 教训 ✓：上一轮我删「吸附即约束」按键时**把它一起删了** ✗（删除区间要按行核对 ✓）
-        // ★ **尺寸链**开关 ✓（需求 (3) 的最后一条 ✓ 与"辅助线"同一套写法 ✓）
-        final var chainBtn = new Button(Component.translatable("model.dim.chain"), () -> {
-            session.setChainMode(!session.chainMode());
-            refreshLeftPanel();
-        });
-        chainBtn.toggled = session.chainMode();
-        body.add(chainBtn);
         //   只列**关系**（水平/竖直/平行/垂直/等长/中点/重合/固定 ✓）✗——
         //   尺寸已经在上面那份列表里了 ✓ 两边都列会让人以为标重了 ✗。
         //   用统一库的 Button + hboxWrap ✓ ⇒ 窄了自动折行 ✓ 文字自动短标签 ✓ 不会遮盖 ✓
@@ -1601,6 +1601,29 @@ public final class ModelUi {
             com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.pattern.s2", 0.0);
     private static final String CMD_PATTERN_S2 = "feature.pattern.s2";
 
+    // ===== 克隆参数（左栏可调；默认无变换）=====
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> cloneTx =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.clone.tx", 0.0);
+    private static final String CMD_CLONE_TX = "feature.clone.tx";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> cloneTy =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.clone.ty", 0.0);
+    private static final String CMD_CLONE_TY = "feature.clone.ty";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> cloneTz =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.clone.tz", 0.0);
+    private static final String CMD_CLONE_TZ = "feature.clone.tz";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> cloneRx =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.clone.rx", 0.0);
+    private static final String CMD_CLONE_RX = "feature.clone.rx";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> cloneRy =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.clone.ry", 0.0);
+    private static final String CMD_CLONE_RY = "feature.clone.ry";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> cloneRz =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.clone.rz", 0.0);
+    private static final String CMD_CLONE_RZ = "feature.clone.rz";
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> cloneScale =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("feature.clone.scale", 1.0);
+    private static final String CMD_CLONE_SCALE = "feature.clone.scale";
+
     private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> extrudeDepth =
             com.ovo.sablestopnow.client.gui.lib.Prop.of("extrude.depth", 2.0);
     /** 拉伸深度输入框的命令名。 */
@@ -1986,7 +2009,8 @@ public final class ModelUi {
         //   （之前我加过"这四个工具每帧重建预览"的分支，但后来被后续整块替换冲掉了）
         final String toolNow = ModelMode.tool();
         if (ModelTools.PLANE.equals(toolNow) || ModelTools.FILLET.equals(toolNow)
-                || ModelTools.MIRROR.equals(toolNow) || ModelTools.PATTERN.equals(toolNow)) {
+                || ModelTools.MIRROR.equals(toolNow) || ModelTools.PATTERN.equals(toolNow)
+                || ModelTools.CLONE.equals(toolNow)) {
             // 每帧**重建**：无论谁清掉都能立刻恢复 ✓
             if (ModelTools.FILLET.equals(toolNow)) {
                 updateFilletPreview(filletRadius.get());
@@ -1994,6 +2018,9 @@ public final class ModelUi {
                 updatePlanePreview(planeDistance.get());
             } else if (ModelTools.MIRROR.equals(toolNow)) {
                 updateMirrorPreview();
+            } else if (ModelTools.CLONE.equals(toolNow)) {
+                CloneTool.preview(cloneTx.get(), cloneTy.get(), cloneTz.get(),
+                        cloneRx.get(), cloneRy.get(), cloneRz.get(), cloneScale.get());
             } else {
                 PatternTool.preview((int) (double) patternN1.get(), patternS1.get(),
                         (int) (double) patternN2.get(), patternS2.get());
@@ -2274,6 +2301,8 @@ public final class ModelUi {
             kind = "model.pattern.item";
         } else if (sd.isMirror()) {
             kind = "model.mirror.item";
+        } else if (sd.isClone()) {
+            kind = "model.clone.item";
         } else if (sd.isFillet()) {
             kind = "model.fillet.item";
         } else if (sd.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut) {
@@ -3163,6 +3192,7 @@ public final class ModelUi {
         for (final com.ovo.sablestopnow.sketch.Solid sd
                 : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, body)) {
             if (sd.isPlane() || sd.isFillet() || sd.isMirror() || sd.isPattern()
+                    || sd.isClone()
                     || sd.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut) {
                 continue;
             }
@@ -3214,6 +3244,10 @@ public final class ModelUi {
 
     private static final java.util.Map<java.util.UUID,
             com.ovo.sablestopnow.client.gui.lib.Prop<Boolean>> PATTERN_SRC_PROPS =
+            new java.util.HashMap<>();
+
+    private static final java.util.Map<java.util.UUID,
+            com.ovo.sablestopnow.client.gui.lib.Prop<Boolean>> CLONE_SRC_PROPS =
             new java.util.HashMap<>();
 
     private static final java.util.Map<java.util.UUID,
@@ -3553,6 +3587,17 @@ public final class ModelUi {
                 patternN2.set((double) p.dirs().get(1).count());
                 patternS2.set(p.dirs().get(1).spacing());
             }
+        } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Clone cl) {
+            ModelMode.setTool(ModelTools.CLONE);
+            CloneTool.setSources(solid.body(), cl.sources());
+            CLONE_SRC_PROPS.clear();
+            cloneTx.set(cl.tx());
+            cloneTy.set(cl.ty());
+            cloneTz.set(cl.tz());
+            cloneRx.set(cl.rx());
+            cloneRy.set(cl.ry());
+            cloneRz.set(cl.rz());
+            cloneScale.set(cl.scale());
         } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane pl) {
             ModelMode.setTool(ModelTools.PLANE);
             planeSourceSolid = solid.body();
@@ -3625,6 +3670,10 @@ public final class ModelUi {
             return createPatternFeature((int) (double) patternN1.get(), patternS1.get(),
                     (int) (double) patternN2.get(), patternS2.get());
         }
+        if (ModelTools.CLONE.equals(tool)) {
+            return createCloneFeature(cloneTx.get(), cloneTy.get(), cloneTz.get(),
+                    cloneRx.get(), cloneRy.get(), cloneRz.get(), cloneScale.get());
+        }
         if (ModelTools.PLANE.equals(tool)) {
             return createPlaneFeature(planeDistance.get());
         }
@@ -3684,6 +3733,26 @@ public final class ModelUi {
             return true;
         }
         PatternTool.create(n1, s1, n2, s2);
+        return true;
+    }
+
+    /**
+     * 克隆主按钮：编辑态 ⇒ 原地更新；否则走 CloneTool 新建 ✓
+     */
+    private static boolean createCloneFeature(final double tx, final double ty, final double tz,
+                                              final double rx, final double ry, final double rz,
+                                              final double scale) {
+        CloneTool.syncFromProps(CLONE_SRC_PROPS);
+        final com.ovo.sablestopnow.sketch.Solid.Shape.Clone next =
+                CloneTool.buildShape(tx, ty, tz, rx, ry, rz, scale);
+        if (next == null) {
+            ModelMode.prompt("model.clone.no_sources");
+            return false;
+        }
+        if (commitShape(next)) {
+            return true;
+        }
+        CloneTool.create(tx, ty, tz, rx, ry, rz, scale);
         return true;
     }
 
@@ -4423,7 +4492,7 @@ public final class ModelUi {
           //   不依赖右栏树子行是否展开（用户实测："上移下移无反应"，多半是子行没展开/点不到）✓
           final boolean featureToolNow = ModelTools.PLANE.equals(tool)
                   || ModelTools.FILLET.equals(tool) || ModelTools.MIRROR.equals(tool)
-                  || ModelTools.PATTERN.equals(tool);
+                  || ModelTools.PATTERN.equals(tool) || ModelTools.CLONE.equals(tool);
           if (!featureToolNow && selectedSolidId != null && editingSolidId == null) {
               final net.minecraft.client.Minecraft mc0 =
                       net.minecraft.client.Minecraft.getInstance();
@@ -4541,6 +4610,15 @@ public final class ModelUi {
           }
           if (ModelTools.MIRROR.equals(tool)) {
               body.add(new Label(Component.translatable("model.tool.mirror.hint")).color(0xFFCFD8FF));
+              // ★ 没有物理结构时：**只**显示"去点方块/模型面"的提示，不显示半截参数
+              if (mirrorBody == null) {
+                  body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+                  body.add(new Label(Component.translatable("model.prompt.no_structure"))
+                          .color(0xFFFFCC55));
+                  body.add(new Label(Component.translatable("model.prompt.pick_structure_hint"))
+                          .color(0xFFB9C0EE));
+                  return;
+              }
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
               body.add(new Label(mirrorPlaneOrigin == null
                       ? Component.translatable("model.mirror.step1")
@@ -4585,8 +4663,9 @@ public final class ModelUi {
                   if (lv != null && b0 != null) {
                       for (final com.ovo.sablestopnow.sketch.Solid sd
                               : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
-                          if (sd.isPlane() || sd.isMirror() || sd.isPattern()) {
-                              continue; // 基准面/镜像/阵列不是"材料特征"
+                          if (sd.isPlane() || sd.isMirror() || sd.isPattern()
+                                  || sd.isClone()) {
+                              continue; // 基准面/镜像/阵列/克隆不是"材料特征"
                           }
                           if (sd.isFillet()) {
                               // ★ 圆角**可以**被镜像，但依赖（被倒圆的材料特征）必须先勾上；
@@ -4668,6 +4747,15 @@ public final class ModelUi {
           }
           if (ModelTools.PATTERN.equals(tool)) {
               body.add(new Label(Component.translatable("model.tool.pattern.hint")).color(0xFFCFD8FF));
+              // ★ 与镜像一致：没有结构时先引导玩家点方块/模型面
+              if (PatternTool.bodyId() == null) {
+                  body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+                  body.add(new Label(Component.translatable("model.prompt.no_structure"))
+                          .color(0xFFFFCC55));
+                  body.add(new Label(Component.translatable("model.prompt.pick_structure_hint"))
+                          .color(0xFFB9C0EE));
+                  return;
+              }
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
               body.add(new Label(Component.translatable("model.pattern.state",
                       com.ovo.sablestopnow.client.model.PatternTool.dirCount(),
@@ -4711,8 +4799,9 @@ public final class ModelUi {
                     if (lv != null && b0 != null) {
                         for (final com.ovo.sablestopnow.sketch.Solid sd
                                 : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
-                            if (sd.isPlane() || sd.isMirror() || sd.isPattern()) {
-                                continue; // 基准面/镜像/阵列不是"材料特征"
+                            if (sd.isPlane() || sd.isMirror() || sd.isPattern()
+                                    || sd.isClone()) {
+                                continue; // 基准面/镜像/阵列/克隆不是"材料特征"
                             }
                             if (sd.isFillet()) {
                                 // ★ 圆角可以被阵列，但依赖（被倒圆的材料特征）必须先勾上；
@@ -4747,6 +4836,114 @@ public final class ModelUi {
                 }
               // ⚠ 与镜像面板同样的坑：上面已经有一组“创建阵列 / 清空选择”
               //   （始终可见、内部会校验方向/源），这里以前又加了一组 ⇒ 用户看到两份按钮。
+              return;
+          }
+          if (ModelTools.CLONE.equals(tool)) {
+              body.add(new Label(Component.translatable("model.tool.clone.hint"))
+                      .color(0xFFCFD8FF));
+              if (CloneTool.bodyId() == null) {
+                  body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+                  body.add(new Label(Component.translatable("model.prompt.no_structure"))
+                          .color(0xFFFFCC55));
+                  body.add(new Label(Component.translatable("model.prompt.pick_structure_hint"))
+                          .color(0xFFB9C0EE));
+                  return;
+              }
+              body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
+              body.add(new Label(() -> {
+                  final net.minecraft.client.Minecraft mc0 =
+                          net.minecraft.client.Minecraft.getInstance();
+                  final org.joml.Vector3d c = CloneTool.center(
+                          mc0 == null ? null : mc0.level);
+                  if (c == null) {
+                      return Component.translatable("model.clone.center_none");
+                  }
+                  return Component.translatable("model.clone.center",
+                          String.format(java.util.Locale.ROOT, "%.2f", c.x),
+                          String.format(java.util.Locale.ROOT, "%.2f", c.y),
+                          String.format(java.util.Locale.ROOT, "%.2f", c.z));
+              }).color(0xFFB9C0EE));
+              body.add(new Label(() -> Component.translatable("model.clone.state",
+                      CloneTool.sourceCount())).color(0xFFFFFFFF));
+              // ---- 平移 ----
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_CLONE_TX);
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_CLONE_TY);
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_CLONE_TZ);
+              body.add(com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                      "model.clone.move_x", CMD_CLONE_TX, cloneTx, -64.0, 64.0, 0.25));
+              body.add(com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                      "model.clone.move_y", CMD_CLONE_TY, cloneTy, -64.0, 64.0, 0.25));
+              body.add(com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                      "model.clone.move_z", CMD_CLONE_TZ, cloneTz, -64.0, 64.0, 0.25));
+              // ---- 绕公共中心旋转 ----
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_CLONE_RX);
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_CLONE_RY);
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_CLONE_RZ);
+              body.add(com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                      "model.clone.rot_x", CMD_CLONE_RX, cloneRx, -180.0, 180.0, 5.0));
+              body.add(com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                      "model.clone.rot_y", CMD_CLONE_RY, cloneRy, -180.0, 180.0, 5.0));
+              body.add(com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                      "model.clone.rot_z", CMD_CLONE_RZ, cloneRz, -180.0, 180.0, 5.0));
+              // ---- 缩放 ----
+              com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_CLONE_SCALE);
+              final com.ovo.sablestopnow.client.gui.lib.UiField scaleField =
+                      com.ovo.sablestopnow.client.gui.lib.UiField.number(
+                              "model.clone.scale", CMD_CLONE_SCALE, cloneScale,
+                              0.05, 16.0, 0.05);
+              scaleField.format(v -> String.format(java.util.Locale.ROOT, "%.2f", v));
+              body.add(scaleField);
+              // ---- 创建 / 清空 ----
+              body.add(new Button(applyLabel("model.clone.create"), () -> {
+                  final net.minecraft.client.Minecraft mc0 =
+                          net.minecraft.client.Minecraft.getInstance();
+                  final net.minecraft.world.level.Level lv0 =
+                          mc0 == null ? null : mc0.level;
+                  if (lv0 == null) {
+                      return;
+                  }
+                  createCloneFeature(cloneTx.get(), cloneTy.get(), cloneTz.get(),
+                          cloneRx.get(), cloneRy.get(), cloneRz.get(), cloneScale.get());
+                  forceRefreshLeft();
+              }).width(Widget.FILL));
+              body.add(new Button(Component.translatable("model.clone.clear"), () -> {
+                  CloneTool.clearSources();
+                  CLONE_SRC_PROPS.forEach((k, prop) -> prop.set(false));
+                  forceRefreshLeft();
+              }).width(Widget.FILL));
+              // ---- 源特征 ----
+              body.add(new Label(Component.translatable("model.clone.pick_sources_hint"))
+                      .color(0xFF8FA0D8));
+              {
+                  final net.minecraft.client.Minecraft mc0 =
+                          net.minecraft.client.Minecraft.getInstance();
+                  final net.minecraft.world.level.Level lv =
+                          mc0 == null ? null : mc0.level;
+                  final java.util.UUID b0 = CloneTool.bodyId() != null
+                          ? CloneTool.bodyId() : ModelMode.selectedModel();
+                  if (lv != null && b0 != null) {
+                      for (final com.ovo.sablestopnow.sketch.Solid sd
+                              : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv, b0)) {
+                          // 只列**材料特征**：切割/圆角/镜像/阵列/克隆已经或不能作为独立源
+                          if (!(sd.shape()
+                                  instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Extrusion)
+                                  && !(sd.shape()
+                                  instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Revolution)) {
+                              continue;
+                          }
+                          final com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> prop =
+                                  CLONE_SRC_PROPS.computeIfAbsent(sd.id(), k ->
+                                          com.ovo.sablestopnow.client.gui.lib.Prop.of(
+                                                  "clone.src." + k.toString().substring(0, 8),
+                                                  CloneTool.hasSource(k)));
+                          final com.ovo.sablestopnow.client.gui.lib.Checkbox cb =
+                                  new com.ovo.sablestopnow.client.gui.lib.Checkbox(prop,
+                                          () -> Component.literal(solidShortLabel(sd)));
+                          cb.onChange = on -> CloneTool.setSource(sd.id(), on, sd.body());
+                          body.add(cb);
+                      }
+                  }
+              }
               return;
           }
         if (ModelTools.MATE.equals(tool)) {
@@ -4977,61 +5174,10 @@ public final class ModelUi {
                             }
                             body.add(crow);
                         }
-                        // ★ 从动/驱动开关 ✓（SolidWorks：驱动尺寸可切换为从动 = 只显示不驱动 ✓）
-                        final var refBtn = new Button(Component.translatable("model.dim.reference"),
-                                () -> session.setReferenceMode(!session.referenceMode()));
-                        refBtn.toggled = session.referenceMode();
-                        body.add(refBtn);
-                        if (smart.expressible()) {
-                            body.add(new Button(Component.translatable("model.measure.dimension"),
-                                    () -> {
-                                        final var mode = com.ovo.sablestopnow.client.SketchClient.mode();
-                                        final var work = mode.working();
-                                        final var sel = mode.session().selection();
-                                        if (work == null || sel.isEmpty()) {
-                                            return;
-                                        }
-                                        // ⚠ 用**智能尺寸算出来的那个值**，不要在这里重算一遍：
-                                        // 两处各算一次迟早会不一致（而且显示的和标下去的必须同一个数）。
-                                        final var again = com.ovo.sablestopnow.sketch.SketchMeasure
-                                                .smartDimension(work, sel);
-                                        if (again == null || !again.expressible()) {
-                                            return;
-                                        }
-                                        // ★ 走**通用落约束** ✓：用"当前候选"的 kind 与值 ✓
-                                        //   ⇒ 夹角/线线距/点线距/水平竖直 全部一次打通 ✓
-                                        //   并且自带**过定义拦截** ✓（同几何同种约束 ⇒ 改值而非新建 ✓）
-                                        final var now = com.ovo.sablestopnow.sketch.SketchMeasure
-                                                .preview(work, sel, mode.session().hoverU(),
-                                                        mode.session().hoverV(),
-                                                        mode.session().lockedVariant());
-                                        final var cand = now != null ? now
-                                                : (com.ovo.sablestopnow.sketch.SketchMeasure
-                                                        .variants(work, again).isEmpty() ? null
-                                                        : com.ovo.sablestopnow.sketch.SketchMeasure
-                                                                .variants(work, again).get(0));
-                                        // 从动模式 ✓：不落约束 ✗，而且把已有约束删掉 ⇒ 退成参考尺寸 ✓（灰 + 括号 ✓）
-                                        if (mode.session().referenceMode()) {
-                                            final var already = com.ovo.sablestopnow.sketch.SketchMeasure
-                                                    .alreadyDimensioned(work, again);
-                                            final boolean removed = already != null
-                                                    && work.removeConstraint(already);
-                                            mode.solve();
-                                            com.ovo.sablestopnow.client.model.ModelMode.prompt(
-                                                    removed ? "model.dim.made_reference"
-                                                            : "model.dim.already_reference");
-                                            return;
-                                        }
-                                        final boolean ok = cand != null && mode.session()
-                                                .dimensionWith(cand.solverKind(), cand.value(),
-                                                        cand.vars());
-                                        if (ok) {
-                                            mode.solve();
-                                            ModelMode.prompt("model.measure.added");
-                                        }
-                                        refreshLeftPanel();
-                                    }).width(Widget.FILL));
-                        } else {
+                        // ★ 用户要求：删掉「标注为尺寸」与「从动/驱动」开关。
+                        //   参考（从动）尺寸仍会自动显示 —— 几何没有驱动约束时
+                        //   SketchMeasure 会把它算成灰括号参考尺寸 ✓
+                        if (!smart.expressible()) {
                             body.add(new Label(Component.translatable("model.measure.not_lockable"))
                                     .color(0xFFB9C0EE));
                         }
@@ -5358,7 +5504,8 @@ public final class ModelUi {
           // ★ 关键：进这四个特征工具前先退出草图模式，否则 onLeftPress 会先走"草图分支"
           //   工具分支永远轮不到 ⇒ "点棱/点面毫无反应"（用户实测）✓
           if (ModelTools.PLANE.equals(toolId) || ModelTools.FILLET.equals(toolId)
-                  || ModelTools.MIRROR.equals(toolId) || ModelTools.PATTERN.equals(toolId)) {
+                  || ModelTools.MIRROR.equals(toolId) || ModelTools.PATTERN.equals(toolId)
+                  || ModelTools.CLONE.equals(toolId)) {
               // ★ 进工具即重置上次的拾取状态（用户实测："第二次进入就已经有创建按钮"）
               planeFaceOrigin = null;
               planeFaceNormal = null;
@@ -5368,24 +5515,34 @@ public final class ModelUi {
               filletSolidId = null;
               filletSourceSolid = null;
               mirrorSources.clear();
+              MIRROR_SRC_PROPS.clear();
               mirrorPlaneOrigin = null;
               mirrorPlaneSolidId = null;
               mirrorPlaneSegs = null;
               mirrorPlaneNormal = null;
               com.ovo.sablestopnow.client.model.FeaturePreview.clear();
-              // ★ 默认把该体的**全部材料特征**勾上 ⇒ "创建镜像"按钮一定出现 ✓
-              //   （之前源列表为空时按钮根本不显示，用户以为"没有创建按键"✗）
+              // ★ 镜像/阵列/克隆都需要先有一个**物理结构**。
+              //   没选就提示，并保持工具激活 ⇒ 下一次点击方块/模型面就会当场选结构
+              //  （见 ModelMode 的 toolAwaitingBody + ModelInput 的分流）。
               final net.minecraft.client.Minecraft mc0 =
                       net.minecraft.client.Minecraft.getInstance();
               final net.minecraft.world.level.Level lv0 = mc0 == null ? null : mc0.level;
               final java.util.UUID b0 = ModelMode.selectedModel();
+              if (b0 == null && (ModelTools.MIRROR.equals(toolId)
+                      || ModelTools.PATTERN.equals(toolId)
+                      || ModelTools.CLONE.equals(toolId))) {
+                  ModelMode.prompt("model.prompt.pick_structure");
+              }
+              // ★ 默认把该体的**全部材料特征**勾上 ⇒ "创建镜像"按钮一定出现 ✓
+              //   （之前源列表为空时按钮根本不显示，用户以为"没有创建按键"✗）
               if (lv0 != null && b0 != null && ModelTools.MIRROR.equals(toolId)) {
                   mirrorBody = b0;
                   for (final com.ovo.sablestopnow.sketch.Solid sd
                           : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv0, b0)) {
                       // ★ 圆角**不再默认勾上**：它依赖“被倒圆的材料特征”，
                       //   用户要求依赖没勾时连复选框都不显示 ⇒ 等依赖勾上后再手动勾 ✓
-                      if (sd.isPlane() || sd.isMirror() || sd.isPattern() || sd.isFillet()) {
+                      if (sd.isPlane() || sd.isMirror() || sd.isPattern()
+                              || sd.isClone() || sd.isFillet()) {
                           continue;
                       }
                       mirrorSources.add(sd.id());
@@ -5394,6 +5551,10 @@ public final class ModelUi {
               }
               if (lv0 != null && b0 != null && ModelTools.PATTERN.equals(toolId)) {
                   PatternTool.prefill(b0, com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv0, b0));
+              }
+              if (lv0 != null && b0 != null && ModelTools.CLONE.equals(toolId)) {
+                  CloneTool.prefill(b0, com.ovo.sablestopnow.sketch.SolidClientState.ofBody(lv0, b0));
+                  CLONE_SRC_PROPS.clear();
               }
               if (com.ovo.sablestopnow.client.SketchClient.active()) {
                   com.ovo.sablestopnow.client.SketchClient.finish();
@@ -5407,7 +5568,105 @@ public final class ModelUi {
         ModelMode.setTool(toolId);
         ModelMode.clearPicks();
         chosenType = null;
+        // 工具切换/重置后强制重建左栏：同一工具再点一次时签名可能没变，
+        // 不重建会留下上一次的源列表/参数（"第二次进入还留着上次状态"）
+        lastLeftSignature = null;
         afterEdit();
+    }
+
+    /**
+     * 当前工具是否**要求先有一个物理结构**（镜像/阵列/克隆）✓。
+     *
+     * <p>这三个工具原先都默认“已经选中了模型”，没选时面板一片空白、点模型又只会
+     * 被当成“选棱/选面” ⇒ 玩家完全没法继续（用户实测要求：进入后提示没有选择，
+     * 并允许当场点方块或模型面选结构）。
+     */
+    public static boolean toolRequiresBody() {
+        final String tool = ModelMode.tool();
+        return ModelTools.MIRROR.equals(tool) || ModelTools.PATTERN.equals(tool)
+                || ModelTools.CLONE.equals(tool);
+    }
+
+    /** 当前工具还没有物理结构 ⇒ 下一次左键应该用来选结构，而不是选棱/选面。 */
+    public static boolean toolAwaitingBody() {
+        if (!toolRequiresBody()) {
+            return false;
+        }
+        final String tool = ModelMode.tool();
+        if (ModelTools.MIRROR.equals(tool)) {
+            return mirrorBody == null;
+        }
+        if (ModelTools.PATTERN.equals(tool)) {
+            return PatternTool.bodyId() == null;
+        }
+        return CloneTool.bodyId() == null;
+    }
+
+    /**
+     * 鼠标下可以当作“物理结构”的对象：优先模型面（FeatureHover），
+     * 退到结构上的方块面（MateTargeting.BoxHit），最后退到盒子拾取 ✓。
+     *
+     * @return 结构 id；没指到任何结构时 null
+     */
+    @Nullable
+    public static java.util.UUID featureToolHoverBody() {
+        final com.ovo.sablestopnow.client.model.FeatureHover.Hit fh = pickOnDemand();
+        if (fh != null && fh.body() != null) {
+            return fh.body();
+        }
+        final com.ovo.sablestopnow.client.MateTargeting.BoxHit bh = ModelMode.hovered();
+        if (bh != null && bh.body() != null) {
+            return bh.body().getUniqueId();
+        }
+        final BoxPick.Hit box = BoxPick.nearest(net.minecraft.client.Minecraft.getInstance());
+        return box == null ? null : box.body();
+    }
+
+    /**
+     * 当场把鼠标下的结构选为镜像/阵列/克隆的目标，并预填材料特征。
+     *
+     * <p>这是“进入后还没选结构”那一步的落点；选完后面板立刻出现参数与创建按钮。
+     */
+    public static void pickStructureForTool(final java.util.UUID body) {
+        if (body == null) {
+            ModelMode.prompt("model.prompt.pick_structure");
+            return;
+        }
+        ModelMode.selectModel(body);
+        final net.minecraft.client.Minecraft mc =
+                net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        if (level == null) {
+            return;
+        }
+        final java.util.List<com.ovo.sablestopnow.sketch.Solid> solids =
+                com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, body);
+        final String tool = ModelMode.tool();
+        if (ModelTools.MIRROR.equals(tool)) {
+            mirrorBody = body;
+            mirrorSources.clear();
+            MIRROR_SRC_PROPS.clear();
+            for (final com.ovo.sablestopnow.sketch.Solid sd : solids) {
+                if (sd.isPlane() || sd.isMirror() || sd.isPattern()
+                        || sd.isClone() || sd.isFillet()) {
+                    continue;
+                }
+                mirrorSources.add(sd.id());
+                mirrorSourceProp(sd.id()).set(true);
+            }
+        } else if (ModelTools.PATTERN.equals(tool)) {
+            PatternTool.prefill(body, solids);
+            PATTERN_SRC_PROPS.clear();
+        } else if (ModelTools.CLONE.equals(tool)) {
+            CloneTool.prefill(body, solids);
+            CLONE_SRC_PROPS.clear();
+        }
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[feature] structure picked body={} tool={}", body, tool);
+        ModelMode.prompt("model.prompt.structure_selected");
+        lastLeftSignature = null;
+        buildTop();
+        refreshLeftPanel();
     }
 
     /**

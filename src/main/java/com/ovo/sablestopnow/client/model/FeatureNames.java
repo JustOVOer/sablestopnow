@@ -55,6 +55,9 @@ public final class FeatureNames {
         if (solid.isMirror()) {
             return "镜像";
         }
+        if (solid.isClone()) {
+            return "克隆";
+        }
         if (solid.isFillet()) {
             return "圆角";
         }

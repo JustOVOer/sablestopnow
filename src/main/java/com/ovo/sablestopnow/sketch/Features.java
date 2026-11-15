@@ -66,9 +66,20 @@ public final class Features {
     /**
      * 把**相邻且法线渐变**的平面块合并成**曲面**面 ✓（修"一个曲面识别成多个平面"✗）。
      *
-     * <p>判据：两块共享任一顶点，且法线夹角 < 12°（圆柱弦盒的相邻条带约 5–10° ✓）。
-     * 合并结果标成 {@link Kind#CURVED} ⇒ **不产参考线、不能当基准面** ✓
-     * 但**边界面**本身仍然可以高亮 ✓（玩家看得见是"一整块曲面"✓）
+     * <p>判据（2026-10 重做）：
+     * <ul>
+     *   <li>法线夹角 ≤ 25°（低模圆柱的一个条带也可能到 30°，取 25° 兼顾两者）；</li>
+     *   <li>两块共享任一顶点；</li>
+     *   <li><b>两块都得是"窄条"或"小面"</b> —— 这是本次修"圆角曲面点不中"的关键：
+     *       以前只看法线，圆角条带的第一块与相邻的大平面**法线恰好相切**（夹角 0°），
+     *       于是整个实体被合并成一个"曲面"，悬停时轮廓变成整个实体的外轮廓，
+     *       圆角那一圈反而没有独立描边；反过来，微面在合并**之前**就被面积阈值删掉，
+     *       小半径圆角的条带全是微面 ⇒ 曲面整块从特征图里消失 ⇒ 鼠标移上去毫无反应 ✗。</li>
+     * </ul>
+     *
+     * <p>现在：只合并"窄条/小面"，大平面永远独立；微面先参与合并，合并后再按面积过滤。
+     * 圆角/圆柱的条带会合成一整块曲面，边界由**并集的只出现一次的边**重算（不画内部
+     * 细分线），悬停与描边都正常 ✓
      */
     private static List<Face> mergeSmooth(final List<Face> faces) {
         final int n = faces.size();
@@ -79,21 +90,36 @@ public final class Features {
         for (int i = 0; i < n; i++) {
             parent[i] = i;
         }
-        final double cosLimit = Math.cos(Math.toRadians(12.0));
+        // 每个面的"窄条程度"只算一次：两两比较时不再遍历三角形
+        final double[] aspects = new double[n];
         for (int i = 0; i < n; i++) {
-            for (int j = i + 1; j < n; j++) {
-                final Face a = faces.get(i);
-                final Face b = faces.get(j);
-                if (!a.planar() || !b.planar()) {
-                    continue;
+            aspects[i] = aspect(faces.get(i));
+        }
+        // 顶点 → 共用它的面（按 1e-4 量化，和特征图的焊接同一口径）
+        final Map<String, List<Integer>> byVertex = new HashMap<>();
+        for (int i = 0; i < n; i++) {
+            final java.util.Set<String> keys = new java.util.HashSet<>();
+            for (final Vector3d[] tri : faces.get(i).triangles()) {
+                for (final Vector3d p : tri) {
+                    keys.add(quant(p));
                 }
-                if (a.normal().dot(b.normal()) < cosLimit) {
-                    continue;
+            }
+            for (final String key : keys) {
+                byVertex.computeIfAbsent(key, x -> new ArrayList<>()).add(i);
+            }
+        }
+        for (final List<Integer> around : byVertex.values()) {
+            for (int i = 0; i < around.size(); i++) {
+                for (int j = i + 1; j < around.size(); j++) {
+                    final int a = around.get(i);
+                    final int b = around.get(j);
+                    if (find(parent, a) == find(parent, b)) {
+                        continue;
+                    }
+                    if (canMerge(faces.get(a), faces.get(b), aspects[a], aspects[b])) {
+                        union(parent, a, b);
+                    }
                 }
-                if (!sharesVertex(a, b)) {
-                    continue;
-                }
-                union(parent, i, j);
             }
         }
         final Map<Integer, List<Integer>> groups = new HashMap<>();
@@ -112,8 +138,6 @@ public final class Features {
             final Vector3d centroid = new Vector3d();
             double area = 0;
             double maxDev = 0;
-            final Vector3d n0 = faces.get(g.get(0)).normal();
-            double w0 = 0;
             for (final int idx : g) {
                 final Face f = faces.get(idx);
                 tris.addAll(f.triangles());
@@ -121,40 +145,110 @@ public final class Features {
                 centroid.fma(f.area(), f.origin());
                 area += f.area();
             }
-            final Vector3d normal = area > 0 ? nSum.normalize(new Vector3d()) : n0;
+            final Vector3d normal = area > 0 ? nSum.normalize(new Vector3d())
+                    : new Vector3d(faces.get(g.get(0)).normal());
             final Vector3d origin = area > 0 ? centroid.div(area, new Vector3d()) : new Vector3d();
-            w0 = normal.dot(origin);
+            final double w0 = normal.dot(origin);
             for (final Vector3d[] tri : tris) {
                 for (final Vector3d p : tri) {
                     maxDev = Math.max(maxDev, Math.abs(normal.dot(p) - w0));
                 }
             }
             final Kind kind = maxDev < 1.0e-3 ? Kind.PLANAR : Kind.CURVED;
-            // 合并面的描边：组内所有 segments 收起来再合并共线 ✓（曲面也描边 ✓）
-            final List<double[]> rawSegs = new ArrayList<>();
-            for (final int idx : g) {
-                rawSegs.addAll(faces.get(idx).segments());
-            }
+            // ★ 边界 = 并集里**只出现一次**的边（内部细分线不再画进悬停轮廓）
             final List<double[]> segs = new ArrayList<>();
-            mergeCollinear(rawSegs, segs);
+            boundarySegments(tris, segs);
             out.add(new Face(out.size(), kind, origin, normal, tris, segs, area));
         }
         return out;
     }
 
-    private static boolean sharesVertex(final Face a, final Face b) {
-        for (final Vector3d[] ta : a.triangles()) {
-            for (final Vector3d[] tb : b.triangles()) {
-                for (final Vector3d pa : ta) {
-                    for (final Vector3d pb : tb) {
-                        if (pa.distanceSquared(pb) < 1.0e-8) {
-                            return true;
-                        }
-                    }
-                }
+    /** 合并判据：法线近 + 至少一块是窄条/小面 + 尺度相差不大（防止圆角条带吞并大平面）。 */
+    private static boolean canMerge(final Face a, final Face b,
+                                    final double aspectA, final double aspectB) {
+        if (!a.planar() || !b.planar()) {
+            return false;
+        }
+        if (a.normal().dot(b.normal()) < SMOOTH_COS) {
+            return false;
+        }
+        final double minArea = Math.min(a.area(), b.area());
+        final double maxArea = Math.max(a.area(), b.area());
+        if (minArea < 1.0e-9 || maxArea / minArea > SMOOTH_MAX_AREA_RATIO) {
+            return false;
+        }
+        final boolean small = a.area() < SMOOTH_SMALL_AREA && b.area() < SMOOTH_SMALL_AREA;
+        final boolean thin = aspectA >= SMOOTH_MIN_ASPECT && aspectB >= SMOOTH_MIN_ASPECT;
+        return small || thin;
+    }
+
+    /** 面的两个最大平面跨度之比（长条 ≫ 1，方块 ≈ 1）。 */
+    private static double aspect(final Face face) {
+        final double[] ext = extents(face);
+        final double lo = Math.min(ext[0], ext[1]);
+        final double hi = Math.max(ext[0], ext[1]);
+        return lo < 1.0e-9 ? 0.0 : hi / lo;
+    }
+
+    /** 面在其平面内的两个方向的跨度 ✓。 */
+    private static double[] extents(final Face face) {
+        final Vector3d n = new Vector3d(face.normal()).normalize();
+        Vector3d u = n.cross(new Vector3d(0, 1, 0), new Vector3d());
+        if (u.lengthSquared() < 1.0e-9) {
+            u = n.cross(new Vector3d(1, 0, 0), new Vector3d());
+        }
+        u.normalize();
+        final Vector3d v = n.cross(u, new Vector3d()).normalize();
+        double minU = Double.MAX_VALUE;
+        double maxU = -Double.MAX_VALUE;
+        double minV = Double.MAX_VALUE;
+        double maxV = -Double.MAX_VALUE;
+        for (final Vector3d[] tri : face.triangles()) {
+            for (final Vector3d p : tri) {
+                final Vector3d d = new Vector3d(p).sub(face.origin());
+                final double du = d.dot(u);
+                final double dv = d.dot(v);
+                minU = Math.min(minU, du);
+                maxU = Math.max(maxU, du);
+                minV = Math.min(minV, dv);
+                maxV = Math.max(maxV, dv);
             }
         }
-        return false;
+        if (minU > maxU || minV > maxV) {
+            return new double[] {0, 0};
+        }
+        return new double[] {maxU - minU, maxV - minV};
+    }
+
+    /** 由一组三角形的并集重算边界边（只出现一次的边），再合并共线 ✓。 */
+    private static void boundarySegments(final List<Vector3d[]> tris, final List<double[]> out) {
+        final Map<String, int[]> count = new HashMap<>();
+        final Map<String, double[]> coords = new HashMap<>();
+        for (final Vector3d[] tri : tris) {
+            for (int k = 0; k < 3; k++) {
+                final Vector3d a = tri[k];
+                final Vector3d b = tri[(k + 1) % 3];
+                if (a.distanceSquared(b) < 1.0e-12) {
+                    continue;
+                }
+                final String ka = quant(a);
+                final String kb = quant(b);
+                final String key = ka.compareTo(kb) <= 0 ? ka + "|" + kb : kb + "|" + ka;
+                count.computeIfAbsent(key, x -> new int[1])[0]++;
+                coords.putIfAbsent(key, new double[] {a.x, a.y, a.z, b.x, b.y, b.z});
+            }
+        }
+        final List<double[]> raw = new ArrayList<>();
+        for (final Map.Entry<String, int[]> e : count.entrySet()) {
+            if (e.getValue()[0] != 1) {
+                continue;
+            }
+            final double[] s = coords.get(e.getKey());
+            if (s != null) {
+                raw.add(s);
+            }
+        }
+        mergeCollinear(raw, out);
     }
 
     private static int find(final int[] parent, final int i) {
@@ -171,6 +265,15 @@ public final class Features {
 
     /** 面的最小面积（格²）✓ 小于它的当噪声丢掉（圆柱条带、CSG 碎三角形）✗。 */
     public static final double MIN_FACE_AREA = 0.02;
+
+    /** 平滑合并：法线夹角阈值（低模圆柱条带可能接近 25°）。 */
+    private static final double SMOOTH_COS = Math.cos(Math.toRadians(25.0));
+    /** 小面的面积阈值：两块都小于它 ⇒ 允许合并（球面/小圆角的三角汤）。 */
+    private static final double SMOOTH_SMALL_AREA = 0.35;
+    /** 长条判据：面内两个跨度的比值 ≥ 2 视为"窄条"（圆角/圆柱条带）。 */
+    private static final double SMOOTH_MIN_ASPECT = 2.0;
+    /** 面积比上限：避免小圆角条带吞并大平面。 */
+    private static final double SMOOTH_MAX_AREA_RATIO = 8.0;
 
     private static boolean sameSeg(final Vector3d[] e, final double[] seg) {
         return (Math.abs(e[0].x - seg[0]) < 1.0e-6 && Math.abs(e[0].y - seg[1]) < 1.0e-6
@@ -280,35 +383,35 @@ public final class Features {
                     .add(t);
         }
 
-        // ★ 过滤**微面**：圆柱面（弦盒近似）与 CSG 噪声会碎成大量小三角形面 ✗
-        //   它们体积小、不能当基准面、更不该产参考线 ✓ ⇒ 面积小于阈值的面直接丢掉 ✓
-        final List<Face> faces = new ArrayList<>();
-        final List<Vector3d[]> allEdges = new ArrayList<>();
-        final java.util.Set<Integer> usedTri = new java.util.HashSet<>();
+        // ★ 微面**先不丢**：小半径圆角的曲面条带全是微面，先丢就会让整个圆角
+        //   从特征图里消失（用户实测"圆角曲面鼠标移上去没反应、没有描边"）。
+        //   现在先让它们参与平滑合并（合成一整块曲面），合并后再按面积过滤。
+        final List<Face> raw = new ArrayList<>();
         for (final List<Integer> bucket : buckets.values()) {
             for (final List<Integer> component : components(bucket, tris, vertTris)) {
                 if (component.isEmpty()) {
                     continue;
                 }
-                usedTri.addAll(component);
-                final Face f = makeFace(faces.size(), component, tris, verts, triNormal, triW,
-                        allEdges);
-                if (f.area() >= MIN_FACE_AREA) {
-                    faces.add(f);
-                } else {
-                    // 微面：把它贡献的棱也撤掉（否则棱会有一大堆碎段 ✗）
-                    for (final double[] seg : f.segments()) {
-                        allEdges.removeIf(e -> sameSeg(e, seg));
-                    }
-                }
+                raw.add(makeFace(raw.size(), component, tris, verts, triNormal, triW));
             }
         }
 
-        // ★ 修实测"一个曲面被识别成多个平面"✗：把**相邻且法线夹角小**的平面块合并成曲面 ✓
-        //   （圆柱的弦盒侧面每个三角形法线都略不同 ⇒ 会被拆成一堆小平面 ✗）
-        final List<Face> merged = mergeSmooth(faces);
-        faces.clear();
-        faces.addAll(merged);
+        // ★ 修实测"一个曲面被识别成多个平面"✗：把**相邻且法线渐变**的窄条/小面合并成曲面 ✓
+        final List<Face> merged = mergeSmooth(raw);
+        final List<Face> faces = new ArrayList<>();
+        final List<Vector3d[]> allEdges = new ArrayList<>();
+        for (final Face f : merged) {
+            // 合并后的**平面**微面当噪声丢掉；**曲面**即使面积小也保留
+            //（小半径圆角/小圆柱的曲面本来就窄，但它是玩家看得见、点得到的真实表面）
+            if (f.area() < MIN_FACE_AREA && f.kind() == Kind.PLANAR) {
+                continue;
+            }
+            faces.add(f);
+            for (final double[] s : f.segments()) {
+                allEdges.add(new Vector3d[] {new Vector3d(s[0], s[1], s[2]),
+                        new Vector3d(s[3], s[4], s[5])});
+            }
+        }
 
         final List<Vector3d> usedVerts = new ArrayList<>();
         final java.util.Set<Integer> seen = new java.util.HashSet<>();
@@ -372,7 +475,7 @@ public final class Features {
     /** 把一个连通分量做成面（含边界环 ⇒ 直线边）✓。 */
     private static Face makeFace(final int id, final List<Integer> comp, final List<int[]> tris,
                                  final List<Vector3d> verts, final List<Vector3d> triNormal,
-                                 final List<Double> triW, final List<Vector3d[]> outEdges) {
+                                 final List<Double> triW) {
         // 面积加权法线 / 质心
         final Vector3d nSum = new Vector3d();
         final Vector3d centroid = new Vector3d();
@@ -437,10 +540,6 @@ public final class Features {
                 raw.add(new double[] {a.x, a.y, a.z, b.x, b.y, b.z});
             }
             mergeCollinear(raw, segments);
-            for (final double[] s : segments) {
-                outEdges.add(new Vector3d[] {new Vector3d(s[0], s[1], s[2]),
-                        new Vector3d(s[3], s[4], s[5])});
-            }
         }
         return new Face(id, kind, origin, normal, triangles, segments, areaSum);
     }

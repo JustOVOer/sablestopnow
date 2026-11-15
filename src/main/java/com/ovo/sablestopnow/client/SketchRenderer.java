@@ -506,7 +506,8 @@ public final class SketchRenderer {
             if (sd.shape() instanceof Solid.Shape.Plane
                     || sd.shape() instanceof Solid.Shape.Fillet
                     || sd.shape() instanceof Solid.Shape.Mirror
-                    || sd.shape() instanceof Solid.Shape.Pattern) {
+                    || sd.shape() instanceof Solid.Shape.Pattern
+                    || sd.shape() instanceof Solid.Shape.Clone) {
                 continue; // 派生视图，不代表“草图被吸收”
             }
             if (sd.sketchId() != null) {

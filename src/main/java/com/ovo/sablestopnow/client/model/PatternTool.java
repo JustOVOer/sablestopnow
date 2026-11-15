@@ -76,7 +76,8 @@ public final class PatternTool {
         for (final Solid sd : solids) {
             // ★ 圆角与切割同等对待，可以被阵列 ✓（圆角默认不勾：它依赖被倒圆的材料特征，
             //   面板会在依赖勾选后才显示它的复选框）
-            if (sd.isPlane() || sd.isMirror() || sd.isPattern() || sd.isFillet()) {
+            if (sd.isPlane() || sd.isMirror() || sd.isPattern() || sd.isClone()
+                    || sd.isFillet()) {
                 continue;
             }
             SOURCES.add(sd.id());
@@ -255,7 +256,7 @@ public final class PatternTool {
     /** 右栏点特征：加入/移出被阵列列表 ✓ */
     public static void toggleSource(final Solid solid) {
         if (solid == null || solid.isPlane() || solid.isMirror()
-                || solid.isPattern()) {
+                || solid.isPattern() || solid.isClone()) {
             return;
         }
         if (!SOURCES.remove(solid.id())) {

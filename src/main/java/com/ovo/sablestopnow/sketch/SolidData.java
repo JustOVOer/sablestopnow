@@ -295,6 +295,24 @@ public class SolidData extends SavedData {
                   }
                   entry.put("patternSources", psrc);
               }
+              case Solid.Shape.Clone cl -> {
+                  // 克隆：平移 + 绕公共中心旋转 + 缩放 + 源特征
+                  entry.putString("shape", "clone");
+                  entry.putDouble("cltx", cl.tx());
+                  entry.putDouble("clty", cl.ty());
+                  entry.putDouble("cltz", cl.tz());
+                  entry.putDouble("clrx", cl.rx());
+                  entry.putDouble("clry", cl.ry());
+                  entry.putDouble("clrz", cl.rz());
+                  entry.putDouble("clscale", cl.scale());
+                  final ListTag csrc = new ListTag();
+                  for (final java.util.UUID id2 : cl.sources()) {
+                      if (id2 != null) {
+                          csrc.add(net.minecraft.nbt.NbtUtils.createUUID(id2));
+                      }
+                  }
+                  entry.put("cloneSources", csrc);
+              }
         }
         // 外观（贴图）：用 SolidAppearance 自己的编码，本层不解释任何规则
         final String[] look = solid.appearance().encode();
@@ -357,6 +375,20 @@ public class SolidData extends SavedData {
                           }
                       }
                       yield new Solid.Shape.Pattern(dirs2, psrc);
+                  }
+                  case "clone" -> {
+                      final java.util.List<java.util.UUID> csrc = new java.util.ArrayList<>();
+                      for (final Tag t2 : entry.getList("cloneSources", Tag.TAG_INT_ARRAY)) {
+                          final java.util.UUID u2 = net.minecraft.nbt.NbtUtils.loadUUID(t2);
+                          if (u2 != null) {
+                              csrc.add(u2);
+                          }
+                      }
+                      yield new Solid.Shape.Clone(
+                              entry.getDouble("cltx"), entry.getDouble("clty"),
+                              entry.getDouble("cltz"), entry.getDouble("clrx"),
+                              entry.getDouble("clry"), entry.getDouble("clrz"),
+                              entry.getDouble("clscale"), csrc);
                   }
                   case "mirror" -> {
                       final java.util.List<java.util.UUID> srcs = new java.util.ArrayList<>();

@@ -45,6 +45,9 @@ public final class ModelTools {
     /** item 10: pattern */
     public static final String PATTERN = "pattern";
 
+    /** **克隆**：只复制一个副本，可平移/绕公共中心旋转/缩放（左栏调参数）。 */
+    public static final String CLONE = "clone";
+
     /** 上边栏的标签页分组。 */
     public static final String TAB_MATE = "mate";
     public static final String TAB_MODEL = "model";
@@ -70,6 +73,7 @@ public final class ModelTools {
             case FORCE -> "model.tool.force";
             case SKETCH -> "model.tool.sketch";
             case EXTRUDE -> "model.tool.extrude";
+            case CLONE -> "model.tool.clone";
             default -> "model.tool.none";
         };
     }
@@ -83,6 +87,7 @@ public final class ModelTools {
             case FORCE -> "model.tool.force.hint";
             case SKETCH -> "model.tool.sketch.hint";
             case EXTRUDE -> "model.tool.extrude.hint";
+            case CLONE -> "model.tool.clone.hint";
             default -> "model.tool.none.hint";
         };
     }

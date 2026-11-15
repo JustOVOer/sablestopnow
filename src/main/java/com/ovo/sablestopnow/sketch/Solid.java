@@ -111,6 +111,26 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
         }
 
+        /**
+         * **克隆特征** ✓：与阵列一样复制选中的特征，但**只产生一个副本**，
+         * 并且允许精细控制：三轴平移 + 绕选中特征**公共中心**的三轴旋转 + 等比缩放。
+         *
+         * <p>变换顺序：先绕公共中心缩放/旋转，再平移 ✓（与左侧栏的直觉一致）。
+         * 旋转角是**度**，按 JOML 的 XYZ 顺序作用。
+         *
+         * <p>产物**不单独占树行**：作为"克隆N"这一行的 Placed 输出 ✓（与镜像/阵列一致）。
+         */
+        record Clone(double tx, double ty, double tz,
+                     double rx, double ry, double rz, double scale,
+                     java.util.List<java.util.UUID> sources) implements Shape {
+            public Clone {
+                if (!Double.isFinite(scale) || scale <= 0.0) {
+                    throw new IllegalArgumentException("克隆缩放必须为正");
+                }
+                sources = sources == null ? java.util.List.of() : java.util.List.copyOf(sources);
+            }
+        }
+
         record Mirror(double ox, double oy, double oz, double nx, double ny, double nz,
                       java.util.List<java.util.UUID> sources,
                       java.util.UUID planeSolidId) implements Shape {
@@ -372,6 +392,27 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 new Shape.Pattern(dirs, sources), SolidAppearance.EMPTY);
     }
 
+    /**
+     * 新建一个**克隆特征** ✓（只产生一个副本，支持平移/绕公共中心旋转/缩放）。
+     *
+     * @param tx/ty/tz 平移（格）
+     * @param rx/ry/rz 绕公共中心的旋转（度，XYZ 顺序）
+     * @param scale    等比缩放（> 0）
+     */
+    public static Solid createClone(final UUID body, final UUID sketchId, final int index,
+                                    final double tx, final double ty, final double tz,
+                                    final double rx, final double ry, final double rz,
+                                    final double scale, final java.util.List<UUID> sources) {
+        return new Solid(UUID.randomUUID(), body, sketchId, index,
+                new Shape.Clone(tx, ty, tz, rx, ry, rz, scale, sources),
+                SolidAppearance.EMPTY);
+    }
+
+    /** 是不是克隆特征 ✓ */
+    public boolean isClone() {
+        return this.shape instanceof Shape.Clone;
+    }
+
     /** 是不是阵列特征 ✓ */
     public boolean isPattern() {
         return this.shape instanceof Shape.Pattern;
@@ -581,6 +622,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Fillet f -> List.of(); // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
             case Shape.Mirror m -> List.of(); // 镜像的材料由反射得出 ✓
             case Shape.Pattern pt -> List.of(); // 阵列材料由平移得出 ✓
+            case Shape.Clone cl -> List.of(); // 克隆不产生自己的碰撞（材料由变换得出）✓
             case Shape.Extrusion e -> {
                 // ⚠ **曲面走棱盒（OBB），轴对齐轮廓走扫描线。** 判据是刻意的：
                 //   矩形/L 形的扫描线分解是**精确**的、盒子也最少，没有理由给它加朝向；
@@ -679,6 +721,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Fillet f -> 0.0; // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
             case Shape.Mirror m -> 0.0; // 镜像的材料由反射得出 ✓
             case Shape.Pattern pt -> 0.0; // 阵列材料由平移得出 ✓
+            case Shape.Clone cl -> 0.0; // 克隆材料由变换得出 ✓
         };
     }
 
@@ -792,6 +835,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Fillet f -> EMPTY_MESH; // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
             case Shape.Mirror m -> EMPTY_MESH; // 镜像的材料由反射得出 ✓
             case Shape.Pattern pt -> EMPTY_MESH; // 阵列材料由平移得出 ✓
+            case Shape.Clone cl -> EMPTY_MESH; // 克隆材料由变换得出 ✓
         };
     }
 
@@ -813,6 +857,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Fillet f -> List.of(); // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
             case Shape.Mirror m -> List.of(); // 镜像的材料由反射得出 ✓
             case Shape.Pattern pt -> List.of(); // 阵列材料由平移得出 ✓
+            case Shape.Clone cl -> List.of(); // 克隆材料由变换得出 ✓
         };
     }
 
@@ -1061,7 +1106,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         for (final Solid s : solids) {
             if (s.shape instanceof Shape.Cut || s.shape instanceof Shape.Plane
                     || s.shape instanceof Shape.Fillet || s.shape instanceof Shape.Mirror
-                    || s.shape instanceof Shape.Pattern) {
+                    || s.shape instanceof Shape.Pattern || s.shape instanceof Shape.Clone) {
                 continue;
             }
             final Sketch sk = s.resolve(sketches);
@@ -1283,7 +1328,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             //  `31:t162:tex0:b0:e37:Mirror:FB`）⇒ 玩家看到的是"本体点不到、只剩被挖掉那块"✗
             //  它们自己的产物由后面的 mirror / pattern 段输出 ⇒ 主循环必须跳过 ✓
             if (solid.shape() instanceof Shape.Mirror
-                    || solid.shape() instanceof Shape.Pattern) {
+                    || solid.shape() instanceof Shape.Pattern
+                    || solid.shape() instanceof Shape.Clone) {
                 continue;
             }
             final Sketch sketch = solid.resolve(sketches);
@@ -1453,7 +1499,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 final Solid src = byId.get(sid);
                 if (src == null || src.shape instanceof Shape.Plane
                         || src.shape instanceof Shape.Fillet
-                        || src.shape instanceof Shape.Mirror) {
+                        || src.shape instanceof Shape.Mirror
+                        || src.shape instanceof Shape.Pattern
+                        || src.shape instanceof Shape.Clone) {
                     continue;
                 }
                 final Sketch srcSketch = src.resolve(sketches);
@@ -1603,6 +1651,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         || src.shape instanceof Shape.Fillet
                         || src.shape instanceof Shape.Mirror
                         || src.shape instanceof Shape.Pattern
+                        || src.shape instanceof Shape.Clone
                         || src.shape instanceof Shape.Cut) {
                     continue;
                 }
@@ -1707,6 +1756,51 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                             ? srcSk.plane().normal() : null;
                     out.add(new Placed(view, finalBoxes, edges, mesh, viewNormal));
                 }
+            }
+        }
+        // ★ **克隆特征**：与阵列一样复制选中的特征，但只输出**一个副本**。
+        //   几何取主循环算好的**评估后**几何（已扣切割、已倒圆角）⇒ 克隆体与源看起来完全一致；
+        //   然后绕"所有源的公共包围盒中心"缩放/旋转，再整体平移。
+        for (final Solid clone : solids) {
+            if (!(clone.shape() instanceof final Shape.Clone cl) || cl.sources().isEmpty()) {
+                continue;
+            }
+            final List<double[]> allBoxes = new ArrayList<>();
+            for (final UUID sid : cl.sources()) {
+                final Eval e = evalById.get(sid);
+                if (e != null) {
+                    allBoxes.addAll(e.boxes());
+                }
+            }
+            final Vector3d center = centerOfBoxes(allBoxes);
+            final org.joml.Matrix3d rot = cloneRotation(cl.rx(), cl.ry(), cl.rz());
+            for (final UUID sid : cl.sources()) {
+                final Solid src = byId.get(sid);
+                final Eval e = evalById.get(sid);
+                if (src == null || e == null) {
+                    continue;
+                }
+                final List<double[]> boxes = new ArrayList<>(e.boxes().size());
+                for (final double[] b : e.boxes()) {
+                    boxes.add(cloneBox(b, center, rot, cl.scale(),
+                            cl.tx(), cl.ty(), cl.tz()));
+                }
+                final List<Vector3d[]> edges = cloneEdges(e.edges(), center, rot,
+                        cl.scale(), cl.tx(), cl.ty(), cl.tz());
+                final SolidMesh.Mesh mesh = cloneMesh(e.mesh(), center, rot,
+                        cl.scale(), cl.tx(), cl.ty(), cl.tz());
+                if (boxes.isEmpty() || edges.isEmpty()) {
+                    continue;
+                }
+                final Solid view = new Solid(clone.id(), clone.body(), src.sketchId(),
+                        clone.index(), src.shape(), src.appearance());
+                // 贴图投影法线也要跟着旋转（否则旋转后的克隆体贴图方向不对）
+                Vector3d viewNormal = null;
+                final Sketch srcSk = src.resolve(sketches);
+                if (srcSk != null && srcSk.plane() != null) {
+                    viewNormal = cloneDirection(srcSk.plane().normal(), rot).normalize();
+                }
+                out.add(new Placed(view, boxes, edges, mesh, viewNormal));
             }
         }
         // ★ **镜像/阵列取"拉伸+切割之后、圆角之前"的几何** ✓
@@ -3241,6 +3335,114 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     new Vector3d(v.normal()), v.u(), v.v()));
         }
         return new SolidMesh.Mesh(vs, in.indices());
+    }
+
+    // ================== 克隆变换（平移 + 绕公共中心旋转 + 缩放）==================
+
+    /** 克隆的旋转矩阵（角度为度，JOML 的 XYZ 顺序）。 */
+    public static org.joml.Matrix3d cloneRotation(final double rx, final double ry,
+                                                  final double rz) {
+        return new org.joml.Matrix3d().rotationXYZ(
+                (float) Math.toRadians(rx),
+                (float) Math.toRadians(ry),
+                (float) Math.toRadians(rz));
+    }
+
+    /**
+     * 一个点经过克隆变换：{@code p' = c + R·(s·(p−c)) + t} ✓
+     *
+     * <p>先缩放、再旋转（都绕公共中心 c），最后平移 —— 与左栏三个控件的直觉一致。
+     */
+    public static Vector3d clonePoint(final Vector3d p, final Vector3d center,
+                                      final org.joml.Matrix3d rot, final double scale,
+                                      final double tx, final double ty, final double tz) {
+        final Vector3d d = new Vector3d(p).sub(center).mul(scale);
+        rot.transform(d);
+        return d.add(center).add(tx, ty, tz);
+    }
+
+    /** 克隆变换后的方向（只旋转；缩放不改变单位方向）。 */
+    public static Vector3d cloneDirection(final Vector3d d, final org.joml.Matrix3d rot) {
+        return rot.transform(new Vector3d(d));
+    }
+
+    /** 克隆变换后的 AABB（把 8 个角变换后取包围盒；仅用于盒子近似/拾取）。 */
+    public static double[] cloneBox(final double[] box, final Vector3d center,
+                                    final org.joml.Matrix3d rot, final double scale,
+                                    final double tx, final double ty, final double tz) {
+        double minX = Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double minZ = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+        double maxZ = -Double.MAX_VALUE;
+        for (int i = 0; i < 8; i++) {
+            final Vector3d p = new Vector3d(
+                    (i & 1) == 0 ? box[0] : box[3],
+                    (i & 2) == 0 ? box[1] : box[4],
+                    (i & 4) == 0 ? box[2] : box[5]);
+            final Vector3d q = clonePoint(p, center, rot, scale, tx, ty, tz);
+            minX = Math.min(minX, q.x);
+            minY = Math.min(minY, q.y);
+            minZ = Math.min(minZ, q.z);
+            maxX = Math.max(maxX, q.x);
+            maxY = Math.max(maxY, q.y);
+            maxZ = Math.max(maxZ, q.z);
+        }
+        return new double[] {minX, minY, minZ, maxX, maxY, maxZ};
+    }
+
+    /** 克隆变换后的线框 ✓ */
+    public static List<Vector3d[]> cloneEdges(final List<Vector3d[]> edges,
+                                              final Vector3d center,
+                                              final org.joml.Matrix3d rot, final double scale,
+                                              final double tx, final double ty, final double tz) {
+        final List<Vector3d[]> out = new ArrayList<>(edges.size());
+        for (final Vector3d[] e : edges) {
+            out.add(new Vector3d[] {
+                    clonePoint(e[0], center, rot, scale, tx, ty, tz),
+                    clonePoint(e[1], center, rot, scale, tx, ty, tz)});
+        }
+        return out;
+    }
+
+    /** 克隆变换后的网格（位置旋转缩放、法线只旋转、UV 按缩放保持贴图密度）✓ */
+    public static SolidMesh.Mesh cloneMesh(final SolidMesh.Mesh in, final Vector3d center,
+                                           final org.joml.Matrix3d rot, final double scale,
+                                           final double tx, final double ty, final double tz) {
+        if (in == null || in.isEmpty()) {
+            return in;
+        }
+        final List<SolidMesh.Vertex> vs = new java.util.ArrayList<>(in.vertices().size());
+        for (final SolidMesh.Vertex v : in.vertices()) {
+            final Vector3d p = clonePoint(v.position(), center, rot, scale, tx, ty, tz);
+            final Vector3d n = rot.transform(new Vector3d(v.normal())).normalize();
+            // UV 单位是"格"：几何放大 s 倍时 UV 也乘 s，贴图密度才不变
+            vs.add(new SolidMesh.Vertex(p, n, v.u() * scale, v.v() * scale));
+        }
+        return new SolidMesh.Mesh(vs, in.indices());
+    }
+
+    /** 一组盒子的公共包围盒中心（没有盒子时返回原点）✓ */
+    public static Vector3d centerOfBoxes(final List<double[]> boxes) {
+        if (boxes == null || boxes.isEmpty()) {
+            return new Vector3d();
+        }
+        double minX = Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double minZ = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+        double maxZ = -Double.MAX_VALUE;
+        for (final double[] b : boxes) {
+            minX = Math.min(minX, b[0]);
+            minY = Math.min(minY, b[1]);
+            minZ = Math.min(minZ, b[2]);
+            maxX = Math.max(maxX, b[3]);
+            maxY = Math.max(maxY, b[4]);
+            maxZ = Math.max(maxZ, b[5]);
+        }
+        return new Vector3d((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5);
     }
 
     /** 反射一个点 ✓ */

@@ -10,7 +10,6 @@ import org.joml.Matrix3d;
 import org.joml.Vector3d;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -252,14 +251,5 @@ public final class CloneTool {
         reset();
         ModelUi.refreshTreeNow();
         ModelMode.setTool(ModelTools.NONE);
-    }
-
-    /** 供左栏显示的名字映射（源 feature id → 选中态）。 */
-    public static Map<UUID, Boolean> sourceFlags() {
-        final Map<UUID, Boolean> out = new HashMap<>();
-        for (final UUID id : SOURCES) {
-            out.put(id, Boolean.TRUE);
-        }
-        return out;
     }
 }

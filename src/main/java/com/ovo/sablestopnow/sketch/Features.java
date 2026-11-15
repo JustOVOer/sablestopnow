@@ -390,6 +390,88 @@ public final class Features {
         return built;
     }
 
+    /**
+     * 给**派生特征**（克隆/镜像/阵列）预置一份图 ✓。
+     *
+     * <p>派生副本的网格是由源几何做刚体变换/等比缩放得到的，拓扑完全一样
+     * （哪些三角形属于一个面、哪些边是边界都不变）⇒ 只需要对源图做同一套
+     * 坐标变换，不必再对新网格重新焊接/分桶/合并。大网格（如 40k 多边形镜像体）
+     * 的创建/加载开销因此从"重建拓扑"降到"变换顶点"。
+     */
+    public static void put(final Solid.Placed placed, final Graph graph) {
+        if (placed != null && graph != null) {
+            CACHE.put(placed, graph);
+        }
+    }
+
+    /**
+     * 按网格对象缓存特征图（克隆的源几何来自 `evaluateSelected` 的缓存，
+     * 同一个网格对象在多次创建/参数调整间复用，没必要反复建图）。
+     */
+    private static final Map<SolidMesh.Mesh, Graph> MESH_CACHE =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    public static Graph ofMeshCached(final java.util.UUID solidId, final SolidMesh.Mesh mesh) {
+        if (mesh == null || mesh.isEmpty()) {
+            return new Graph(solidId, List.of(), List.of(), List.of());
+        }
+        final Graph cached = MESH_CACHE.get(mesh);
+        if (cached != null) {
+            return cached;
+        }
+        final Graph built = buildMesh(solidId, mesh);
+        MESH_CACHE.put(mesh, built);
+        return built;
+    }
+
+    /**
+     * 把一张特征图整体做**仿射变换**（刚体/等比缩放/镜像）✓。
+     *
+     * @param point     顶点/原点变换
+     * @param direction 法线/方向变换（只旋转/反射，不平移）
+     * @param areaScale 面积缩放（平移/镜像为 1；等比缩放为 s，面积乘 s²）
+     */
+    public static Graph transform(
+            final Graph source,
+            final java.util.UUID solidId,
+            final java.util.function.UnaryOperator<Vector3d> point,
+            final java.util.function.UnaryOperator<Vector3d> direction,
+            final double areaScale) {
+        if (source == null) {
+            return new Graph(solidId, List.of(), List.of(), List.of());
+        }
+        final List<Face> faces = new ArrayList<>(source.faces().size());
+        for (final Face f : source.faces()) {
+            final List<Vector3d[]> tris = new ArrayList<>(f.triangles().size());
+            for (final Vector3d[] tri : f.triangles()) {
+                tris.add(new Vector3d[] {point.apply(tri[0]), point.apply(tri[1]),
+                        point.apply(tri[2])});
+            }
+            final List<double[]> segs = new ArrayList<>(f.segments().size());
+            for (final double[] s : f.segments()) {
+                final Vector3d a = point.apply(new Vector3d(s[0], s[1], s[2]));
+                final Vector3d b = point.apply(new Vector3d(s[3], s[4], s[5]));
+                segs.add(new double[] {a.x, a.y, a.z, b.x, b.y, b.z});
+            }
+            final Vector3d n = direction.apply(new Vector3d(f.normal()));
+            if (n.lengthSquared() < 1.0e-12) {
+                n.set(0, 1, 0);
+            }
+            n.normalize();
+            faces.add(new Face(f.id(), f.kind(), point.apply(new Vector3d(f.origin())),
+                    n, tris, segs, f.area() * areaScale * areaScale));
+        }
+        final List<Vector3d[]> edges = new ArrayList<>(source.edges().size());
+        for (final Vector3d[] e : source.edges()) {
+            edges.add(new Vector3d[] {point.apply(e[0]), point.apply(e[1])});
+        }
+        final List<Vector3d> vertices = new ArrayList<>(source.vertices().size());
+        for (final Vector3d v : source.vertices()) {
+            vertices.add(point.apply(v));
+        }
+        return new Graph(solidId, faces, edges, vertices);
+    }
+
     // ================== 主流程 ==================
 
     /** 直接从**网格**建特征图 ✓（离线用例用；生产走 {@link #of(Solid.Placed)} ✓）。 */

@@ -1455,6 +1455,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
         }
         final List<Placed> out = new ArrayList<>(solids.size());
+        // ★ 主循环顺手缓存**材料源自己的原始几何**（未扣切割、未倒圆角）。
+        //   克隆只勾材料特征时直接复用这份几何，不再重复 solid.mesh()/edges()/boxes()
+        //   （镜像/阵列以前也各建一份，但克隆多了一次独立求值，这里先消掉重复）。
+        final java.util.Map<UUID, Eval> rawEvalById = new java.util.HashMap<>();
         for (final Solid solid : solids) {
             if (solid.shape() instanceof Shape.Cut) {
                 continue; // 切割体本身不产生材料/线框/网格 ✓
@@ -1529,7 +1533,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 probeBoxes = rawBoxes;
             }
             // ② 渲染：**CSG 真布尔** ✓ —— 外观保持原样（顶点带 normal+uv ⇒ 贴图照常）✓
-            SolidMesh.Mesh mesh = solid.mesh(sketch);
+            final SolidMesh.Mesh rawMesh = solid.mesh(sketch);
+            rawEvalById.put(solid.id(), new Eval(rawBoxes, edges, rawMesh));
+            SolidMesh.Mesh mesh = rawMesh;
             List<Vector3d[]> drawnEdges = edges;
             // ★ CSG 渲染链路（csg.js 移植）✓ —— Node.clipTo 的"清空后再传入"坑修好后已可用 ✓
             if (cut && CSG_RENDER_ENABLED) {
@@ -1910,8 +1916,40 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             if (!(clone.shape() instanceof final Shape.Clone cl) || cl.sources().isEmpty()) {
                 continue;
             }
-            final List<SelectedEval> selected =
-                    evaluateSelected(solids, sketches, cl.sources());
+            // ★ 选中集合里没有切割/圆角时，直接复用主循环缓存的**材料原始几何**，
+            //   不再 evaluateSelected 里重复 solid.mesh()/edges()/boxes()；有切割/圆角
+            //   才走那一套（需要在选中集合内部做布尔/倒圆）。
+            boolean needsCsg = false;
+            for (final UUID sid : cl.sources()) {
+                final Solid src = byId.get(sid);
+                if (src != null && (src.shape() instanceof Shape.Cut
+                        || src.shape() instanceof Shape.Fillet)) {
+                    needsCsg = true;
+                    break;
+                }
+            }
+            final List<SelectedEval> selected;
+            if (needsCsg) {
+                selected = evaluateSelected(solids, sketches, cl.sources());
+            } else {
+                selected = new ArrayList<>();
+                for (final UUID sid : cl.sources()) {
+                    final Solid src = byId.get(sid);
+                    final Eval raw = rawEvalById.get(sid);
+                    if (src == null || raw == null) {
+                        continue;
+                    }
+                    if (!(src.shape() instanceof Shape.Extrusion
+                            || src.shape() instanceof Shape.Revolution)) {
+                        continue;
+                    }
+                    final Sketch srcSk = src.resolve(sketches);
+                    final Vector3d pn = srcSk != null && srcSk.plane() != null
+                            ? srcSk.plane().normal() : null;
+                    selected.add(new SelectedEval(src, raw.boxes(), raw.edges(), raw.mesh(), pn,
+                            selectedBounds(raw.boxes(), raw.edges(), raw.mesh())));
+                }
+            }
             final List<double[]> allBoxes = new ArrayList<>();
             for (final SelectedEval se : selected) {
                 final double[] b = se.bounds();
@@ -1945,7 +1983,17 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 if (se.planeNormal() != null) {
                     viewNormal = cloneDirection(se.planeNormal(), rot).normalize();
                 }
-                out.add(new Placed(view, boxes, edges, mesh, viewNormal));
+                final Placed placed = new Placed(view, boxes, edges, mesh, viewNormal);
+                // ★ 特征图**不重建**：源空间建一次图，再按同一个仿射变换整体搬过来。
+                //   克隆的顶点数可能很大（40k 面），重建分桶/合并远比变换一遍贵。
+                final Features.Graph srcGraph = Features.ofMeshCached(src.id(), se.mesh());
+                final Features.Graph cloneGraph = Features.transform(srcGraph, clone.id(),
+                        p -> clonePoint(p, center, rot, cl.scale(),
+                                cl.tx(), cl.ty(), cl.tz()),
+                        d -> cloneDirection(d, rot),
+                        cl.scale());
+                Features.put(placed, cloneGraph);
+                out.add(placed);
             }
         }
         // ★ **镜像/阵列取"拉伸+切割之后、圆角之前"的几何** ✓

@@ -274,8 +274,11 @@ public final class SketchRenderer {
         final double sketchBarScale = wppBar > 0.0
                 ? Math.max(0.6, Math.min(10.0, (3.0 * wppBar) / BAR_WIDTH_HALF))
                 : 1.0;
-        // ★ 模型视图：每帧更新"面/棱/点"的悬停拾取 ✓（画草图时不拾取模型面 ✓）
-        if (!sketching) {
+        // ★ 模型视图：只有**模型模式**才需要面/棱/点的悬停拾取 ✓
+        //   以前普通游戏里也每帧构建所有实体的 Features 特征图（大模型/40k 多边形
+        //   镜像体在进世界时就会被完整分桶合并 ⇒ 加载明显变慢、平时也占 CPU）。
+        //   模型模式的按钮/树/草图都在 ModelMode 内，普通游戏不需要这份数据。
+        if (!sketching && com.ovo.sablestopnow.client.model.ModelMode.isOn()) {
             com.ovo.sablestopnow.client.model.FeatureHover.update(mc);
         } else {
             com.ovo.sablestopnow.client.model.FeatureHover.clear();

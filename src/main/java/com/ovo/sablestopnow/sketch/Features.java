@@ -212,7 +212,7 @@ public final class Features {
         if (!a.planar() || !b.planar()) {
             return false;
         }
-        if (a.normal().dot(b.normal()) < 1.0 - 1.0e-9) {
+        if (a.normal().dot(b.normal()) < DOMINANT_DOT) {
             return false;
         }
         final double da = a.normal().dot(a.origin());

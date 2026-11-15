@@ -104,12 +104,10 @@ public class PagedRow extends Container {
         next.visible = arrows;
 
         final int count = Math.min(per, items.size() - page * per);
-        final int rowW = count * itemW + Math.max(0, count - 1) * gap;
-        final int area = avail - (arrows ? 2 * (arrowW + gap) : 0);
+        // 用户要求：不需要分页时所有按键**靠左**；分页时也从左箭头后开始靠左排。
         final int startX = arrows
                 ? parent.innerX() + arrowW + gap
-                        + Math.max(0, (area - rowW) / 2)
-                : parent.innerX() + Math.max(0, (avail - rowW) / 2);
+                : parent.innerX();
         final int y = parent.innerY() + Math.max(0, (parent.innerH() - itemH) / 2);
         final int shift = (int) Math.round(slideOffset);
 

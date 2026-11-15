@@ -437,16 +437,70 @@ public class Button extends Widget {
         }
     }
 
+    /**
+     * 按像素宽度**逐字符换行**（中文没有空格；英文也允许在词中断开，
+     * 因为 36px 宽的键里 "Normal" 本来就放不下一行）。
+     * 最多 3 行，超出用 …。
+     */
+    private static java.util.List<String> wrapText(final UiContext ctx, final String text,
+                                                   final int maxW) {
+        final java.util.List<String> out = new java.util.ArrayList<>();
+        if (text == null || text.isEmpty()) {
+            return out;
+        }
+        final StringBuilder line = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            final char ch = text.charAt(i);
+            final String candidate = line.toString() + ch;
+            if (line.length() > 0 && ctx.textW(candidate) > maxW) {
+                out.add(line.toString());
+                line.setLength(0);
+                if (ch == ' ') {
+                    continue;
+                }
+            }
+            line.append(ch);
+        }
+        if (line.length() > 0) {
+            out.add(line.toString());
+        }
+        if (out.size() > 3) {
+            final java.util.List<String> capped = new java.util.ArrayList<>(out.subList(0, 3));
+            capped.set(2, capped.get(2) + "…");
+            return capped;
+        }
+        return out;
+    }
+
+    // 36px 的 1px 像素画在缩放绘制时必须是**最近邻**，否则 1px 线会被线性过滤糊掉
+    private static final java.util.Set<ResourceLocation> CRISP_DONE = new java.util.HashSet<>();
+
+    private static void ensureCrisp(@Nullable final ResourceLocation texture) {
+        if (texture == null || !CRISP_DONE.add(texture)) {
+            return;
+        }
+        try {
+            final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+            if (mc != null) {
+                mc.getTextureManager().getTexture(texture).setFilter(false, false);
+            }
+        } catch (final Throwable ignored) {
+            // 拿不到纹理管理器时保持默认过滤，不影响绘制
+        }
+    }
+
     /** 画当前帧图标（横排 / 竖排共用）✓。 */
     private void renderIcon(final GuiGraphics g, final int ix, final int iy) {
         if (!iconFrames.isEmpty()) {
             // 多张独立贴图（每帧 16×16 基准 ✓ 与 UiDraw.icon 同一约定）
             final int idx = iconIdle ? iconFrames.size() - 1 : iconFrameIndex(iconFrames.size());
+            ensureCrisp(iconFrames.get(idx));
             UiDraw.iconFrame(g, iconFrames.get(idx), ix, iy, iconSize,
                     0.0f, 0.0f, 16, 16, 16, 16, 0xFFFFFFFF);
         } else if (iconSheet != null && sheetFrameCount > 0
                 && sheetFrameW > 0 && sheetFrameH > 0) {
             // 单张横向 sheet：静止态用最后一帧（完成态），悬停时从第 0 帧开始演示
+            ensureCrisp(iconSheet);
             final int idx = iconIdle ? sheetFrameCount - 1 : iconFrameIndex(sheetFrameCount);
             UiDraw.iconFrame(g, iconSheet, ix, iy, iconSize,
                     (float) (idx * sheetFrameW), 0.0f,
@@ -490,30 +544,33 @@ public class Button extends Widget {
         final String text = raw();
         final int normalText = !enabled ? th.textDisabled : (textColor == 0 ? th.text : textColor);
 
-        // ★ 竖向：图标在上、文字在下、整体居中
+        // ★ 竖向：图标**贴顶**、文字在下方按宽度换行（每行居中）
         if (vertical) {
-            final int lineH = text.isEmpty() ? 0 : ctx.lineH();
-            final int blockH = (hasIcon() ? iconSize : 0)
-                    + (hasIcon() && !text.isEmpty() ? gap : 0) + lineH;
-            int iy = y + Math.max(1, (h - blockH) / 2);
+            final int maxW = Math.max(8, w - th.padX * 2);
+            final java.util.List<String> lines = wrapText(ctx, text, maxW);
+            final int lineH = ctx.lineH();
+            int iy;
             if (hasIcon()) {
+                iy = y + 2;
                 final int ix = x + (w - iconSize) / 2;
                 renderIcon(g, ix, iy);
-                iy += iconSize + (text.isEmpty() ? 0 : gap);
+                iy += iconSize + (lines.isEmpty() ? 0 : gap);
+            } else {
+                // 纯文字键（例如“删除配合”）在高度里居中
+                iy = y + Math.max(2, (h - lines.size() * lineH) / 2);
             }
-            if (!text.isEmpty()) {
-                final String shown = UiDraw.ellipsize(
-                        ctx.font, text, w - th.padX * 2, th.fontScale);
-                final int tw = ctx.textW(shown);
+            for (final String line : lines) {
+                final int tw = ctx.textW(line);
                 final int tx = x + (w - tw) / 2;
-                UiDraw.text(g, ctx.font, shown, tx, iy, normalText, th.fontScale, false);
+                UiDraw.text(g, ctx.font, line, tx, iy, normalText, th.fontScale, false);
                 if (progress > 0.0f && alpha > 0.01f) {
                     final int swept = Math.round(w * progress);
                     UiDraw.scissor(g, x, y, swept, h);
-                    UiDraw.text(g, ctx.font, shown, tx, iy,
+                    UiDraw.text(g, ctx.font, line, tx, iy,
                             UiDraw.fade(th.sweepText, alpha), th.fontScale, false);
                     UiDraw.unscissor(g);
                 }
+                iy += lineH;
             }
             return;
         }

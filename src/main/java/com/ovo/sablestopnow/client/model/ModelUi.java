@@ -256,7 +256,7 @@ public final class ModelUi {
                 // ★ 用户要求：特征按键改成**竖向长方形**（上动图、下文字），
                 //   一排排不下就用 < > 翻页；动图只在鼠标悬停时播放。
                 final com.ovo.sablestopnow.client.gui.lib.PagedRow pager =
-                        new com.ovo.sablestopnow.client.gui.lib.PagedRow(64, 54, 4, 14);
+                        new com.ovo.sablestopnow.client.gui.lib.PagedRow(36, 56, 3, 14);
                 pager.page(featurePage);
                 pager.onPageChanged(p -> featurePage = p);
 
@@ -389,9 +389,11 @@ public final class ModelUi {
                                             final boolean toggled) {
         final Button button = new Button(Component.translatable(labelKey), action);
         button.vertical();
-        button.size(64, 54);
-        button.iconSize(36);
-        button.gap = 3;
+        // 用户要求：按钮只 36px 宽；游戏 GUI scale=2 时 36 逻辑像素会变 72 物理像素，
+        // 所以图标按 18 逻辑像素画（=36 物理像素，与浏览器 1:1 预览一致）。
+        button.size(36, 56);
+        button.iconSize(18);
+        button.gap = 2;
         if (textureId != null) {
             button.sheet(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
                     "sablestopnow", "textures/gui/feature/" + textureId + ".png"),

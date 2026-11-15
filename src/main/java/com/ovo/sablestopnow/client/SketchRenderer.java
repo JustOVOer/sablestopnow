@@ -1899,28 +1899,39 @@ public final class SketchRenderer {
                     dv = DIM_OFFSET;
                 }
             }
-            // ★ SolidWorks：拖尺寸数字 ⇒ **整条尺寸线**（尺寸线本体 + 箭头 + 界线）跟着走 ✓
-            //   以前只有 HUD 数字在动，尺寸线还钉在原处（用户实测）。
-            //   做法：取"标签被拖到的位置相对默认锚点"的位移在**偏移方向**上的分量，加到偏移量上。
+            // ★ 拖动（修用户实测"一按下就瞬移到鼠标下方"✗）：
+            //   ① 基准必须取**端点中点** —— 不能取 d.anchorU/V ✗：
+            //      半径/直径的 anchor 是 "center + r + 20" 的旧屏幕式位置 ✗
+            //      ⇒ 一按下 perp 就差了 20 格 ⇒ 整条尺寸线瞬移 ✓（根因）
+            //   ② 拖动量取**绝对值**（原来在 DIM_OFFSET 上再加 perp ⇒ 按下瞬间
+            //      多跳一个偏移量 ✗）
+            //   ③ 尺寸线只沿**垂直于自身**的方向移动（SolidWorks ✓）：
+            //      数字可以沿线的方向滑动 ✓ 但界线始终垂直于尺寸线 ✓（不会变斜）
             final double[] labelOv =
                     com.ovo.sablestopnow.client.SketchHud.labelOverride(d.constraintIndex());
-            final double offLen = Math.hypot(du, dv);
-            if (labelOv != null && offLen > 1.0e-6) {
-                final double nx = du / offLen;
-                final double ny = dv / offLen;
-                final double perp = (labelOv[0] - d.anchorU()) * nx
-                        + (labelOv[1] - d.anchorV()) * ny;
-                du = nx * (offLen + perp);
-                dv = ny * (offLen + perp);
+            final double midU = (u1 + u2) * 0.5;
+            final double midV = (v1 + v2) * 0.5;
+            if (labelOv != null) {
+                final double offLen = Math.hypot(du, dv);
+                if (offLen > 1.0e-6) {
+                    final double nx = du / offLen;
+                    final double ny = dv / offLen;
+                    final double perp = (labelOv[0] - midU) * nx
+                            + (labelOv[1] - midV) * ny;
+                    du = nx * perp;
+                    dv = ny * perp;
+                }
             }
             // 尺寸线两端（几何点 + 偏移）✓
             final double a1 = u1 + du;
             final double b1 = v1 + dv;
             final double a2 = u2 + du;
             final double b2 = v2 + dv;
-            // ★ 发布尺寸线中点：HUD 把数字放在这里 ⇒ 永远处在两条界线之间 ✓
-            DIM_TEXT_ANCHORS.put(d.constraintIndex(),
-                    new double[] {(a1 + a2) * 0.5, (b1 + b2) * 0.5});
+            // ★ 发布数字的位置：拖动时**就是指针拖到的点**（数字跟手 ✓）；
+            //   没拖动时 = 尺寸线中点（两条界线之间 ✓）。
+            DIM_TEXT_ANCHORS.put(d.constraintIndex(), labelOv != null
+                    ? new double[] {labelOv[0], labelOv[1]}
+                    : new double[] {(a1 + a2) * 0.5, (b1 + b2) * 0.5});
             // 尺寸线本体
             seg3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2, white);
             drawn++;

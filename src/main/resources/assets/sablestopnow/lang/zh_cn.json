@@ -809,5 +809,11 @@
   "model.force.point": "施力点",
   "sablestopnow.net.invalid_packet": "无效的数据包",
   "sablestopnow.split.or": " 或 ",
-  "model.sketch.hint.orbit": "中键旋转  Ctrl+中键平移  滚轮缩放"
+  "model.sketch.hint.orbit": "中键旋转  Ctrl+中键平移  滚轮缩放",
+  "model.sketch.entity.line": "直线",
+  "model.sketch.entity.circle": "圆",
+  "model.sketch.entity.arc": "圆弧",
+  "model.sketch.entity.point": "点",
+  "model.sketch.entity.bezier": "贝塞尔",
+  "model.sketch.entities": "图元"
 }

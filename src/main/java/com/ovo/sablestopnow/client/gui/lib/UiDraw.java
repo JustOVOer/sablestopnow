@@ -428,6 +428,32 @@ public final class UiDraw {
     }
 
     /**
+     * 贴图图标的**任意子区域**（动图帧 / sprite sheet ✓）。
+     *
+     * <p>与 {@link #icon} 的区别：这里显式给 UV 与贴图尺寸 ⇒ 既可以从一张长图里取某一帧，
+     * 也可以画非 16×16 的独立帧 ✓（{@link Button} 的 {@code frames}/{@code sheet} 用它）。
+     *
+     * @param u      源图左上角 u（像素，= 帧号 × 帧宽）
+     * @param v      源图左上角 v（像素）
+     * @param srcW   源区域宽（像素 = 单帧宽）
+     * @param srcH   源区域高（像素 = 单帧高）
+     * @param texW   整张贴图宽（像素；sheet 时为 帧宽 × 帧数）
+     * @param texH   整张贴图高（像素）
+     */
+    public static void iconFrame(final GuiGraphics g, final ResourceLocation texture,
+                                 final int x, final int y, final int size,
+                                 final float u, final float v,
+                                 final int srcW, final int srcH,
+                                 final int texW, final int texH, final int tint) {
+        if (srcW <= 0 || srcH <= 0 || texW <= 0 || texH <= 0) {
+            return;
+        }
+        applyTint(tint);
+        g.blit(texture, x, y, size, size, u, v, srcW, srcH, texW, texH);
+        clearTint();
+    }
+
+    /**
      * **图集精灵**（方块贴图就是这种）按 size 画出来。
      *
      * <p>⚠ 与上面 {@link #icon} 的区别很关键：{@code icon} 画的是**独立贴图文件**

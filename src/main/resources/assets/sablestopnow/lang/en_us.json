@@ -809,5 +809,11 @@
   "model.force.point": "Force point",
   "sablestopnow.net.invalid_packet": "Invalid packet",
   "sablestopnow.split.or": " or ",
-  "model.sketch.hint.orbit": "MMB orbit - Ctrl+MMB pan - wheel zoom"
+  "model.sketch.hint.orbit": "MMB orbit - Ctrl+MMB pan - wheel zoom",
+  "model.sketch.entity.line": "Line",
+  "model.sketch.entity.circle": "Circle",
+  "model.sketch.entity.arc": "Arc",
+  "model.sketch.entity.point": "Point",
+  "model.sketch.entity.bezier": "Bezier",
+  "model.sketch.entities": "Entities"
 }

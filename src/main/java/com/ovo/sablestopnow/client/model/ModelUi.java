@@ -1066,11 +1066,56 @@ public final class ModelUi {
             com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch] tool={}", value);
             refreshLeftPanel();
         });
-        // ⚠ 不能用 FILL ✗：hboxFit 的比例缩放会跳过 FILL 子控件（源码 L164 ✓）
-        //   ⇒ 用确定宽度，让"放不下就缩"的机制真正作用到它 ✓（配合 Label 的自动短标签/缩字号 ✓）
-        button.prefW = 26;
+        // ⚠ 宽度不在这里定 ✗：调用方会按**完整标签**量宽后显式 size(...) ✓
+        //   （本轮需求 ⑤：图元按键要完整显示名称 ⇒ 由 buildToolRows 装箱 ✓）
         button.toggled = session.tool() == value;
         return button;
+    }
+
+    /**
+     * 把图元按键按**完整标签**的宽度装箱成若干行 ✓（本轮需求 ⑤）。
+     *
+     * <p>宽度算法与 {@code Button.measure} 完全一致（图标 + 间距 + 文本 + padX*2 + 2），
+     * 并把算出的宽度**显式写回**按钮 ⇒ "量宽"与"布局"同源，不会出现
+     * "量的时候放得下、画的时候却被压窄/进短标签"✗。
+     *
+     * <p>为什么不交给 hboxWrap 的 AUTO 高度 ✗：vbox 在布局**之前**读子控件的 wantH，
+     * 而 Container 没有 measure ⇒ AUTO 高恒为 0 ⇒ 折行会被压掉（本项目踩过 ✓）。
+     * ⇒ 自己装箱、每行显式 prefH=12，行数就是实际行数 ✓。
+     */
+    private static void buildToolRows(
+            final com.ovo.sablestopnow.client.gui.lib.Container body,
+            final java.util.List<Button> buttons) {
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final com.ovo.sablestopnow.client.gui.lib.UiTheme th =
+                com.ovo.sablestopnow.client.gui.lib.UiTheme.current();
+        // 用上一帧的实际内容宽（与 ScrollPane 布局同源）；首帧还没布过局 ⇒ 按左栏比例估一个
+        int avail = body == null ? 0 : body.innerW() - 4; // -4：给右侧滚动条留位
+        if (avail < 60) {
+            final int guiW = mc == null ? 640 : mc.getWindow().getGuiScaledWidth();
+            avail = Math.max(60, Math.min(160, Math.round(guiW * 0.26f)) - 14);
+        }
+        com.ovo.sablestopnow.client.gui.lib.Container line = null;
+        int used = 0;
+        for (final Button b : buttons) {
+            final String text = b.label == null ? "" : b.label.get().getString();
+            int natural = ((b.hasIcon() ? b.iconSize : 0)
+                    + (b.hasIcon() && !text.isEmpty() ? b.gap : 0)
+                    + (mc == null ? 24 : th.textW(mc.font, text)))
+                    + th.padX * 2 + 2;
+            natural = Math.max(24, natural);
+            final int want = Math.min(natural, avail); // 极窄面板：给到可用宽，文字省成省略号
+            if (line == null || (used > 0 && used + 3 + want > avail)) {
+                line = new com.ovo.sablestopnow.client.gui.lib.Container();
+                line.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hbox(0, 3);
+                line.prefH = 12;
+                body.add(line);
+                used = 0;
+            }
+            b.size(want, 12);
+            line.add(b);
+            used += (used > 0 ? 3 : 0) + want;
+        }
     }
 
     /** 求解器约束类型 → 名称 lang key ✓；**尺寸类**返回 null（列表里不重复列 ✓）。 */
@@ -4758,38 +4803,38 @@ public final class ModelUi {
                       }
                   }
             } else {
-                body.add(new Label(Component.translatable("model.sketch.tool.line")).color(0xFF8FA0D8));
+                // ★ 本轮 ⑤：这一组是**图元**按键（原来误用了"直线"当组标题 ✓ 一并改对）
+                body.add(new Label(Component.translatable("model.sketch.entities")).color(0xFF8FA0D8));
                 // ⚠ 工具按钮必须**每次重建都重新读一遍当前工具**来设置高亮，
                 // 而不是订阅：订阅写在建面板里的话，左栏每重建一次就多挂一条回调，
                 // 勾一下会发出 N 个包（配合编辑器那边踩过这个坑）。
-                final var row = new com.ovo.sablestopnow.client.gui.lib.Container();
-                // ⚠ 这里以前是普通 hbox ✗ + 子控件 FILL ✗ ⇒ free=0 时每个按钮分到 0 宽 ✗✓
-                //   （五种图元挤一行 ⇒ "文字遮盖/看不见" ✓）。
-                //   hboxFit：放不下先让控件 setCompact ✓ 再按比例缩 ✓ 且 Math.max(1, …) 保证永不 0 ✓
-                // 折行版 ✓：五种图元一行塞不下时**自动折到第二行** ✓ 而不是压到 0 宽 ✗；
-                // 高度由布局自己写回（prefH = AUTO ✓）⇒ 这里不需要知道会折几行 ✓
-                row.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hboxWrap(0, 3, 2);
-                // ★ 明确给**两行**高度 ✓：6 个 26px 按钮在窄左栏里必然折行 ✓
-                //   而自动换行只写 prefH、父 vbox 不一定当帧重读 ⇒ 第二行会被压掉 ✗（F9 报告里只看到 4 个 ✗）
-                //   ⇒ 这里写死两行高（比依赖时序稳 ✓ 一行时略空一点 ✓ 可接受 ✓）
-                row.prefH = 28;
-                row.add(sketchToolButton("model.sketch.tool.select",
+                // ★ 用户要求（本轮 ⑤）：**图元按键做宽一点，让它们能完整显示图元名称** ✓
+                //   以前每个按钮固定 26px ⇒ "选择/直线/矩形"被自动短标签压成一个字（"选/线/矩"✗），
+                //   "圆弧（圆心/起点/终点）"更是只剩一个"弧"✗。
+                //   ⇒ 现在按**完整标签**量宽度，再按左栏可用宽度**逐行装箱**：
+                //     每行是普通 hbox（固定宽 ⇒ 不压缩、不进短标签 ✓），放不下就换行 ✓。
+                //   为什么不用 hboxWrap 的 prefH=AUTO ✗：vbox 在它自己布局**之前**读 wantH，
+                //   而 Container 没有 measure ⇒ 读到 0 高 ⇒ 行会被压掉（F9 报告里的老问题）。
+                //   ⇒ 这里自己装箱、每行显式 prefH=12，行数 = 实际行数 ✓ 高度一定对 ✓。
+                final java.util.List<com.ovo.sablestopnow.client.gui.lib.Button> toolButtons =
+                        new java.util.ArrayList<>();
+                toolButtons.add(sketchToolButton("model.sketch.tool.select",
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.SELECT, session));
-                row.add(sketchToolButton("model.sketch.tool.line",
+                toolButtons.add(sketchToolButton("model.sketch.tool.line",
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.LINE, session));
-                row.add(sketchToolButton("model.sketch.tool.rectangle",
+                toolButtons.add(sketchToolButton("model.sketch.tool.rectangle",
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.RECTANGLE, session));
-                row.add(sketchToolButton("model.sketch.tool.circle",
+                toolButtons.add(sketchToolButton("model.sketch.tool.circle",
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.CIRCLE, session));
                 // 圆弧：三次点击（圆心 → 起点 → 终点）
-                row.add(sketchToolButton("model.sketch.tool.arc",
+                toolButtons.add(sketchToolButton("model.sketch.tool.arc",
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.ARC, session));
                 // ★ 需求 ⑤：**贝塞尔**（四次点击 P0 → C1 → P3 → C2 ✓ 两个手柄是辅助线 ✓）
-                row.add(sketchToolButton("model.sketch.tool.bezier",
+                toolButtons.add(sketchToolButton("model.sketch.tool.bezier",
                         com.ovo.sablestopnow.sketch.SketchSession.Tool.BEZIER, session));
-                  // ★ item 3：**文字**图元（两次点击拉矩形 ⇒ 弹出多行编辑框）✓
-                  row.add(sketchToolButton("model.sketch.tool.text",
-                          com.ovo.sablestopnow.sketch.SketchSession.Tool.TEXT, session));
+                // ★ item 3：**文字**图元（两次点击拉矩形 ⇒ 弹出多行编辑框）✓
+                toolButtons.add(sketchToolButton("model.sketch.tool.text",
+                        com.ovo.sablestopnow.sketch.SketchSession.Tool.TEXT, session));
                 // ★ **辅助线** ✓：按用户要求放在**图元按键**里 ✓ 且是**直接绘制**模式 ✓（不是转换 ✗）
                 //   开启后用直线工具画出来的图元**直接就是辅助线** ✓（虚线外观 ✓ 不计入轮廓/拉伸 ✓）
                 final var constructionTool = new com.ovo.sablestopnow.client.gui.lib.Button(
@@ -4801,10 +4846,9 @@ public final class ModelUi {
                                             : "model.sketch.construction_draw_off");
                             refreshLeftPanel();
                         });
-                constructionTool.prefW = 26;
                 constructionTool.toggled = session.constructionDraw();
-                row.add(constructionTool);
-                body.add(row);
+                toolButtons.add(constructionTool);
+                buildToolRows(body, toolButtons);
                 body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
                 // 几何约束：作用在**当前选中的图元**上（左栏「选择」工具点中的那个）。
                 // 校验在模型层（圆不能加水平/竖直），失败时给提示而不是静默无反应。
@@ -4931,7 +4975,7 @@ public final class ModelUi {
                             // ★ 明确给**两行**高度 ✓：6 个 26px 按钮在窄左栏里必然折行 ✓
                             //   而自动换行只写 prefH、父 vbox 不一定当帧重读 ⇒ 第二行会被压掉 ✗（F9 报告里只看到 4 个 ✗）
                             //   ⇒ 这里写死两行高（比依赖时序稳 ✓ 一行时略空一点 ✓ 可接受 ✓）
-                            row.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
+                            crow.prefH = com.ovo.sablestopnow.client.gui.lib.Widget.AUTO;
                             for (int ci = 0; ci < cands.size(); ci++) {
                                 final int index = ci;
                                 final var cb = new Button(

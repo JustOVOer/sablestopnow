@@ -29,6 +29,29 @@ public class Button extends Widget {
     @Nullable
     public ResourceLocation icon;
     public int iconSize = 10;
+    /**
+     * **动图序列**（逐帧独立贴图 ✓）。
+     *
+     * <p>用户要求（本轮 ④）：按键要能"插入动图序列" ✓。
+     * 帧按 {@link #iconFps} 循环播放；非空时优先于静态 {@link #icon} ✓。
+     * 每帧贴图按 16×16 基准缩放绘制（与 {@link UiDraw#icon} 同一约定 ✓）。
+     */
+    public java.util.List<ResourceLocation> iconFrames = java.util.List.of();
+    /** 动图播放速度（帧/秒）✓。 */
+    public double iconFps = 8.0;
+    /**
+     * **横向 sprite sheet**（单张贴图里一帧挨一帧 ✓）；非空时优先于 {@link #icon} ✓。
+     *
+     * <p>与 {@link #iconFrames} 二选一：序列是"多张独立 png"，sheet 是"一张长图"。
+     * 后者的好处是只需一个资源文件、不会因为帧数多而散落一堆 png ✓。
+     */
+    @Nullable
+    public ResourceLocation iconSheet;
+    public int sheetFrameW;
+    public int sheetFrameH;
+    public int sheetFrameCount;
+    /** 动图当前帧时钟（秒）✓。 */
+    private double iconClock;
     @Nullable
     public Runnable action;
     /** 右键回调（可选）。 */
@@ -91,6 +114,80 @@ public class Button extends Widget {
     public Button icon(@Nullable final ResourceLocation texture) {
         this.icon = texture;
         return this;
+    }
+
+    /** 图标边长（链式 ✓）。 */
+    public Button iconSize(final int px) {
+        this.iconSize = Math.max(1, px);
+        return this;
+    }
+
+    /**
+     * **自定义按键尺寸**（用户要求 ④ ✓）。
+     *
+     * <p>不写的话：宽按内容量、高 12；写 {@code -1}（{@link #AUTO}）恢复自动。
+     * 与 {@link Widget#size(int,int)} 完全同一语义，只是返回 {@link Button} 方便链式调用 ✓。
+     */
+    @Override
+    public Button size(final int width, final int height) {
+        super.size(width, height);
+        return this;
+    }
+
+    /**
+     * **插入动图序列**（多张独立贴图 ✓ 用户要求 ④）。
+     *
+     * @param frames 帧贴图（顺序即播放顺序；空表 = 关闭动图 ✓）
+     * @param fps    帧率（帧/秒；≤0 时保留原值 ✓）
+     */
+    public Button frames(final java.util.List<ResourceLocation> frames, final double fps) {
+        this.iconFrames = frames == null ? java.util.List.of() : java.util.List.copyOf(frames);
+        if (fps > 0.0) {
+            this.iconFps = fps;
+        }
+        this.iconClock = 0.0;
+        return this;
+    }
+
+    /** 插入动图序列（可变参数版 ✓）。 */
+    public Button frames(final double fps, final ResourceLocation... frames) {
+        return frames(java.util.Arrays.asList(frames), fps);
+    }
+
+    /**
+     * **插入 sprite sheet 动图**（单张横向长图 ✓ 用户要求 ④）。
+     *
+     * @param texture    长图（帧从左到右排）
+     * @param frameW     单帧宽（像素）
+     * @param frameH     单帧高（像素）
+     * @param frameCount 帧数（≤0 = 关闭 ✓）
+     * @param fps        帧率（帧/秒；≤0 时保留原值 ✓）
+     */
+    public Button sheet(final ResourceLocation texture, final int frameW, final int frameH,
+                        final int frameCount, final double fps) {
+        this.iconSheet = texture;
+        this.sheetFrameW = frameW;
+        this.sheetFrameH = frameH;
+        this.sheetFrameCount = Math.max(0, frameCount);
+        if (fps > 0.0) {
+            this.iconFps = fps;
+        }
+        this.iconClock = 0.0;
+        return this;
+    }
+
+    /** 是否有任何图标（静态 / 序列 / sheet）✓。 */
+    public boolean hasIcon() {
+        return icon != null || !iconFrames.isEmpty() || (iconSheet != null && sheetFrameCount > 0);
+    }
+
+    /** 当前应显示的动图帧下标 ✓。 */
+    private int iconFrameIndex(final int count) {
+        if (count <= 1) {
+            return 0;
+        }
+        final int idx = (int) Math.floor(iconClock * Math.max(0.1, iconFps));
+        return Math.floorMod(idx, count);
     }
 
     /** 命令名：让「点了没反应」在日志里能对上号。 */
@@ -249,11 +346,11 @@ public class Button extends Widget {
     @Override
     public void measure(final UiContext ctx) {
         int width = 0;
-        if (icon != null) {
+        if (hasIcon()) {
             width += iconSize;
         }
         if (!raw().isEmpty()) {
-            width += (icon != null ? gap : 0) + ctx.textW(raw());
+            width += (hasIcon() ? gap : 0) + ctx.textW(raw());
         }
         w = Math.max(minW, width + ctx.theme.padX * 2 + 2);
         h = Math.max(minH, prefH >= 0 ? prefH : ctx.lineH() + ctx.theme.padY * 2);
@@ -261,6 +358,10 @@ public class Button extends Widget {
 
     @Override
     public void update(final UiContext ctx, final double dt) {
+        // 动图只在"有图 + 允许动画"时走时钟（尊重"减少动画"设置 ✓）
+        if (hasIcon() && ctx.animations) {
+            iconClock += Math.max(0.0, dt);
+        }
         hover.to(ctx.isHovered(this) && enabled ? 1.0 : 0.0).tick(ctx.animations, dt);
         if (sweepClock >= 0.0) {
             sweepClock += ctx.animations ? dt : SWEEP_SECONDS + FADE_SECONDS + 1.0;
@@ -332,13 +433,29 @@ public class Button extends Widget {
         }
 
         final String text = raw();
-        int contentW = (icon != null ? iconSize : 0) + (!text.isEmpty() && icon != null ? gap : 0)
+        int contentW = (hasIcon() ? iconSize : 0) + (!text.isEmpty() && hasIcon() ? gap : 0)
                 + ctx.textW(text);
         int cx = x + (w - contentW) / 2;
         final int ty = textY(ctx, y, h);
         final int normalText = !enabled ? th.textDisabled : (textColor == 0 ? th.text : textColor);
-        if (icon != null) {
-            UiDraw.icon(g, icon, cx, y + (h - iconSize) / 2, iconSize, 0xFFFFFFFF);
+        if (hasIcon()) {
+            final int iy = y + (h - iconSize) / 2;
+            if (!iconFrames.isEmpty()) {
+                // 多张独立贴图（每帧 16×16 基准 ✓ 与 UiDraw.icon 同一约定）
+                final int idx = iconFrameIndex(iconFrames.size());
+                UiDraw.iconFrame(g, iconFrames.get(idx), cx, iy, iconSize,
+                        0.0f, 0.0f, 16, 16, 16, 16, 0xFFFFFFFF);
+            } else if (iconSheet != null && sheetFrameCount > 0
+                    && sheetFrameW > 0 && sheetFrameH > 0) {
+                // 单张横向 sheet：u 随帧号平移 ✓（贴图宽 = 帧宽 × 帧数）
+                final int idx = iconFrameIndex(sheetFrameCount);
+                UiDraw.iconFrame(g, iconSheet, cx, iy, iconSize,
+                        (float) (idx * sheetFrameW), 0.0f,
+                        sheetFrameW, sheetFrameH,
+                        sheetFrameW * sheetFrameCount, sheetFrameH, 0xFFFFFFFF);
+            } else if (icon != null) {
+                UiDraw.icon(g, icon, cx, iy, iconSize, 0xFFFFFFFF);
+            }
             cx += iconSize + (text.isEmpty() ? 0 : gap);
         }
         if (!text.isEmpty()) {

@@ -123,6 +123,33 @@ public final class SketchHud {
     }
 
     /**
+     * 这条尺寸标签**此刻**所在的平面 uv ✓（拖动开始时用来记"抓取偏移"✓）。
+     *
+     * <p>为什么需要它 ✗✓：用户实测"按住拖动尺寸时，尺寸会先瞬移到鼠标下方"✗ ——
+     * 根因是拖动只记了"鼠标现在在哪"，而没有记"按下的那一点相对标签中心偏了多少"，
+     * 再加上尺寸线偏移是从 {@code Dimension.anchorU/V} 重算的（半径尺寸的 anchor 还带着
+     * {@code +20} 的旧屏幕式偏移 ✗）⇒ 一按下就按整段差值瞬移。
+     * ⇒ 按下时先取**当前标签位置**，之后 {@code override = 标签位置 + (鼠标 - 按下鼠标)}
+     * 1:1 跟手，且首帧位移恰好为 0 ✓。
+     */
+    @Nullable
+    public static double[] labelUvOf(final int constraintIndex) {
+        final com.ovo.sablestopnow.sketch.SketchSession session =
+                SketchClient.mode().session();
+        final com.ovo.sablestopnow.sketch.Sketch work = session == null ? null
+                : session.working();
+        if (work == null || constraintIndex < 0) {
+            return null;
+        }
+        for (final var d : com.ovo.sablestopnow.sketch.SketchMeasure.existingDimensions(work)) {
+            if (d.constraintIndex() == constraintIndex) {
+                return labelUv(d);
+            }
+        }
+        return null;
+    }
+
+    /**
      * 约束被删除后**搬移**以“约束下标”为键的 HUD 状态 ✓
      *
      * <p>删除一条约束会让后面所有下标前移一位；不搬的话拖拽覆盖位置会套到别的尺寸上，
@@ -325,6 +352,30 @@ public final class SketchHud {
         hudLogMs = now;
     }
 
+    // ---- 诊断：HUD 之外的每帧同步/悬停绘制（1 Hz）----
+    private static long hudSyncNs;
+    private static int hudSyncFrames;
+    private static long hudSyncLogMs;
+
+    private static void perfHudSync(final long ns) {
+        hudSyncNs += ns;
+        hudSyncFrames++;
+        final long now = System.currentTimeMillis();
+        if (now - hudSyncLogMs < 1000L) {
+            return;
+        }
+        if (hudSyncFrames > 0) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[perf] hudSync={}ms frames={}",
+                    String.format(java.util.Locale.ROOT, "%.2f",
+                            hudSyncNs / 1.0e6 / hudSyncFrames),
+                    hudSyncFrames);
+        }
+        hudSyncNs = 0L;
+        hudSyncFrames = 0;
+        hudSyncLogMs = now;
+    }
+
     private SketchHud() {
     }
 
@@ -352,6 +403,10 @@ public final class SketchHud {
         drawConstraintGlyphs(event.getGuiGraphics(), mc);
         final long huGlyph = System.nanoTime();
         perfHud(huDim - hu0, huPrev - huDim, huGlyph - huPrev);
+        // ★ 卡顿排查（本轮 ⑥）：上面只统计"画草图覆盖层"，这里再统计
+        //   **每帧同步 + 悬停名称 + 原点坐标轴** —— 它们原来在 perf 之外，
+        //   若这里数值大，说明卡顿来自"每帧同步"而不是绘制 ✓
+        final long hs0 = System.nanoTime();
         // ★ 需求 (4)：左栏候选按钮随**指针预览**实时联动 ✓（只改 toggled ✓ 不重建 ✓）
         com.ovo.sablestopnow.client.model.ModelUi.syncSmartCandidateToggles();
         // ★ 草图 → 树 的高亮同步 ✓（用户要求"草图和右侧树状图联动" ✓ 反方向 ✓）
@@ -360,6 +415,7 @@ public final class SketchHud {
         drawHoverName(event.getGuiGraphics(), mc);
         // ★ 需求 ⑥：**原点 + 坐标轴箭头**（SolidWorks 风格 ✓ 常驻显示 ✓）
         drawOriginAxes(event.getGuiGraphics(), mc);
+        perfHudSync(System.nanoTime() - hs0);
         // ★ 诊断 ✓：把"上次吸附→约束的判定"打出来（只在变化时打 ✓ 不刷屏 ✓）
         //   用户实测"圆弧端点固定仍未做"✗ ⇒ 这行会告诉我们：有没有吸到弧端点、px/py 是不是有效变量 ✓
         final String snapDiag = SketchSession.lastSnapDiag;
@@ -469,6 +525,12 @@ public final class SketchHud {
         }
         final org.joml.Vector3d tmp = new org.joml.Vector3d();
         int shown = 0;
+        // ★ 用户要求（本轮 ②）：指针压在某条尺寸数字上（下一次点击会判定在它上面）
+        //   ⇒ 那个数字变黄 ✓。用**上一帧**登记的命中区 —— 与点击/双击判定完全同源 ✓
+        //   （pickLabel 的容差 14px 与 ModelInput.tryDimensionEdit / 拖拽一致 ✓）
+        final LabelHit hoverHit = pickLabel(
+                com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd(),
+                com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd(), 14.0);
         LABEL_HITS.clear(); // 每帧重建 ✓ 相机一动就跟着更新 ⇒ 不会点到旧位置 ✗
         // 参考尺寸先画（在下面），已有尺寸后画（盖在上面）—— 已有的是"更硬"的信息
         final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.Dimension> all =
@@ -505,12 +567,15 @@ public final class SketchHud {
             // ⚠ 踩坑记录 ✗✓：这里最初用了 `lineArgb`，但它在本行**之后**才定义 ⇒
             //   javac 报的是"找不到符号"，读起来像"方法不存在"，很容易被带偏 ✗
             //   ⇒ 颜色**就地算**（按驱动/从动 ✓ 与设计文档的配色表一致 ✓）。
+            final boolean hovered = hoverHit != null
+                    && hoverHit.constraintIndex() == d.constraintIndex();
             if (d.labelKey() != null && d.labelKey().contains("angle")
                     && d.constraintIndex() >= 0
                     && d.constraintIndex() < working.constraints().size()) {
                 final int[] av = working.constraints().get(d.constraintIndex()).operands();
                 final int angArgb = d.driving() ? 0xFFE6E6E6 : 0xFF8C93A8;
                 drawAngularDimension(g, working, sub, mc, tmp, av, screen, angArgb,
+                        hovered ? 0xFFFFCC55 : angArgb,
                         d.value(), d.constraintIndex(), d.driving());
                 continue; // 不再走下面那套线性画法 ✓
             }
@@ -673,7 +738,7 @@ public final class SketchHud {
             final String number = String.format(java.util.Locale.ROOT, "%.3f",
                     Math.abs(d.value()));
             final String text = d.driving() ? number : "(" + number + ")";
-            final int argb;
+            int argb;
             if (!d.driving()) {
                 argb = 0xFF8C93A8;                       // 参考尺寸：灰
             } else if (Math.abs(Math.abs(d.measured()) - Math.abs(d.value())) > 1.0e-4) {
@@ -683,11 +748,14 @@ public final class SketchHud {
             } else {
                 argb = 0xFFE6E6E6;                       // 正常
             }
+            // ★ 用户要求（本轮 ②）：下一次点击会判定在这条尺寸上 ⇒ 数字变黄
+            //   只改文字，不碰 3D 尺寸线/箭头（几何不该因为悬停而变色）
+            final int textArgb = hovered ? 0xFFFFCC55 : argb;
             // 文字实际落点 ✓（画与双击命中共用 ✓ —— 否则"看到的位置点不中"✗）
             final double textX = screen[0] + (shortLine ? lineDirX * 24.0 : 0.0);
             final double textY = screen[1] + (shortLine ? lineDirY * 24.0 : 0.0);
             com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, mc.font, text,
-                    (int) textX, (int) textY, argb, 1.0f, true);
+                    (int) textX, (int) textY, textArgb, 1.0f, true);
             // 登记屏幕位置 ✓ 供双击命中（一处投影 ✓ 两处使用 ✓）
             LABEL_HITS.add(new LabelHit(d.constraintIndex(), d.driving(), textX, textY));
             shown++;
@@ -750,9 +818,10 @@ public final class SketchHud {
         if (shown.labelKey() != null && shown.labelKey().contains("angle")
                 && shown.vars() != null && shown.vars().length >= 8 && psub != null) {
             final org.joml.Vector3d angTmp = new org.joml.Vector3d();
+            final int angPreviewArgb = session.lockedVariant() >= 0 ? 0xEEFFCC55 : 0x99FFCC55;
             drawAngularDimension(g, working, psub, mc, angTmp, shown.vars(),
                     new double[] {guiX(mc) + OFFSET_X, guiY(mc) + OFFSET_Y},
-                    session.lockedVariant() >= 0 ? 0xEEFFCC55 : 0x99FFCC55,
+                    angPreviewArgb, angPreviewArgb,
                     shown.value(), -1, true);
             return; // 不再走下面的线性预览 ✓
         }
@@ -919,13 +988,19 @@ public final class SketchHud {
         null, "horizontal", "vertical", "parallel", "perpendicular",
         "equal", "midpoint", "coincident", "fixed"};
 
-    @Nullable
-    private static net.minecraft.resources.ResourceLocation glyphTexture(final int glyph) {
-        if (glyph < 1 || glyph >= GLYPH_FILES.length || GLYPH_FILES[glyph] == null) {
-            return null;
+    // ★ 性能：贴图位置**只构造一次**（原来每帧每图标都 fromNamespaceAndPath
+    //   ⇒ 每帧 10 个对象 + 字符串拼接；虽然不大，但这是纯静态数据，没必要重复 ✓）
+    private static final net.minecraft.resources.ResourceLocation[] GLYPH_TEXTURES =
+            new net.minecraft.resources.ResourceLocation[GLYPH_FILES.length];
+
+    static {
+        for (int i = 1; i < GLYPH_FILES.length; i++) {
+            if (GLYPH_FILES[i] != null) {
+                GLYPH_TEXTURES[i] = net.minecraft.resources.ResourceLocation
+                        .fromNamespaceAndPath("sablestopnow",
+                                "textures/gui/constraint/" + GLYPH_FILES[i] + ".png");
+            }
         }
-        return net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("sablestopnow",
-                "textures/gui/constraint/" + GLYPH_FILES[glyph] + ".png");
     }
 
     private static void drawConstraintGlyphs(final net.minecraft.client.gui.GuiGraphics g,
@@ -954,6 +1029,8 @@ public final class SketchHud {
         final org.joml.Vector3d tmp = new org.joml.Vector3d();
         final java.util.Map<Integer, Integer> perEntity = new java.util.HashMap<>();
         final java.util.List<com.ovo.sablestopnow.sketch.Sketch.Constraint> cons = work.constraints();
+        // ★ 用户要求（本轮 ③）：悬停在约束图标上 ⇒ 指针旁显示约束名称（当前语言 ✓）
+        GlyphHit hoveredHit = null;
         for (int i = 0; i < cons.size(); i++) {
             final int glyph = glyphOf(cons.get(i).kind());
             if (glyph == 0) {
@@ -981,20 +1058,27 @@ public final class SketchHud {
             final double mdx = com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() - gx;
             final double mdy = com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() - gy;
             final boolean hoveredGlyph = mdx * mdx + mdy * mdy <= 56.25;
+            if (hoveredGlyph) {
+                hoveredHit = new GlyphHit(i, glyph, gx, gy);
+            }
             // ★ 用户要求：**正方形**图标 + 正方形底 + 再小一点；选中态也用同一套图标 ✓
-            final float half = 6.5f; // 1313 底板（用户指定：阴影面积再小一点）
+            // ★ 性能（本轮 ⑥）：底板原来用 UiVector.roundRect —— 它逐像素算 SDF、每行一次
+            //   fill ⇒ 一个 13×13 图标要 30+ 次单独 fill，每帧 10 个图标就是 4~10ms
+            //   （[perf] hud glyph=… ✓ 已实测）。方块底板只需要**一次** fill ✓
+            //   选中描边同理改成 4 条 1px 线 ⇒ 颜色/尺寸/观感完全不变，代价降一个量级 ✓
+            final int half = 6; // 13×13 底板（用户指定：阴影面积再小一点）
+            final int bx = (int) Math.round(gx) - half;
+            final int by = (int) Math.round(gy) - half;
             final int bg = picked ? 0xCC8A6A1E
                     : (hoveredGlyph ? 0xCC6B8E23 : 0x99101420);
-            com.ovo.sablestopnow.client.gui.lib.UiVector.roundRect(g,
-                    (float) gx - half, (float) gy - half, half * 2f, half * 2f, 1.5f, bg);
+            com.ovo.sablestopnow.client.gui.lib.UiDraw.rect(g, bx, by, 13, 13, bg);
             if (picked) {
-                com.ovo.sablestopnow.client.gui.lib.UiVector.roundRectOutline(g,
-                        (float) gx - half, (float) gy - half, half * 2f, half * 2f, 1.5f,
-                        1.0f, 0xFFFFCC55);
+                com.ovo.sablestopnow.client.gui.lib.UiDraw.rectOutline(
+                        g, bx, by, 13, 13, 0xFFFFCC55, 1);
             }
-            final net.minecraft.resources.ResourceLocation tex = glyphTexture(glyph);
+            final net.minecraft.resources.ResourceLocation tex = GLYPH_TEXTURES[glyph];
             if (tex != null) {
-                // ⚠ 必须用 **8 参数** blit 并显式给贴图尺寸（8×8）：
+                // ⚠ 必须用 **8 参数** blit 并显式给贴图尺寸（12×12）：
                 //   6 参数版本假设贴图是 256×256 图集 ⇒ 只采样左上角一小块
                 //   ⇒ 看起来"只有圆盘、没有图标"（用户实测）。
                 g.blit(tex, (int) Math.round(gx - 6.0), (int) Math.round(gy - 6.0),
@@ -1002,6 +1086,57 @@ public final class SketchHud {
             }
             GLYPH_HITS.add(new GlyphHit(i, glyph, gx, gy));
         }
+        if (hoveredHit != null) {
+            drawGlyphName(g, mc, hoveredHit.glyphKind());
+        }
+    }
+
+    /** 约束图标 → 当前语言名称的 lang key ✓（与模型树里的关系名同一套 ✓）。 */
+    @Nullable
+    private static String glyphNameKey(final int glyph) {
+        return switch (glyph) {
+            case com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_HORIZONTAL ->
+                    "model.relation.horizontal";
+            case com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_VERTICAL ->
+                    "model.relation.vertical";
+            case com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_PARALLEL ->
+                    "model.relation.parallel";
+            case com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_PERPENDICULAR ->
+                    "model.relation.perpendicular";
+            case com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_EQUAL ->
+                    "model.relation.equal";
+            case com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_MIDPOINT ->
+                    "model.relation.midpoint";
+            case com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_COINCIDENT ->
+                    "model.relation.coincident";
+            case com.ovo.sablestopnow.client.gui.lib.UiVector.GLYPH_FIXED ->
+                    "model.relation.fixed";
+            default -> null;
+        };
+    }
+
+    /** 指针旁显示约束名称 ✓（用户要求：悬停约束图标能看到它是什么关系 ✓）。 */
+    private static void drawGlyphName(final net.minecraft.client.gui.GuiGraphics g,
+                                      final Minecraft mc, final int glyph) {
+        final String key = glyphNameKey(glyph);
+        if (key == null) {
+            return;
+        }
+        final String name = Component.translatable(key).getString();
+        final int sw = mc.getWindow().getGuiScaledWidth();
+        final int sh = mc.getWindow().getGuiScaledHeight();
+        final int tw = mc.font.width(name);
+        int tx = (int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() + 12;
+        int ty = (int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() + 14;
+        tx = Math.max(4, Math.min(tx, sw - tw - 8));
+        if (ty + 12 > sh) {
+            ty = (int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() - 20;
+        }
+        com.ovo.sablestopnow.client.gui.lib.UiDraw.rect(g, tx - 3, ty - 2, tw + 6, 12, 0xE0101420);
+        com.ovo.sablestopnow.client.gui.lib.UiDraw.rectOutline(
+                g, tx - 3, ty - 2, tw + 6, 12, 0xFF6B8E23, 1);
+        com.ovo.sablestopnow.client.gui.lib.UiDraw.text(
+                g, mc.font, name, tx, ty, 0xFFFFCC55, 1.0f, true);
     }
 
     /** 求解器约束类型 → 字形常量 ✓；**尺寸类**返回 0（不画图标 ✓）。 */
@@ -1177,13 +1312,15 @@ public final class SketchHud {
                 break;
             }
         }
-        final String base = switch (hovered.kind()) {
-            case LINE -> "直线";
-            case CIRCLE -> "圆";
-            case ARC -> "圆弧";
-            case POINT -> "点";
-            case BEZIER -> "贝塞尔";
-        };
+        // ★ 所有文字都进 lang（用户上一轮要求"务必排查所有"）——
+        //   这里原来是硬编码中文，英文语言下会混出中文 ✓ 已改成 lang key ✓
+        final String base = Component.translatable(switch (hovered.kind()) {
+            case LINE -> "model.sketch.entity.line";
+            case CIRCLE -> "model.sketch.entity.circle";
+            case ARC -> "model.sketch.entity.arc";
+            case POINT -> "model.sketch.entity.point";
+            case BEZIER -> "model.sketch.entity.bezier";
+        }).getString();
         final String label = base + same;
         final int tx = (int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseXd() + 14;
         final int ty = (int) com.ovo.sablestopnow.client.gui.lib.Ui.mouseYd() - 20;
@@ -1218,7 +1355,7 @@ public final class SketchHud {
                                              final dev.ryanhcode.sable.sublevel.ClientSubLevel sub,
                                              final Minecraft mc, final org.joml.Vector3d tmp,
                                              final int[] v, final double[] labelScreen,
-                                             final int argb, final double value,
+                                             final int argb, final int textArgb, final double value,
                                              final int hitIndex, final boolean driving) {
         if (v == null || v.length < 8) {
             return;
@@ -1294,7 +1431,7 @@ public final class SketchHud {
         final double angTx = ox + Math.cos(midA) * (r + 12.0);
         final double angTy = oy + Math.sin(midA) * (r + 12.0);
         com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, Minecraft.getInstance().font, angText,
-                (int) angTx, (int) angTy, argb, 1.0f, true);
+                (int) angTx, (int) angTy, textArgb, 1.0f, true);
         // ★ 登记"可双击改值"的命中区 ✓（与线性尺寸同一套：**画与命中共用同一个位置** ✓
         //   否则会出现"看到的位置点不中" ✗ —— 这类问题用户实测反馈过 ✓）
         // 预览（hitIndex < 0）不登记命中区 ✓ —— 预览还没落约束，点了也没有对象可改 ✓

@@ -109,6 +109,16 @@ public final class ModelInput {
 
     /** 正在拖动的尺寸标签（约束下标 ✓ -1 = 没在拖 ✓）。 */
     private static int draggingDimLabel = -1;
+    /**
+     * 拖动尺寸时的**抓取偏移**（平面 uv ✓）。
+     *
+     * <p>修用户实测"按住拖动尺寸时，尺寸会先瞬移到鼠标下方"✗：
+     * 原来只记"鼠标当前在哪"⇒ 一按下标签中心就跳到指针位置（最多 14px，且半径尺寸的
+     * 旧 anchor 让它跳得更远）。现在按下时记下"标签位置 − 指针位置"，
+     * 之后 {@code 标签 = 指针 + 抓取偏移} ⇒ 首帧位移恰好为 0 ✓ 之后 1:1 跟手 ✓。
+     */
+    private static double draggingDimGrabU;
+    private static double draggingDimGrabV;
 
     /** 拖动尺寸标签：按住期间把指针的平面 uv 写成标签覆盖位置 ✓（松手结束 ✓）。 */
     private static void tickDimLabelDrag(final long window, final Minecraft mc) {
@@ -123,8 +133,9 @@ public final class ModelInput {
         }
         final double[] uv = com.ovo.sablestopnow.client.SketchClient.cursorUv();
         if (uv != null) {
+            // ★ 加"抓取偏移" ⇒ 按下那一点不会瞬移到指尖 ✓（1:1 跟手 ✓）
             com.ovo.sablestopnow.client.SketchHud.setLabelOverride(
-                    draggingDimLabel, uv[0], uv[1]);
+                    draggingDimLabel, uv[0] + draggingDimGrabU, uv[1] + draggingDimGrabV);
         }
     }
 
@@ -648,6 +659,18 @@ public final class ModelInput {
                         dimGuiX(mc), dimGuiY(mc), 14.0);
                 if (grab != null && grab.constraintIndex() >= 0 && grab.driving()) {
                     draggingDimLabel = grab.constraintIndex();
+                    // ★ 记下"标签位置 − 指针位置"（单位都是平面 uv ✓）：
+                    //   拖动第一帧 override = 指针 + 这个偏移 = **标签原地** ⇒ 不瞬移 ✓
+                    final double[] cursor = com.ovo.sablestopnow.client.SketchClient.cursorUv();
+                    final double[] label = com.ovo.sablestopnow.client.SketchHud
+                            .labelUvOf(draggingDimLabel);
+                    if (cursor != null && label != null) {
+                        draggingDimGrabU = label[0] - cursor[0];
+                        draggingDimGrabV = label[1] - cursor[1];
+                    } else {
+                        draggingDimGrabU = 0.0;
+                        draggingDimGrabV = 0.0;
+                    }
                     return; // 交给 tick 里的拖动处理 ✓ 不放置新尺寸 ✓
                 }
             }

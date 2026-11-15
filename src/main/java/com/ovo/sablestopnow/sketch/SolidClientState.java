@@ -89,7 +89,7 @@ public final class SolidClientState {
     private record BodyCache(String sig, List<Solid.Placed> placed) {
     }
 
-    public static List<Solid.Placed> placed(final ResourceLocation dimension) {
+    public static synchronized List<Solid.Placed> placed(final ResourceLocation dimension) {
         final List<Solid> solids = in(dimension);
         final List<Sketch> sketches = SketchClientState.in(dimension);
         // 草图签名：变量/约束/图元数量（与旧实现一致）

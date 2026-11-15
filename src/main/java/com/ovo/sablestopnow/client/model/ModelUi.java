@@ -4862,7 +4862,8 @@ public final class ModelUi {
                           String.format(java.util.Locale.ROOT, "%.2f", c.x),
                           String.format(java.util.Locale.ROOT, "%.2f", c.y),
                           String.format(java.util.Locale.ROOT, "%.2f", c.z));
-              }).color(0xFFB9C0EE));
+              }).color(0xFFB9C0EE).overflow(
+                      com.ovo.sablestopnow.client.gui.lib.Label.Overflow.WRAP));
               body.add(new Label(() -> Component.translatable("model.clone.state",
                       CloneTool.sourceCount())).color(0xFFFFFFFF));
               // ---- 平移 ----

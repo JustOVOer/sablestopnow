@@ -218,10 +218,16 @@ public final class ModelMode {
         graphPrepared = false;
         graphFailed = false;
         final int token = ++graphToken;
-        chat("model.prompt.graph_building");
-        com.ovo.sablestopnow.sketch.Features.clearFailures();
         final java.util.List<com.ovo.sablestopnow.sketch.Solid.Placed> placed =
                 com.ovo.sablestopnow.sketch.SolidClientState.placed(mc.level);
+        // 缓存都在（第二次进入）⇒ 不提示、不等待，直接进
+        if (com.ovo.sablestopnow.sketch.Features.isPrepared(placed)) {
+            graphPreparing = false;
+            setOn(true);
+            return;
+        }
+        chat("model.prompt.graph_building");
+        com.ovo.sablestopnow.sketch.Features.clearFailures();
         com.ovo.sablestopnow.sketch.Features.prepareAll(placed).whenComplete((v, t) -> {
             if (token != graphToken) {
                 return; // 被取消/重开

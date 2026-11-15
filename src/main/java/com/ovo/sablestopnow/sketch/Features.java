@@ -414,6 +414,19 @@ public final class Features {
             java.util.Collections.synchronizedSet(
                     java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
 
+    /** 是否所有图都已经在缓存里（进入模型视图时可跳过等待/提示）✓。 */
+    public static boolean isPrepared(final java.util.List<Solid.Placed> placedList) {
+        if (placedList == null) {
+            return true;
+        }
+        for (final Solid.Placed p : placedList) {
+            if (p != null && CACHE.get(p) == null && !FAILED.contains(p)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** 清空失败标记（进入模型视图重试时用）✓。 */
     public static void clearFailures() {
         FAILED.clear();

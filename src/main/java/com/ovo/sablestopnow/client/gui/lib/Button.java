@@ -464,9 +464,10 @@ public class Button extends Widget {
         if (line.length() > 0) {
             out.add(line.toString());
         }
-        if (out.size() > 3) {
-            final java.util.List<String> capped = new java.util.ArrayList<>(out.subList(0, 3));
-            capped.set(2, capped.get(2) + "…");
+        // 用户要求：只需要两行文字 ⇒ 高度只留两行
+        if (out.size() > 2) {
+            final java.util.List<String> capped = new java.util.ArrayList<>(out.subList(0, 2));
+            capped.set(1, capped.get(1) + "…");
             return capped;
         }
         return out;
@@ -546,7 +547,8 @@ public class Button extends Widget {
 
         // ★ 竖向：图标**贴顶**、文字在下方按宽度换行（每行居中）
         if (vertical) {
-            final int maxW = Math.max(8, w - th.padX * 2);
+            // 用户要求：文字要占满按钮宽度（不能因为左右内边距只剩 3 个字）
+            final int maxW = Math.max(8, w);
             final java.util.List<String> lines = wrapText(ctx, text, maxW);
             final int lineH = ctx.lineH();
             int iy;

@@ -567,7 +567,7 @@
   "model.prompt.sketch_done": "草图已提交",
   "model.sketch.tool.line": "直线",
   "model.sketch.tool.rectangle": "矩形",
-  "model.sketch.tool.arc": "圆弧（圆心/起点/终点）",
+  "model.sketch.tool.arc": "圆弧",
   "model.sketch.tool.dimension": "智能尺寸",
   "model.sketch.tool.dimension.short": "尺寸",
   "model.sketch.tool.circle": "圆",

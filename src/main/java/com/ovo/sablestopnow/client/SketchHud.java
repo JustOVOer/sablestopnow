@@ -1026,6 +1026,16 @@ public final class SketchHud {
         if (sub == null) {
             return;
         }
+        // 用户要求：约束图标只显示**当前选中图元**的约束（不选中就一个都不显示）
+        final java.util.Set<Integer> selectedVars = new java.util.HashSet<>();
+        for (final var picked : session.selection()) {
+            for (final int pv : picked.vars()) {
+                selectedVars.add(pv);
+            }
+        }
+        if (selectedVars.isEmpty()) {
+            return;
+        }
         final org.joml.Vector3d tmp = new org.joml.Vector3d();
         final java.util.Map<Integer, Integer> perEntity = new java.util.HashMap<>();
         final java.util.List<com.ovo.sablestopnow.sketch.Sketch.Constraint> cons = work.constraints();
@@ -1038,6 +1048,16 @@ public final class SketchHud {
             }
             final int[] ops = cons.get(i).operands();
             if (ops.length == 0) {
+                continue;
+            }
+            boolean related = false;
+            for (final int op : ops) {
+                if (selectedVars.contains(op)) {
+                    related = true;
+                    break;
+                }
+            }
+            if (!related) {
                 continue;
             }
             final com.ovo.sablestopnow.sketch.Sketch.Entity owner = entityOwning(work, ops[0]);

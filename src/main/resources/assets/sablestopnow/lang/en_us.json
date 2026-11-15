@@ -567,7 +567,7 @@
   "model.prompt.sketch_done": "Sketch submitted",
   "model.sketch.tool.line": "Line",
   "model.sketch.tool.rectangle": "Rectangle",
-  "model.sketch.tool.arc": "Arc (center/start/end)",
+  "model.sketch.tool.arc": "Arc",
   "model.sketch.tool.dimension": "Smart dimension",
   "model.sketch.tool.dimension.short": "Dim",
   "model.sketch.tool.circle": "Circle",

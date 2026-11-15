@@ -55,7 +55,7 @@ public final class ModelUi {
     public static final String LAYER_HUD = "model.hud";
 
     // 顶部栏：竖排特征键需要 36px 图标 + 文字 ⇒ 从 36 提高到 78
-    private static final int TOP_H = 78;
+    private static final int TOP_H = 66;
     private static final int TREE_W = 138;
     private static final int LEFT_W = 152;
 
@@ -256,7 +256,7 @@ public final class ModelUi {
                 // ★ 用户要求：特征按键改成**竖向长方形**（上动图、下文字），
                 //   一排排不下就用 < > 翻页；动图只在鼠标悬停时播放。
                 final com.ovo.sablestopnow.client.gui.lib.PagedRow pager =
-                        new com.ovo.sablestopnow.client.gui.lib.PagedRow(36, 56, 3, 14);
+                        new com.ovo.sablestopnow.client.gui.lib.PagedRow(36, 44, 3, 14);
                 pager.page(featurePage);
                 pager.onPageChanged(p -> featurePage = p);
 
@@ -391,7 +391,7 @@ public final class ModelUi {
         button.vertical();
         // 用户要求：按钮只 36px 宽；游戏 GUI scale=2 时 36 逻辑像素会变 72 物理像素，
         // 所以图标按 18 逻辑像素画（=36 物理像素，与浏览器 1:1 预览一致）。
-        button.size(36, 56);
+        button.size(36, 44);
         button.iconSize(18);
         button.gap = 2;
         if (textureId != null) {
@@ -756,37 +756,13 @@ public final class ModelUi {
         // ★ 用户要求：**左栏只显示选中图元的约束/尺寸** ✓（"左侧约束和尺寸建议只显示选中的图元的"）
         //   做法：把"选中图元用到的变量下标"收集起来，只保留**引用了其中任一变量**的尺寸 ✓
         //   （没有选中任何图元时照旧全部显示 ✓ 不然空草图会看起来"什么都没标"✗）
-        final var existingAll = com.ovo.sablestopnow.sketch.SketchMeasure.existingDimensions(live);
+        // 只收集选中图元用到的变量：下面所有约束/尺寸显示都按它过滤。
         final java.util.Set<Integer> pickedVars = new java.util.HashSet<>();
-        final var pickedEntities = session.selection();
-        for (final var pe : pickedEntities) {
+        for (final var pe : session.selection()) {
             for (final int pv : pe.vars()) {
                 pickedVars.add(pv);
             }
         }
-        final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.Dimension> existing;
-        if (pickedVars.isEmpty()) {
-            existing = existingAll;
-        } else {
-            final java.util.List<com.ovo.sablestopnow.sketch.SketchMeasure.Dimension> filtered =
-                    new java.util.ArrayList<>();
-            for (final var dd : existingAll) {
-                boolean hit = false;
-                final int ci = dd.constraintIndex();
-                if (ci >= 0 && ci < live.constraints().size()) {
-                    for (final int ov : live.constraints().get(ci).operands()) {
-                        if (pickedVars.contains(ov)) {
-                            hit = true;
-                        }
-                    }
-                }
-                if (hit) {
-                    filtered.add(dd);
-                }
-            }
-            existing = filtered;
-        }
-        final var refs = com.ovo.sablestopnow.sketch.SketchMeasure.referenceDimensions(live);
         // ★ 需求 3（参考 SolidWorks）：**多选时只列出"和选中图元相关"的可用约束** ✓
         //   原来把整张草图的建议关系全列出来 ✗（选什么都看到同一堆 ✗）
         //   ⇒ 先算"选中图元用到的变量"，再只保留**引用了其中任一变量**的关系 ✓
@@ -895,6 +871,20 @@ public final class ModelUi {
             if (nameKey == null) {
                 continue; // 尺寸类 ✓ 上面已经列过 ✓
             }
+            // 用户要求：只列**当前选中图元**的约束（没有选中就一条都不列）
+            if (pickedVars.isEmpty()) {
+                continue;
+            }
+            boolean touchesPicked = false;
+            for (final int ov : c.operands()) {
+                if (pickedVars.contains(ov)) {
+                    touchesPicked = true;
+                    break;
+                }
+            }
+            if (!touchesPicked) {
+                continue;
+            }
             final int index = ci;
             final var row = new com.ovo.sablestopnow.client.gui.lib.Container();
             row.layout = com.ovo.sablestopnow.client.gui.lib.Layouts.hboxWrap(0, 4, 2);
@@ -913,31 +903,6 @@ public final class ModelUi {
                 }
             }));
             body.add(row);
-        }
-        for (final var d : existing) {
-            // 实测 ≠ 常数 → 求解器还没算平，用警示色并同时给出两个数
-            // ★ 角度存的是**有向角** ⇒ 实测可能为 −θ ⇒ 按**绝对值**比较 ✓（否则会误报标红）
-            final boolean off = Math.abs(Math.abs(d.measured()) - Math.abs(d.value())) > 1.0e-4;
-            // ★ 用户要求：约束/尺寸**要编号** ✓（"左侧约束和尺寸建议…并进行编号" ✓）
-            //   编号用**约束下标 +1**（与画布上双击改值的对象一致 ✓ 稳定不随排序跳 ✓）
-            final String num = "#" + (d.constraintIndex() + 1) + " ";
-            // ★ 水平/竖直尺寸存有符号差值 ⇒ 左栏也按**绝对值**显示 ✓
-            final String text = off
-                    ? String.format(java.util.Locale.ROOT, "%s%s %.3f  (实测 %.3f)", num,
-                            Component.translatable(d.labelKey()).getString(),
-                            Math.abs(d.value()), Math.abs(d.measured()))
-                    : String.format(java.util.Locale.ROOT, "%s%s %.3f", num,
-                            Component.translatable(d.labelKey()).getString(),
-                            Math.abs(d.value()));
-            body.add(new Label(Component.literal(text))
-                    .color(off ? 0xFFFF8A5C : 0xFFE6E6E6));
-        }
-        for (final var d : refs) {
-            // 参考尺寸：灰显，明说"未约束"
-            body.add(new Label(Component.translatable("model.dim.reference",
-                    Component.translatable(d.labelKey()),
-                    String.format(java.util.Locale.ROOT, "%.3f", d.value())))
-                    .color(0xFF8C93A8));
         }
         for (final var r : relations) {
             body.add(new Button(Component.translatable("model.relation.add",
@@ -1614,12 +1579,6 @@ public final class ModelUi {
     /** 诊断：左栏每秒重建次数（用户怀疑"每次点击都触发重建"）✓ */
     private static int perfPanelBuilds;
     private static long perfPanelLogMs;
-
-    /** 草图尺寸输入框的当前值（静态：左栏重建时不能丢）。 */
-    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> sketchDimension =
-            com.ovo.sablestopnow.client.gui.lib.Prop.of("sketch.dimension", 10.0);
-    /** 尺寸输入框的命令名。 */
-    private static final String CMD_SKETCH_DIM = "sketch.dimension";
 
     /** 拉伸深度输入框的当前值（静态：左栏重建时不能丢）。 */
     // ===== item 7/8/10：左栏内联参数（待定值，按"创建"才落地）✓ =====
@@ -4940,27 +4899,6 @@ public final class ModelUi {
                             }));
                 }
                 body.add(constraintRow);
-                // 尺寸：给**选中的图元**标长度（线段）或半径（圆）。
-                // 数值放在静态 Prop 里，左栏每重建一次都读同一个值 ——
-                // 否则勾一下/切一下工具，输入框里的数就被重置了。
-                com.ovo.sablestopnow.client.gui.lib.Cmd.declare(CMD_SKETCH_DIM);
-                final com.ovo.sablestopnow.client.gui.lib.UiField dimField =
-                        com.ovo.sablestopnow.client.gui.lib.UiField.number(
-                                "model.sketch.dimension", CMD_SKETCH_DIM, sketchDimension,
-                                0.1, 1000.0, 1.0);
-                dimField.format(v -> String.format(java.util.Locale.ROOT, "%.1f", v));
-                dimField.commit(v -> {
-                    final var mode = com.ovo.sablestopnow.client.SketchClient.mode();
-                    if (mode.session().selectedEntity() == null) {
-                        ModelMode.prompt("model.sketch.constraint.need_select");
-                    } else if (mode.dimension(v)) {
-                        ModelMode.prompt("model.sketch.constraint.added");
-                    } else {
-                        ModelMode.prompt("model.sketch.constraint.need_line");
-                    }
-                    refreshLeftPanel();
-                });
-                body.add(dimField);
                 // 删除**选中的图元**（不是整张草图）。必须先选中才可用 ——
                 // 没选中时给提示而不是静默无反应（静默失败是最容易被当成"按钮坏了"的）。
                 body.add(new Button(Component.translatable("model.sketch.delete_entity"), () -> {

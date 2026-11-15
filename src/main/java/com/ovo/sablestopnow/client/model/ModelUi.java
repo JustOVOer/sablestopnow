@@ -5516,10 +5516,17 @@ public final class ModelUi {
               filletSourceSolid = null;
               mirrorSources.clear();
               MIRROR_SRC_PROPS.clear();
+              mirrorBody = null;
               mirrorPlaneOrigin = null;
               mirrorPlaneSolidId = null;
               mirrorPlaneSegs = null;
               mirrorPlaneNormal = null;
+              if (ModelTools.PATTERN.equals(toolId)) {
+                  PatternTool.reset();
+              }
+              if (ModelTools.CLONE.equals(toolId)) {
+                  CloneTool.reset();
+              }
               com.ovo.sablestopnow.client.model.FeaturePreview.clear();
               // ★ 镜像/阵列/克隆都需要先有一个**物理结构**。
               //   没选就提示，并保持工具激活 ⇒ 下一次点击方块/模型面就会当场选结构

@@ -1095,12 +1095,36 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      *       特征之间做布尔/倒圆，语义正确，也不会把没选的切割带进来）✓</li>
      * </ul>
      */
+    /**
+     * 上一次 {@link #evaluateSelected} 的签名/结果（**一次 CSG 很贵**：左栏预览先算一遍，
+     * 点"创建"后 placeAll 又要同一份几何 ⇒ 用同一个签名复用，避免创建时再卡一次）。
+     */
+    private static String selectedCacheSig = "";
+    private static List<SelectedEval> selectedCache = List.of();
+
     public static List<SelectedEval> evaluateSelected(
             final Collection<Solid> solids,
             final Collection<Sketch> sketches,
             final Collection<UUID> selectedIds) {
         if (solids == null || selectedIds == null || selectedIds.isEmpty()) {
             return List.of();
+        }
+        // 签名：选中特征的 hash + 全部草图（与预览缓存同一口径）
+        final StringBuilder sig = new StringBuilder();
+        for (final Solid s : solids) {
+            if (selectedIds.contains(s.id())) {
+                sig.append(s.id()).append(':').append(s.hashCode()).append(';');
+            }
+        }
+        for (final Sketch k : sketches) {
+            sig.append(k.id()).append(':')
+                    .append(java.util.Arrays.hashCode(k.variables())).append(':')
+                    .append(k.constraints().size()).append(':')
+                    .append(k.entities().size()).append(';');
+        }
+        final String sigNow = sig.toString();
+        if (sigNow.equals(selectedCacheSig)) {
+            return selectedCache;
         }
         final List<Solid> subset = new ArrayList<>();
         boolean needCsg = false;
@@ -1129,6 +1153,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         sk.plane() == null ? null : sk.plane().normal(),
                         selectedBounds(bx, ed, me)));
             }
+            selectedCacheSig = sigNow;
+            selectedCache = out;
             return out;
         }
         final long t0 = System.nanoTime();
@@ -1143,6 +1169,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         if (ms >= 100L) {
             trace("clone: evaluateSelected features=" + subset.size() + " ms=" + ms);
         }
+        selectedCacheSig = sigNow;
+        selectedCache = out;
         return out;
     }
 

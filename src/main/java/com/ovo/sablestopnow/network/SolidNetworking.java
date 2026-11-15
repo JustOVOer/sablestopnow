@@ -122,13 +122,33 @@ public final class SolidNetworking {
             broadcast(level);
             // ⚠ 存档变了必须**重建碰撞**，否则物理还停在旧形状上 ——
             // 玩家会看到"模型变了但碰撞没变"，这是最难查的一类不一致。
-            com.ovo.sablestopnow.server.SolidCollisionService.rebuild(level, solid.body());
+            // ★ 但**派生特征**（克隆/镜像/阵列/基准面）不产生自己的碰撞：
+            //   它们的新建/编辑/删除只需广播渲染数据。以前每建一个克隆都会
+            //   把整个结构的碰撞、质量、凸分解全部重跑一遍 ⇒ 实例实测卡好几秒。
+            if (needsCollisionRebuild(existing, solid)) {
+                com.ovo.sablestopnow.server.SolidCollisionService.rebuild(level, solid.body());
+            }
         }
 
         @Override
         public Type<? extends CustomPacketPayload> type() {
             return TYPE;
         }
+    }
+
+    /** 新建/更新前后只要有一边是"材料/切割/圆角"，碰撞就需要重建。 */
+    private static boolean needsCollisionRebuild(
+            @org.jetbrains.annotations.Nullable final Solid before, final Solid after) {
+        if (before == null) {
+            return !isDerivedOnly(after);
+        }
+        return !(isDerivedOnly(before) && isDerivedOnly(after));
+    }
+
+    /** 克隆/镜像/阵列/基准面：不产生自己的碰撞体。 */
+    private static boolean isDerivedOnly(final Solid solid) {
+        return solid.isClone() || solid.isMirror() || solid.isPattern()
+                || solid.isPlane();
     }
 
     /** 删掉一个实体。 */
@@ -152,7 +172,7 @@ public final class SolidNetworking {
             final java.util.UUID body = existing == null ? null : existing.body();
             if (data.remove(this.solidId)) {
                 broadcast(level);
-                if (body != null) {
+                if (body != null && (existing == null || !isDerivedOnly(existing))) {
                     com.ovo.sablestopnow.server.SolidCollisionService.rebuild(level, body);
                 }
             }

@@ -145,13 +145,21 @@ public final class Features {
             }
         }
         for (final Map.Entry<Long, int[]> e : pairCount.entrySet()) {
-            if (e.getValue()[0] < 2) {
-                continue; // 只共享一个顶点 ⇒ 不是同一条边
-            }
             final int a = (int) (e.getKey() >>> 32);
             final int b = (int) (e.getKey() & 0xFFFFFFFFL);
             if (find(parent, a) == find(parent, b)) {
                 continue;
+            }
+            // ★ 普通平面被 CSG 切成多块时（共面、共享一个或多个顶点）要重新并回一整块，
+            //   否则悬停会只亮一个三角形/多边形（用户实测"普通平面碎掉了"✗）。
+            //   共面合并与曲面合并分开：前者不受"窄条/面积比/主导平面"限制，
+            //   但仍然要求共享顶点（不能把两块隔空的共面面糊在一起）。
+            if (coplanar(faces.get(a), faces.get(b))) {
+                union(parent, a, b);
+                continue;
+            }
+            if (e.getValue()[0] < 2) {
+                continue; // 曲面合并只认共享一条边（≥2 个顶点）
             }
             if (canMerge(faces.get(a), faces.get(b), aspects[a], aspects[b],
                     dominantOf[a], dominantOf[b])) {
@@ -197,6 +205,19 @@ public final class Features {
             out.add(new Face(out.size(), kind, origin, normal, tris, segs, area));
         }
         return out;
+    }
+
+    /** 两个平面面**严格共面**（同一朝法线 + 同一平面偏移）✓。 */
+    private static boolean coplanar(final Face a, final Face b) {
+        if (!a.planar() || !b.planar()) {
+            return false;
+        }
+        if (a.normal().dot(b.normal()) < 1.0 - 1.0e-9) {
+            return false;
+        }
+        final double da = a.normal().dot(a.origin());
+        final double db = b.normal().dot(b.origin());
+        return Math.abs(da - db) < 1.0e-3;
     }
 
     /** 合并判据：法线近 + 至少一块是窄条/小面 + 尺度相差不大（防止圆角条带吞并大平面）。 */

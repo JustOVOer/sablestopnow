@@ -54,7 +54,8 @@ public final class ModelUi {
     public static final String LAYER_PICKS = "model.picks";
     public static final String LAYER_HUD = "model.hud";
 
-    private static final int TOP_H = 36;
+    // 顶部栏：竖排特征键需要 36px 图标 + 文字 ⇒ 从 36 提高到 78
+    private static final int TOP_H = 78;
     private static final int TREE_W = 138;
     private static final int LEFT_W = 152;
 
@@ -252,28 +253,39 @@ public final class ModelUi {
                         ModelTools.GEAR, "model.tool.gear.hint"));
             }
             case ModelTools.TAB_MODEL -> {
-                row.add(shortButton("model.tool.normal_to", "model.tool.normal_to.short",
-                        () -> startTool(ModelTools.NORMAL_TO)).tooltipKey("model.tool.normal_to.hint"));
-                row.add(shortButton("model.tool.force", "model.tool.force.short",
-                        () -> startTool(ModelTools.FORCE)).tooltipKey("model.tool.force.hint"));
+                // ★ 用户要求：特征按键改成**竖向长方形**（上动图、下文字），
+                //   一排排不下就用 < > 翻页；动图只在鼠标悬停时播放。
+                final com.ovo.sablestopnow.client.gui.lib.PagedRow pager =
+                        new com.ovo.sablestopnow.client.gui.lib.PagedRow(64, 54, 4, 14);
+                pager.page(featurePage);
+                pager.onPageChanged(p -> featurePage = p);
+
+                final String tool = ModelMode.tool();
+                pager.addItem(featureIconButton("model.tool.normal_to", "normal_to",
+                        () -> startTool(ModelTools.NORMAL_TO), "model.tool.normal_to.hint",
+                        ModelTools.NORMAL_TO.equals(tool)));
+                pager.addItem(featureIconButton("model.tool.force", "force",
+                        () -> startTool(ModelTools.FORCE), "model.tool.force.hint",
+                        ModelTools.FORCE.equals(tool)));
                 // 草图：进入一个持续编辑的环境，选择结构与平面之后由 SketchClient 接管交互。
-                row.add(shortButton("model.tool.sketch", "model.tool.sketch.short",
-                        ModelUi::startSketch).tooltipKey("model.tool.sketch.hint"));
+                pager.addItem(featureIconButton("model.tool.sketch", "sketch",
+                        ModelUi::startSketch, "model.tool.sketch.hint",
+                        ModelTools.SKETCH.equals(tool)));
                 // 拉伸：先选结构，再在树里点一张**已保存**的草图作为拉伸源。
-                row.add(shortButton("model.tool.extrude", "model.tool.extrude.short",
+                pager.addItem(featureIconButton("model.tool.extrude", "extrude",
                         () -> {
                             cutMode = false;   // 普通拉伸 ⇒ 关掉切割 ✓
                             startExtrude();
-                        }).tooltipKey("model.tool.extrude.hint"));
-                // item 10: pattern entry
-                row.add(shortButton("model.tool.pattern", "model.tool.pattern.short",
+                        }, "model.tool.extrude.hint",
+                        ModelTools.EXTRUDE.equals(tool) && !cutMode));
+                pager.addItem(featureIconButton("model.tool.pattern", "pattern",
                         () -> {
                             cutMode = false;
                             com.ovo.sablestopnow.client.model.PatternTool.reset();
                             startTool(ModelTools.PATTERN);
-                        }).tooltipKey("model.tool.pattern.hint"));
-                // item 9: mirror entry
-                row.add(shortButton("model.tool.mirror", "model.tool.mirror.short",
+                        }, "model.tool.pattern.hint",
+                        ModelTools.PATTERN.equals(tool)));
+                pager.addItem(featureIconButton("model.tool.mirror", "mirror",
                         () -> {
                             cutMode = false;
                             mirrorSources.clear();
@@ -282,30 +294,33 @@ public final class ModelUi {
                             mirrorPlaneSegs = null;
                             mirrorPlaneNormal = null;
                             startTool(ModelTools.MIRROR);
-                        }).tooltipKey("model.tool.mirror.hint"));
-                // ★ item 8：**圆角**入口 ✓（上边栏）
-                row.add(shortButton("model.tool.fillet", "model.tool.fillet.short",
+                        }, "model.tool.mirror.hint",
+                        ModelTools.MIRROR.equals(tool)));
+                pager.addItem(featureIconButton("model.tool.fillet", "fillet",
                         () -> {
                             cutMode = false;
                             startTool(ModelTools.FILLET);
                             refreshLeftPanel();
-                        }).tooltipKey("model.tool.fillet.hint"));
-                // ★ item 7：**新建基准面**入口 ✓（上边栏）
-                row.add(shortButton("model.tool.plane", "model.tool.plane.short",
+                        }, "model.tool.fillet.hint",
+                        ModelTools.FILLET.equals(tool)));
+                pager.addItem(featureIconButton("model.tool.plane", "plane",
                         () -> {
                             cutMode = false;
                             startTool(ModelTools.PLANE);
                             refreshLeftPanel();
-                        }).tooltipKey("model.tool.plane.hint"));
-                // ★ 需求 ⑥：**切割台体**独立入口 ✓（与"拉伸台体"平级 ✓ 不是藏在面板里的开关 ✓）
-                row.add(shortButton("model.tool.cut", "model.tool.cut.short",
+                        }, "model.tool.plane.hint",
+                        ModelTools.PLANE.equals(tool)));
+                pager.addItem(featureIconButton("model.tool.cut", "cut",
                         () -> {
                             cutMode = true;    // 进来就是切割模式 ✓
                             startExtrude();
-                        }).tooltipKey("model.tool.cut.hint"));
-                row.add(shortButton("model.tool.hide", "model.tool.hide.short", ModelUi::toggleHide));
-                row.add(shortButton("model.tool.delete_mate", "model.tool.delete_mate.short",
-                        ModelUi::deleteSelectedMate));
+                        }, "model.tool.cut.hint",
+                        ModelTools.EXTRUDE.equals(tool) && cutMode));
+                pager.addItem(featureIconButton("model.tool.hide", "hide",
+                        ModelUi::toggleHide, null, false));
+                pager.addItem(featureIconButton("model.tool.delete_mate", null,
+                        ModelUi::deleteSelectedMate, null, false));
+                return pager;
             }
             case ModelTools.TAB_DEBUG -> {
                 // 验证类功能的统一入口（用户规定：一律挂这里）
@@ -359,6 +374,33 @@ public final class ModelUi {
         final Button button = shortButton(labelKey, shortKey, () -> startTool(toolId));
         button.tooltipKey(hintKey);
         button.toggled = toolId.equals(ModelMode.tool());
+        return button;
+    }
+
+    /**
+     * 顶部栏的**竖向特征键**：36px 的 1px 动图在上、名字居中在下。
+     *
+     * <p>贴图是 `assets/sablestopnow/textures/gui/feature/<id>.png`：
+     * 24 帧 × 36×36 的横向 sprite sheet（严格 1px 线宽版本）。
+     * 动画只在悬停时播放（见 {@code Button.update}），移开回到第一帧。
+     */
+    private static Button featureIconButton(final String labelKey, @Nullable final String textureId,
+                                            final Runnable action, @Nullable final String hintKey,
+                                            final boolean toggled) {
+        final Button button = new Button(Component.translatable(labelKey), action);
+        button.vertical();
+        button.size(64, 54);
+        button.iconSize(36);
+        button.gap = 3;
+        if (textureId != null) {
+            button.sheet(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
+                    "sablestopnow", "textures/gui/feature/" + textureId + ".png"),
+                    36, 36, 24, 12);
+        }
+        if (hintKey != null) {
+            button.tooltipKey(hintKey);
+        }
+        button.toggled = toggled;
         return button;
     }
 
@@ -1619,6 +1661,8 @@ public final class ModelUi {
      * （同一 body 内与它相交的实体被挖掉 ✓ 完全贯穿 = 深度拉大 ✓）
      */
     private static boolean cutMode;
+    /** 顶部特征键当前翻到第几页（切标签/重建顶部栏时保留）✓。 */
+    private static int featurePage;
 
     /**
      * **本会话内已创建过的实体序号** ✓（按 body 记）。
@@ -1928,6 +1972,8 @@ public final class ModelUi {
         extrudeSource = null;
         ModelMode.setTool(ModelTools.EXTRUDE);
         ModelMode.prompt("model.prompt.extrude_pick_sketch");
+        // 顶栏竖排按键的选中态要跟着变
+        buildTop();
         refreshLeftPanel();
     }
 
@@ -4288,6 +4334,7 @@ public final class ModelUi {
         }
         ModelMode.setTool(ModelTools.SKETCH);
         ModelMode.prompt("model.prompt.sketch_pick_plane");
+        buildTop();
         refreshLeftPanel();
     }
 

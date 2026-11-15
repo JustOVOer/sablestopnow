@@ -52,6 +52,8 @@ public class Button extends Widget {
     public int sheetFrameCount;
     /** 动图当前帧时钟（秒）✓。 */
     private double iconClock;
+    /** 是否处于“未悬停”的静止态（静止态显示最后一帧 = 特征完成态）✓。 */
+    private boolean iconIdle = true;
     @Nullable
     public Runnable action;
     /** 右键回调（可选）。 */
@@ -92,6 +94,18 @@ public class Button extends Widget {
     /** 图标与文字之间的间距。 */
     public int gap = 3;
     public Layouts.Dock iconSide = Layouts.Dock.LEFT;
+    /**
+     * 竖向按键 ✓（用户要求：上面动图、下面居中文字）。
+     *
+     * <p>为 {@code false} 时保持原来的“左图标 + 右文字”横排。
+     */
+    public boolean vertical;
+
+    /** 链式：切到竖向布局 ✓。 */
+    public Button vertical() {
+        this.vertical = true;
+        return this;
+    }
 
     public Button(final Component label, final Runnable action) {
         this.label = () -> label;
@@ -181,13 +195,20 @@ public class Button extends Widget {
         return icon != null || !iconFrames.isEmpty() || (iconSheet != null && sheetFrameCount > 0);
     }
 
-    /** 当前应显示的动图帧下标 ✓。 */
+    /**
+     * 当前应显示的动图帧下标 ✓（**乒乓循环**：正放到底再倒放回来）。
+     *
+     * <p>sprite sheet 只存正放帧（0…N-1）；这里用 2N-2 的周期，后半段倒着取帧，
+     * 与做图标时的“正放 + 倒放”预览完全一致。
+     */
     private int iconFrameIndex(final int count) {
         if (count <= 1) {
             return 0;
         }
-        final int idx = (int) Math.floor(iconClock * Math.max(0.1, iconFps));
-        return Math.floorMod(idx, count);
+        final int total = count * 2 - 2;
+        final int step = Math.floorMod(
+                (int) Math.floor(iconClock * Math.max(0.1, iconFps)), total);
+        return step < count ? step : total - step;
     }
 
     /** 命令名：让「点了没反应」在日志里能对上号。 */
@@ -345,6 +366,16 @@ public class Button extends Widget {
 
     @Override
     public void measure(final UiContext ctx) {
+        if (vertical) {
+            // ★ 竖向按键（用户要求）：图标在上、文字在下，两者整体居中
+            final int tw = raw().isEmpty() ? 0 : ctx.textW(raw());
+            w = Math.max(minW, Math.max(hasIcon() ? iconSize : 0, tw)
+                    + ctx.theme.padX * 2 + 2);
+            h = Math.max(minH, prefH >= 0 ? prefH
+                    : (hasIcon() ? iconSize : 0) + (raw().isEmpty() || !hasIcon() ? 0 : gap)
+                    + (raw().isEmpty() ? 0 : ctx.lineH()) + ctx.theme.padY * 2);
+            return;
+        }
         int width = 0;
         if (hasIcon()) {
             width += iconSize;
@@ -358,11 +389,15 @@ public class Button extends Widget {
 
     @Override
     public void update(final UiContext ctx, final double dt) {
-        // 动图只在"有图 + 允许动画"时走时钟（尊重"减少动画"设置 ✓）
-        if (hasIcon() && ctx.animations) {
+        // ★ 用户要求：**只在鼠标放到按键上时才动**；移开就回到第一帧
+        final boolean hot = ctx.isHovered(this) && enabled;
+        iconIdle = !hot;
+        if (hasIcon() && ctx.animations && hot) {
             iconClock += Math.max(0.0, dt);
+        } else if (!hot) {
+            iconClock = 0.0;
         }
-        hover.to(ctx.isHovered(this) && enabled ? 1.0 : 0.0).tick(ctx.animations, dt);
+        hover.to(hot ? 1.0 : 0.0).tick(ctx.animations, dt);
         if (sweepClock >= 0.0) {
             sweepClock += ctx.animations ? dt : SWEEP_SECONDS + FADE_SECONDS + 1.0;
             if (sweepClock > SWEEP_SECONDS + FADE_SECONDS) {
@@ -402,6 +437,26 @@ public class Button extends Widget {
         }
     }
 
+    /** 画当前帧图标（横排 / 竖排共用）✓。 */
+    private void renderIcon(final GuiGraphics g, final int ix, final int iy) {
+        if (!iconFrames.isEmpty()) {
+            // 多张独立贴图（每帧 16×16 基准 ✓ 与 UiDraw.icon 同一约定）
+            final int idx = iconIdle ? iconFrames.size() - 1 : iconFrameIndex(iconFrames.size());
+            UiDraw.iconFrame(g, iconFrames.get(idx), ix, iy, iconSize,
+                    0.0f, 0.0f, 16, 16, 16, 16, 0xFFFFFFFF);
+        } else if (iconSheet != null && sheetFrameCount > 0
+                && sheetFrameW > 0 && sheetFrameH > 0) {
+            // 单张横向 sheet：静止态用最后一帧（完成态），悬停时从第 0 帧开始演示
+            final int idx = iconIdle ? sheetFrameCount - 1 : iconFrameIndex(sheetFrameCount);
+            UiDraw.iconFrame(g, iconSheet, ix, iy, iconSize,
+                    (float) (idx * sheetFrameW), 0.0f,
+                    sheetFrameW, sheetFrameH,
+                    sheetFrameW * sheetFrameCount, sheetFrameH, 0xFFFFFFFF);
+        } else if (icon != null) {
+            UiDraw.icon(g, icon, ix, iy, iconSize, 0xFFFFFFFF);
+        }
+    }
+
     @Override
     public void render(final UiContext ctx, final GuiGraphics g) {
         final UiTheme th = ctx.theme;
@@ -433,29 +488,43 @@ public class Button extends Widget {
         }
 
         final String text = raw();
+        final int normalText = !enabled ? th.textDisabled : (textColor == 0 ? th.text : textColor);
+
+        // ★ 竖向：图标在上、文字在下、整体居中
+        if (vertical) {
+            final int lineH = text.isEmpty() ? 0 : ctx.lineH();
+            final int blockH = (hasIcon() ? iconSize : 0)
+                    + (hasIcon() && !text.isEmpty() ? gap : 0) + lineH;
+            int iy = y + Math.max(1, (h - blockH) / 2);
+            if (hasIcon()) {
+                final int ix = x + (w - iconSize) / 2;
+                renderIcon(g, ix, iy);
+                iy += iconSize + (text.isEmpty() ? 0 : gap);
+            }
+            if (!text.isEmpty()) {
+                final String shown = UiDraw.ellipsize(
+                        ctx.font, text, w - th.padX * 2, th.fontScale);
+                final int tw = ctx.textW(shown);
+                final int tx = x + (w - tw) / 2;
+                UiDraw.text(g, ctx.font, shown, tx, iy, normalText, th.fontScale, false);
+                if (progress > 0.0f && alpha > 0.01f) {
+                    final int swept = Math.round(w * progress);
+                    UiDraw.scissor(g, x, y, swept, h);
+                    UiDraw.text(g, ctx.font, shown, tx, iy,
+                            UiDraw.fade(th.sweepText, alpha), th.fontScale, false);
+                    UiDraw.unscissor(g);
+                }
+            }
+            return;
+        }
+
         int contentW = (hasIcon() ? iconSize : 0) + (!text.isEmpty() && hasIcon() ? gap : 0)
                 + ctx.textW(text);
         int cx = x + (w - contentW) / 2;
         final int ty = textY(ctx, y, h);
-        final int normalText = !enabled ? th.textDisabled : (textColor == 0 ? th.text : textColor);
         if (hasIcon()) {
             final int iy = y + (h - iconSize) / 2;
-            if (!iconFrames.isEmpty()) {
-                // 多张独立贴图（每帧 16×16 基准 ✓ 与 UiDraw.icon 同一约定）
-                final int idx = iconFrameIndex(iconFrames.size());
-                UiDraw.iconFrame(g, iconFrames.get(idx), cx, iy, iconSize,
-                        0.0f, 0.0f, 16, 16, 16, 16, 0xFFFFFFFF);
-            } else if (iconSheet != null && sheetFrameCount > 0
-                    && sheetFrameW > 0 && sheetFrameH > 0) {
-                // 单张横向 sheet：u 随帧号平移 ✓（贴图宽 = 帧宽 × 帧数）
-                final int idx = iconFrameIndex(sheetFrameCount);
-                UiDraw.iconFrame(g, iconSheet, cx, iy, iconSize,
-                        (float) (idx * sheetFrameW), 0.0f,
-                        sheetFrameW, sheetFrameH,
-                        sheetFrameW * sheetFrameCount, sheetFrameH, 0xFFFFFFFF);
-            } else if (icon != null) {
-                UiDraw.icon(g, icon, cx, iy, iconSize, 0xFFFFFFFF);
-            }
+            renderIcon(g, cx, iy);
             cx += iconSize + (text.isEmpty() ? 0 : gap);
         }
         if (!text.isEmpty()) {

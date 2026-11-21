@@ -2061,6 +2061,10 @@ public final class ModelUi {
 
     /** 进入拉伸工具：先选一个结构，再在树里点一张草图作为拉伸源。 */
     public static void startExtrude() {
+        // 如果还开着草图，先提交并退出，否则拉伸工具会和草图输入抢世界点击。
+        if (com.ovo.sablestopnow.client.SketchClient.active()) {
+            com.ovo.sablestopnow.client.SketchClient.finish();
+        }
         // ★ 用户要求：不先选结构也能进入拉伸/切割，然后在左栏直接选草图。
         extrudeSource = null;
         ModelMode.setTool(ModelTools.EXTRUDE);

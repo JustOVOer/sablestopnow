@@ -1540,6 +1540,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             SolidMesh.Mesh mesh = rawMesh;
             List<Vector3d[]> drawnEdges = edges;
             // ★ CSG 渲染链路（csg.js 移植）✓ —— Node.clipTo 的"清空后再传入"坑修好后已可用 ✓
+            final long tCsg0 = System.nanoTime();
             if (cut && CSG_RENDER_ENABLED) {
                 // ★ 修实测"现在是完全没有切割"✗
                 //   真因：`solid.mesh(sketch)` 是**为贴图准备的网格**，没有贴图时可能是空 ✗
@@ -1612,6 +1613,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                 }
             }
+            final long csgMs = (System.nanoTime() - tCsg0) / 1_000_000L;
             // ★ bug ⑨：缓存**评估后**的几何（已扣切割、已倒圆角），供镜像/阵列复用 ✓
             evalById.put(solid.id(), new Eval(boxes, drawnEdges, mesh));
             out.add(new Placed(solid, boxes, drawnEdges, mesh, normal));
@@ -1619,7 +1621,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     + " idx=" + solid.index() + " id=" + shortId(solid.id())
                     + " shape=" + solid.shape().getClass().getSimpleName()
                     + " cut=" + cut + " tris=" + (mesh == null ? 0 : mesh.indices().length / 3)
-                    + " boxes=" + boxes.size()
+                    + " boxes=" + boxes.size() + " csgMs=" + csgMs
                     + " ms=" + ((System.nanoTime() - tSolid) / 1_000_000L));
         }
         // ★ item 9：**镜像特征**的产物（反射源特征的盒子/线框/网格）

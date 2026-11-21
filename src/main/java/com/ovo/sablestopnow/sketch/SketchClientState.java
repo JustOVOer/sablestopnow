@@ -30,8 +30,11 @@ public final class SketchClientState {
     /** 收到一个维度的全量同步：整份替换。 */
     public static void accept(final ResourceLocation dimension, final CompoundTag data) {
         // 用与服务端**同一个**解码器（SketchData.load），坏记录逐条跳过。
+        final long t0 = System.nanoTime();
         final SketchData parsed = SketchData.load(data, null);
         BY_DIMENSION.put(dimension, List.copyOf(parsed.all().values()));
+        System.out.println("[load] sketches-parse dim=" + dimension + " n="
+                + parsed.all().size() + " ms=" + ((System.nanoTime() - t0) / 1_000_000L));
     }
 
     public static void clear() {

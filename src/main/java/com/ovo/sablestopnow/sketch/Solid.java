@@ -1459,7 +1459,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         //   克隆只勾材料特征时直接复用这份几何，不再重复 solid.mesh()/edges()/boxes()
         //   （镜像/阵列以前也各建一份，但克隆多了一次独立求值，这里先消掉重复）。
         final java.util.Map<UUID, Eval> rawEvalById = new java.util.HashMap<>();
+        final long tAll = System.nanoTime();
         for (final Solid solid : solids) {
+            final long tSolid = System.nanoTime();
             if (solid.shape() instanceof Shape.Cut) {
                 continue; // 切割体本身不产生材料/线框/网格 ✓
             }
@@ -1613,9 +1615,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             // ★ bug ⑨：缓存**评估后**的几何（已扣切割、已倒圆角），供镜像/阵列复用 ✓
             evalById.put(solid.id(), new Eval(boxes, drawnEdges, mesh));
             out.add(new Placed(solid, boxes, drawnEdges, mesh, normal));
+            System.out.println("[load] solid body=" + solid.body()
+                    + " idx=" + solid.index() + " id=" + shortId(solid.id())
+                    + " shape=" + solid.shape().getClass().getSimpleName()
+                    + " cut=" + cut + " tris=" + (mesh == null ? 0 : mesh.indices().length / 3)
+                    + " boxes=" + boxes.size()
+                    + " ms=" + ((System.nanoTime() - tSolid) / 1_000_000L));
         }
         // ★ item 9：**镜像特征**的产物（反射源特征的盒子/线框/网格）
         //   它们作为**该镜像特征自己的 Placed** 输出 ⇒ 树里只有"镜像N"一行 ✓（与 SolidWorks 一致）
+        final long tMirrorPass = System.nanoTime();
         for (final Solid mirror : solids) {
             if (!(mirror.shape() instanceof final Shape.Mirror m)) {
                 continue;
@@ -1750,7 +1759,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 out.add(new Placed(view, finalBoxes, edges, mesh, viewNormal));
             }
         }
+        System.out.println("[load] mirror-pass ms="
+                + ((System.nanoTime() - tMirrorPass) / 1_000_000L));
         // item 10: **阵列**产物（N×M 个副本，归在"阵列N"一行）
+        final long tPatternPass = System.nanoTime();
         for (final Solid pat : solids) {
             if (!(pat.shape() instanceof final Shape.Pattern pt)) {
                 continue;
@@ -1907,11 +1919,14 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
             }
         }
+        System.out.println("[load] pattern-pass ms="
+                + ((System.nanoTime() - tPatternPass) / 1_000_000L));
         // ★ **克隆特征**：只复制**选中的特征**，并且只把**选中的切割/圆角**作用到副本上。
         //   以前直接用主循环的 evalById ⇒ 那是一个 body 的“全部切割 + 全部圆角”结果，
         //   于是只勾了一个拉伸却把整条结构的特征全克隆了（用户实测）。
         //   现在走 evaluateSelected：没勾切割/圆角就取材料自己的几何（不跑 CSG），
         //   勾了才在选中集合内部做布尔/倒圆 ✓
+        final long tClonePass = System.nanoTime();
         for (final Solid clone : solids) {
             if (!(clone.shape() instanceof final Shape.Clone cl) || cl.sources().isEmpty()) {
                 continue;
@@ -1994,6 +2009,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 out.add(placed);
             }
         }
+        System.out.println("[load] clone-pass ms="
+                + ((System.nanoTime() - tClonePass) / 1_000_000L)
+                + " placeAll-total-ms=" + ((System.nanoTime() - tAll) / 1_000_000L)
+                + " out=" + out.size());
         // ★ **镜像/阵列取"拉伸+切割之后、圆角之前"的几何** ✓
         //   用户要求：圆角是拉伸的后处理，不该被镜像带走。
         //   之前用的是 evalById（已扣圆角）⇒ 圆角看起来"同步到了镜像"✗

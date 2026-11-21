@@ -65,6 +65,18 @@ public final class ModelCamera {
     private static float pitchGoal = 28.0f;
     private static boolean initialized;
 
+    // ---- "正视此面/进入草图"的**定时线性**相机旋转（SolidWorks 手感）----
+    /** 时长 0.8s（用户要求；与 SolidWorks 的正视/草图转向一致）。 */
+    private static final double ALIGN_SECONDS = 0.8;
+    private static boolean alignAnimating;
+    private static long alignStartNanos;
+    private static float alignFromYaw;
+    private static float alignFromPitch;
+    private static float alignFromRoll;
+    private static float alignToYaw;
+    private static float alignToPitch;
+    private static float alignToRoll;
+
     private ModelCamera() {
     }
 
@@ -89,6 +101,7 @@ public final class ModelCamera {
         pitchGoal = pitch;
         distance = 14.0;
         distanceGoal = 14.0;
+        alignAnimating = false;
         initialized = true;
     }
 
@@ -199,6 +212,25 @@ public final class ModelCamera {
         final double kk = animate ? k : 1.0;
         target.lerp(targetGoal, kk);
         distance += (distanceGoal - distance) * kk;
+        // ★ 正视此面 / 进入草图：0.8s **线性**转向（SolidWorks 手感）。
+        //   其它相机动作用原来的指数平滑；这里只接管 yaw/pitch/roll。
+        if (alignAnimating) {
+            final double t = (System.nanoTime() - alignStartNanos) / 1_000_000_000.0;
+            final double u = Math.max(0.0, Math.min(1.0, t / ALIGN_SECONDS));
+            yaw = alignFromYaw + Mth.wrapDegrees(alignToYaw - alignFromYaw) * (float) u;
+            pitch = alignFromPitch + (alignToPitch - alignFromPitch) * (float) u;
+            roll = alignFromRoll + Mth.wrapDegrees(alignToRoll - alignFromRoll) * (float) u;
+            if (u >= 1.0) {
+                yaw = alignToYaw;
+                pitch = alignToPitch;
+                roll = alignToRoll;
+                yawGoal = yaw;
+                pitchGoal = pitch;
+                rollGoal = roll;
+                alignAnimating = false;
+            }
+            return;
+        }
         yaw += Mth.wrapDegrees(yawGoal - yaw) * (float) kk;
         pitch += (pitchGoal - pitch) * (float) kk;
         roll += Mth.wrapDegrees(rollGoal - roll) * (float) kk;
@@ -207,6 +239,7 @@ public final class ModelCamera {
     // ============ 操作 ============
 
     public static void orbit(final double dx, final double dy) {
+        cancelAlign();
         // 人工旋转一开始就把滚转归零, 否则旋转手感是歪的 ✓
         rollGoal = 0.0f;
         // ★ SolidWorks 的旋转：**围绕光标下的那个点**转，不是围绕轨道中心 ✗
@@ -272,6 +305,7 @@ public final class ModelCamera {
     }
 
     public static void setPreset(final Preset preset) {
+        cancelAlign();
         final Vec3 view = viewVector(preset.yaw, preset.pitch);
         // 预设方向下把相机摆到目标的对侧：yaw/pitch 直接采用预设值即可
         yawGoal = preset.yaw;
@@ -286,10 +320,37 @@ public final class ModelCamera {
         distanceGoal = Mth.clamp(value, MIN_DISTANCE, MAX_DISTANCE);
     }
 
-    /** 直接把相机转到给定朝向（「正视此面」用），带缓动。 */
+    /** 直接把相机转到给定朝向（「正视此面」/进入草图用），**0.8s 线性**。 */
     public static void alignTo(final float yawDeg, final float pitchDeg) {
         yawGoal = yawDeg;
         pitchGoal = Mth.clamp(pitchDeg, -89.5f, 89.5f);
+        rollGoal = rollGoal; // roll 由 alignRoll/alignRollForUp 随后设置
+        if (!com.ovo.sablestopnow.client.gui.lib.UiSettings.animations) {
+            yaw = yawGoal;
+            pitch = pitchGoal;
+            roll = rollGoal;
+            alignAnimating = false;
+            return;
+        }
+        alignFromYaw = yaw;
+        alignFromPitch = pitch;
+        alignFromRoll = roll;
+        alignToYaw = yawGoal;
+        alignToPitch = pitchGoal;
+        alignToRoll = rollGoal;
+        alignStartNanos = System.nanoTime();
+        alignAnimating = true;
+    }
+
+    /** 取消正在进行的 0.8s 线性转向（用户开始手动旋转/切预设时）。 */
+    private static void cancelAlign() {
+        if (!alignAnimating) {
+            return;
+        }
+        alignAnimating = false;
+        yawGoal = yaw;
+        pitchGoal = pitch;
+        rollGoal = roll;
     }
 
     /** 当前 roll（度）—— 只有 {@code CameraRollMixin} 读它 ✓ */
@@ -305,6 +366,9 @@ public final class ModelCamera {
     /** 目标 roll（度）：草图正视时让结构 v 轴朝上；退出/转开视角时归零 ✓ */
     public static void alignRoll(final float deg) {
         rollGoal = deg;
+        if (alignAnimating) {
+            alignToRoll = deg;
+        }
     }
 
     /**
@@ -330,12 +394,18 @@ public final class ModelCamera {
         u.fma(-u.dot(f), f); // 投影到屏幕平面
         if (u.lengthSquared() < 1.0e-9) {
             rollGoal = 0.0f;
+            if (alignAnimating) {
+                alignToRoll = 0.0f;
+            }
             return;
         }
         u.normalize();
         final double dotR = u.dot(right.x, right.y, right.z);
         final double dotU = u.dot(up.x, up.y, up.z);
         rollGoal = (float) -Math.toDegrees(Math.atan2(dotR, dotU));
+        if (alignAnimating) {
+            alignToRoll = rollGoal;
+        }
         // 诊断：目标 roll 变化超过 1° 时打一行（用户实测反馈用；不影响渲染）
         if (Math.abs(rollGoal - lastRollLog) > 1.0f) {
             lastRollLog = rollGoal;

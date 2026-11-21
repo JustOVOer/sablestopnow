@@ -61,6 +61,7 @@ public final class ModelMode {
     private static volatile boolean graphPrepared;
     private static volatile boolean graphFailed;
     private static int graphToken;
+    private static long graphPrepareStartNanos;
 
     /**
      * 模型模式下「光标是否应当保持自由」。
@@ -196,6 +197,9 @@ public final class ModelMode {
                     setOn(true);
                     chat("model.prompt.graph_ready");
                 }
+                System.out.println("[load] model-entry-ready ok=" + !graphFailed
+                        + " ms=" + ((System.nanoTime() - graphPrepareStartNanos) / 1_000_000L));
+                return;
             }
             return;
         }
@@ -217,9 +221,11 @@ public final class ModelMode {
         graphPreparing = true;
         graphPrepared = false;
         graphFailed = false;
+        graphPrepareStartNanos = System.nanoTime();
         final int token = ++graphToken;
         final java.util.List<com.ovo.sablestopnow.sketch.Solid.Placed> placed =
                 com.ovo.sablestopnow.sketch.SolidClientState.placed(mc.level);
+        System.out.println("[load] model-entry-begin placed=" + placed.size());
         // 缓存都在（第二次进入）⇒ 不提示、不等待，直接进
         if (com.ovo.sablestopnow.sketch.Features.isPrepared(placed)) {
             graphPreparing = false;

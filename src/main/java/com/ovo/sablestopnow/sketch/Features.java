@@ -453,6 +453,7 @@ public final class Features {
         if (placed == null || CACHE.get(placed) != null) {
             return;
         }
+        final long t0 = System.nanoTime();
         final TransformSpec spec = TRANSFORMS.remove(placed);
         final Graph graph;
         if (spec != null) {
@@ -463,6 +464,20 @@ public final class Features {
             graph = build(placed);
         }
         CACHE.put(placed, graph);
+        final SolidMesh.Mesh mesh = placed.mesh();
+        System.out.println("[load] featureGraph body=" + placed.solid().body()
+                + " idx=" + placed.solid().index()
+                + " id=" + shortId(placed.solid().id())
+                + " shape=" + placed.solid().shape().getClass().getSimpleName()
+                + " transform=" + (spec != null)
+                + " tris=" + (mesh == null ? 0 : mesh.indices().length / 3)
+                + " faces=" + graph.faces().size()
+                + " edges=" + graph.edges().size()
+                + " ms=" + ((System.nanoTime() - t0) / 1_000_000L));
+    }
+
+    private static String shortId(final java.util.UUID id) {
+        return id == null ? "?" : id.toString().substring(0, 8);
     }
 
     /**
@@ -475,17 +490,22 @@ public final class Features {
         final java.util.List<Solid.Placed> snapshot =
                 placedList == null ? List.of() : new java.util.ArrayList<>(placedList);
         return java.util.concurrent.CompletableFuture.runAsync(() -> {
+            final long t0 = System.nanoTime();
+            int built = 0;
             for (final Solid.Placed p : snapshot) {
                 if (p == null || CACHE.get(p) != null || FAILED.contains(p)) {
                     continue;
                 }
                 try {
                     buildInto(p);
+                    built++;
                 } catch (final Throwable t) {
                     FAILED.add(p);
                     System.err.println("[features] prepare failed: " + t);
                 }
             }
+            System.out.println("[load] featureGraph-prepare requested=" + snapshot.size()
+                    + " built=" + built + " ms=" + ((System.nanoTime() - t0) / 1_000_000L));
         }, WORKER);
     }
 

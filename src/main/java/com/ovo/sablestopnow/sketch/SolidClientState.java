@@ -30,8 +30,11 @@ public final class SolidClientState {
     /** 收到一个维度的全量同步：整份替换。 */
     public static void accept(final ResourceLocation dimension, final CompoundTag data) {
         // 用与服务端**同一个**解码器（SolidData.load），坏记录逐条跳过。
+        final long t0 = System.nanoTime();
         final SolidData parsed = SolidData.load(data, null);
         BY_DIMENSION.put(dimension, List.copyOf(parsed.all().values()));
+        System.out.println("[load] solids-parse dim=" + dimension + " n="
+                + parsed.all().size() + " ms=" + ((System.nanoTime() - t0) / 1_000_000L));
     }
 
     public static void clear() {
@@ -114,10 +117,13 @@ public final class SolidClientState {
         placedSig = sig;
 
         // ★ 跨 body 的引用（镜像/阵列/克隆的源、圆角棱、基准面源）会让"按 body 分头求值"
-        //   看不到别的 body ⇒ 这种情况退回整维度一次算（正确优先，慢一点也只在改模型时）。
+        // ★ 一次性定位卡顿：每个 body 的求值耗时 + 实体数（缓存命中不打印）。
+        final long tPlaced = System.nanoTime();
         if (hasCrossBodyRefs(solids)) {
             BODY_CACHE.clear();
             placedCache = List.copyOf(Solid.placeAll(solids, sketches));
+            System.out.println("[load] placed-global solids=" + solids.size()
+                    + " ms=" + ((System.nanoTime() - tPlaced) / 1_000_000L));
             return placedCache;
         }
 
@@ -139,10 +145,8 @@ public final class SolidClientState {
                 final long t0 = System.nanoTime();
                 part = List.copyOf(Solid.placeAll(e.getValue(), sketches));
                 final long ms = (System.nanoTime() - t0) / 1_000_000L;
-                if (ms >= 100L) {
-                    Solid.trace("perf: placed body=" + e.getKey()
-                            + " solids=" + e.getValue().size() + " ms=" + ms);
-                }
+                System.out.println("[load] placed-body body=" + e.getKey()
+                        + " solids=" + e.getValue().size() + " out=" + part.size() + " ms=" + ms);
             }
             next.put(key, new BodyCache(bodySig, part));
             out.addAll(part);
@@ -150,6 +154,9 @@ public final class SolidClientState {
         BODY_CACHE.clear();
         BODY_CACHE.putAll(next);
         placedCache = List.copyOf(out);
+        System.out.println("[load] placed-total bodies=" + groups.size()
+                + " solids=" + solids.size() + " out=" + out.size()
+                + " ms=" + ((System.nanoTime() - tPlaced) / 1_000_000L));
         return placedCache;
     }
 

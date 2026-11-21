@@ -54,6 +54,7 @@ public final class StaffEnhanceClientEvents {
             public void onResourceManagerReload(
                     final net.minecraft.server.packs.resources.ResourceManager manager) {
                 SolidTextureCache.invalidate();
+                RepeatTextureCache.clear();
             }
         });
     }

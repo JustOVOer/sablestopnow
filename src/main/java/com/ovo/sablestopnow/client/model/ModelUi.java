@@ -1894,6 +1894,8 @@ public final class ModelUi {
     /** 最近点过的草图（树里点草图会进编辑；退出后点拉伸/切割时用它当默认源）✓ */
     @Nullable
     private static java.util.UUID lastSketchId;
+    /** 未选结构时，草图工具等待世界里的第一个基准面/模型面。 */
+    private static boolean sketchAwaitingStart;
 
     /** 当前拉伸/切割源草图 id（渲染侧用来显示未吸收草图）。 */
     @Nullable
@@ -4660,9 +4662,16 @@ public final class ModelUi {
     public static void startSketch() {
         final java.util.UUID body = ModelMode.selectedModel();
         if (body == null) {
-            ModelMode.prompt("model.prompt.sketch_pick_body");
+            // ★ 用户要求：草图不必先选物理结构，直接点基准面/模型面即可开。
+            //   这里只进入“等待世界拾取”的状态；真正的 body 从命中的面/基准面来。
+            sketchAwaitingStart = true;
+            ModelMode.setTool(ModelTools.SKETCH);
+            ModelMode.prompt("model.prompt.sketch_pick_plane_face");
+            buildTop();
+            refreshLeftPanel();
             return;
         }
+        sketchAwaitingStart = false;
         if (!com.ovo.sablestopnow.client.SketchClient.begin(body)) {
             // 结构还没同步到客户端（刚放置/刚进世界）—— 不要静默失败，不然玩家会以为按钮坏了
             ModelMode.prompt("model.prompt.sketch_no_body");
@@ -4672,6 +4681,83 @@ public final class ModelUi {
         ModelMode.prompt("model.prompt.sketch_pick_plane");
         buildTop();
         refreshLeftPanel();
+    }
+
+    /** 正在等待“直接点基准面/模型面”来开草图（未选物理结构）。 */
+    public static boolean sketchAwaitingStart() {
+        return sketchAwaitingStart;
+    }
+
+    /**
+     * 世界左键：没选结构时，直接点基准面方框或模型面开草图 ✓
+     *
+     * @return true = 已经开草图（或这次点击被消费）
+     */
+    public static boolean tryStartSketchFromWorld(final net.minecraft.client.Minecraft mc) {
+        if (mc == null || mc.level == null) {
+            return false;
+        }
+        // ① 基准面方框优先（用户明确要求可直接点基准面）
+        final com.ovo.sablestopnow.client.model.PlanePick.Hit ph =
+                com.ovo.sablestopnow.client.model.PlanePick.pickNow(mc);
+        if (ph != null) {
+            if (!com.ovo.sablestopnow.client.SketchClient.begin(ph.body())) {
+                ModelMode.prompt("model.prompt.sketch_no_body");
+                return true;
+            }
+            ModelMode.selectModel(ph.body());
+            if (!com.ovo.sablestopnow.client.SketchClient.choosePlaneAt(ph.body(),
+                    new org.joml.Vector3d(ph.localHit()),
+                    new org.joml.Vector3d(ph.plane().nx(), ph.plane().ny(),
+                            ph.plane().nz()).normalize())) {
+                return true;
+            }
+            sketchAwaitingStart = false;
+            ModelMode.prompt("model.prompt.sketch_pick_plane");
+            buildTop();
+            refreshLeftPanel();
+            return true;
+        }
+        // ② 模型面（面优先于方块面，和草图内部的优先级一致）
+        com.ovo.sablestopnow.client.model.FeatureHover.update(mc);
+        final com.ovo.sablestopnow.client.model.FeatureHover.Hit fh =
+                com.ovo.sablestopnow.client.model.FeatureHover.get();
+        if (fh != null && fh.kind() == com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE
+                && fh.face() != null && fh.face().planar()) {
+            if (!com.ovo.sablestopnow.client.SketchClient.begin(fh.body())) {
+                ModelMode.prompt("model.prompt.sketch_no_body");
+                return true;
+            }
+            ModelMode.selectModel(fh.body());
+            if (!com.ovo.sablestopnow.client.SketchClient.chooseModelFace(fh)) {
+                return true;
+            }
+            sketchAwaitingStart = false;
+            ModelMode.prompt("model.prompt.sketch_pick_plane");
+            buildTop();
+            refreshLeftPanel();
+            return true;
+        }
+        // ③ 方块面兜底
+        final com.ovo.sablestopnow.client.MateTargeting.BoxHit bh = ModelMode.hovered();
+        if (bh != null) {
+            final java.util.UUID bx = bh.body() == null ? null : bh.body().getUniqueId();
+            if (bx == null || !com.ovo.sablestopnow.client.SketchClient.begin(bx)) {
+                ModelMode.prompt("model.prompt.sketch_no_body");
+                return true;
+            }
+            ModelMode.selectModel(bx);
+            if (!com.ovo.sablestopnow.client.SketchClient.chooseFace(bh)) {
+                return true;
+            }
+            sketchAwaitingStart = false;
+            ModelMode.prompt("model.prompt.sketch_pick_plane");
+            buildTop();
+            refreshLeftPanel();
+            return true;
+        }
+        ModelMode.prompt("model.prompt.sketch_pick_plane_face");
+        return true;
     }
 
     /**
@@ -5783,6 +5869,7 @@ public final class ModelUi {
         textureBlockQuery.set("");
         textureSearchApplied.set("");
         editingSolidId = null;
+        sketchAwaitingStart = false;
         ModelMode.setTool(ModelTools.NONE);
         ModelMode.clearPicks();
         chosenType = null;
@@ -5796,6 +5883,7 @@ public final class ModelUi {
     }
 
     public static void startTool(final String toolId) {
+        sketchAwaitingStart = false;
         // ★ bug 15：切到**非草图**工具时，把还开着的草图会话收尾。
         //   以前只有 PLANE/FILLET/MIRROR/PATTERN 会退出草图；切到别的工具时会话还活着
         //   ⇒ 那张草图一直被当成“工作草图”渲染：完全定义绿 + 辅助线虚线常驻（用户实测）✗

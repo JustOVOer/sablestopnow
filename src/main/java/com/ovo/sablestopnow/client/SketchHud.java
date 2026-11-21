@@ -433,10 +433,6 @@ public final class SketchHud {
     @SubscribeEvent
     public static void onRenderGui(final RenderGuiEvent.Post event) {
         final Minecraft mc = Minecraft.getInstance();
-        // ★ 基准面编号：模型模式里常驻显示（左上角），不只在草图里 ✓
-        if (com.ovo.sablestopnow.client.model.ModelMode.isOn()) {
-            drawPlaneNumbers(event.getGuiGraphics(), mc);
-        }
         if (!SketchClient.active() || mc.player == null || mc.level == null) {
             Ui.close(LAYER);
             Ui.close(EDIT_LAYER); // ★ 草图不在时必须关掉**改值浮层** ✓

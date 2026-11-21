@@ -46,6 +46,11 @@ public final class RepeatTextureCache {
     }
 
     private static final Map<String, ResourceLocation> CACHE = new HashMap<>();
+    /** 连接材质的“无边框底图 + 边框环”两张动态纹理。 */
+    public record Connected(ResourceLocation base, ResourceLocation border) {
+    }
+
+    private static final Map<String, Connected> CONNECTED = new HashMap<>();
 
     /**
      * **失败也要记**（负缓存）。
@@ -132,6 +137,79 @@ public final class RepeatTextureCache {
     /** 资源重载时清空（GL 纹理已被释放，缓存必须跟着失效）。 */
     public static void clear() {
         CACHE.clear();
+        CONNECTED.clear();
         FAILED.clear();
+    }
+
+    /**
+     * 连接材质的**边框拆分** ✓
+     *
+     * <p>方块模型给的是“全边框”贴图（例如 Create 机壳的金属外框）。
+     * 这里从同一张原图的**边缘像素**得到两块：
+     * <ul>
+     *   <li>{@code base}：把最外圈像素用相邻内圈像素填平 ⇒ 无边框底图；</li>
+     *   <li>{@code border}：只保留最外圈，中心透明 ⇒ 沿模型面边缘贴的边框环。</li>
+     * </ul>
+     * 等价于“全边框 − 无边框 = 边框”，但不需要额外资源包。
+     */
+    @Nullable
+    public static Connected connected(@Nullable final String blockId) {
+        if (blockId == null || blockId.isBlank() || FAILED.contains(blockId)) {
+            return null;
+        }
+        final Connected cached = CONNECTED.get(blockId);
+        if (cached != null) {
+            return cached;
+        }
+        try {
+            final Minecraft mc = Minecraft.getInstance();
+            final TextureAtlasSprite sprite = SolidTextureCache.previewSprite(blockId);
+            if (sprite == null || isAnimated(sprite)) {
+                FAILED.add(blockId);
+                return null;
+            }
+            final NativeImage src = sprite.contents().getOriginalImage();
+            if (src == null) {
+                FAILED.add(blockId);
+                return null;
+            }
+            final int w = src.getWidth();
+            final int h = src.getHeight();
+            final int b = Math.max(1, Math.min(w, h) / 16);
+            final NativeImage base = new NativeImage(src.format(), w, h, false);
+            final NativeImage ring = new NativeImage(src.format(), w, h, false);
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    final int sx = Math.max(b, Math.min(w - 1 - b, x));
+                    final int sy = Math.max(b, Math.min(h - 1 - b, y));
+                    base.setPixelRGBA(x, y, src.getPixelRGBA(sx, sy));
+                    final boolean edge = x < b || y < b || x >= w - b || y >= h - b;
+                    ring.setPixelRGBA(x, y, edge ? src.getPixelRGBA(x, y) : 0x00000000);
+                }
+            }
+            final String key = blockId.replace(':', '_').replace('/', '_');
+            final ResourceLocation baseTex = registerRepeat(mc, "sablestopnow_ctm_base/" + key, base);
+            final ResourceLocation borderTex = registerRepeat(mc, "sablestopnow_ctm_border/" + key, ring);
+            final Connected out = new Connected(baseTex, borderTex);
+            CONNECTED.put(blockId, out);
+            return out;
+        } catch (final Throwable t) {
+            FAILED.add(blockId);
+            return null;
+        }
+    }
+
+    private static ResourceLocation registerRepeat(final Minecraft mc, final String name,
+                                                   final NativeImage image) {
+        final DynamicTexture tex = new DynamicTexture(image);
+        tex.upload();
+        final ResourceLocation loc = mc.getTextureManager().register(name, tex);
+        GlStateManager._bindTexture(tex.getId());
+        GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL11.GL_REPEAT);
+        GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL11.GL_REPEAT);
+        GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+        GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
+        GlStateManager._bindTexture(0);
+        return loc;
     }
 }

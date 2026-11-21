@@ -243,6 +243,7 @@ public final class SketchRenderer {
             com.ovo.sablestopnow.sketch.Solid.TRACE.clear();
         }
         pendingTexts.clear();
+        pendingPlaneLabels.clear();
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_ENTITIES) {
             return;
         }
@@ -333,7 +334,8 @@ public final class SketchRenderer {
         //   实体线框仍用原来的 LINES 缓冲（它们不属于"草图线条"✓ 也不该变粗 ✓）
         final MultiBufferSource.BufferSource sketchQuadBuf =
                 immediate(1 << 18);
-        final VertexConsumer vcq = sketchQuadBuf.getBuffer(ModRenderTypes.SKETCH_LINES_QUADS);
+        final VertexConsumer vcq = sketchQuadBuf.getBuffer(
+                ModRenderTypes.SKETCH_LINES_QUADS_FLAT);
 
         int drawn = 0;
         int textured = 0;
@@ -372,12 +374,21 @@ public final class SketchRenderer {
             final SolidTextureCache.Faces faces = look.hasTexture()
                     ? SolidTextureCache.resolve(look.blockId()) : null;
             if (faces != null && !placed.mesh().isEmpty() && placed.planeNormal() != null) {
+                final com.ovo.sablestopnow.client.RepeatTextureCache.Connected ctm =
+                        look.connected()
+                                ? com.ovo.sablestopnow.client.RepeatTextureCache.connected(
+                                        look.blockId())
+                                : null;
+                // 有“无边框底图”时不再内缩；回退路线才用 sprite 内缩近似。
+                final SolidTextureCache.Faces renderFaces =
+                        look.connected() && ctm == null ? insetFaces(faces, 0.0625) : faces;
                 // ⚠ **REPEAT 贴图路线**下每个实体可能是**不同的**贴图（不同方块），
                 //   所以各自用自己的 immediate 源与 RenderType ——
                 //   共用同一个 BufferSource 去取不同 RenderType 会**结束掉前一个 builder**
                 //   （此处曾导致客户端崩在 `BufferBuilder.ensureBuilding: Not building!`）。
-                final net.minecraft.resources.ResourceLocation repeatTex =
-                        com.ovo.sablestopnow.client.RepeatTextureCache.of(look.blockId());
+                final net.minecraft.resources.ResourceLocation repeatTex = ctm != null
+                        ? ctm.base()
+                        : com.ovo.sablestopnow.client.RepeatTextureCache.of(look.blockId());
                 if (repeatTex != null) {
                     final MultiBufferSource.BufferSource own =
                             immediate(1 << 16);
@@ -385,12 +396,29 @@ public final class SketchRenderer {
                             ghostAlpha < 1.0f
                                     ? net.minecraft.client.renderer.RenderType.entityTranslucent(repeatTex)
                                     : net.minecraft.client.renderer.RenderType.entityCutoutNoCull(repeatTex));
-                    textured += drawTexturedSolid(vcRepeat, pose, cameraPos, sPose, placed, faces,
+                    textured += drawTexturedSolid(vcRepeat, pose, cameraPos, sPose, placed, renderFaces,
                             look.blocksPerTile(), repeatTex);
+                    if (look.connected()) {
+                        if (ctm != null) {
+                            final MultiBufferSource.BufferSource borderBuf = immediate(1 << 16);
+                            final VertexConsumer vcBorder = borderBuf.getBuffer(
+                                    net.minecraft.client.renderer.RenderType.entityCutoutNoCull(
+                                            ctm.border()));
+                            drawTextureBorder(vcBorder, pose, cameraPos, sPose, placed,
+                                    faces, ctm.border());
+                            borderBuf.endBatch();
+                        } else {
+                            drawTextureBorder(vcRepeat, pose, cameraPos, sPose, placed,
+                                    faces, null);
+                        }
+                    }
                     own.endBatch();
                 } else {
-                    textured += drawTexturedSolid(vcTex, pose, cameraPos, sPose, placed, faces,
+                    textured += drawTexturedSolid(vcTex, pose, cameraPos, sPose, placed, renderFaces,
                             look.blocksPerTile(), null);
+                    if (look.connected()) {
+                        drawTextureBorder(vcTex, pose, cameraPos, sPose, placed, faces, null);
+                    }
                 }
             }
             if (vcDebug != null) {
@@ -551,35 +579,8 @@ public final class SketchRenderer {
                 drawPreview(vcq, pose, cameraPos, sub.renderPose(), sketch);
             }
         }
-        // ★ item 11：**连接纹理的边框** —— 有邻居的边不画、没邻居的边画内缩线 ✓
-        //   （几何侧实现：边框来自模型自己的面邻接 ⇒ 面/棱/角天然正确 ✓）
-        for (final Solid.Placed placed : solids) {
-            if (!placed.solid().appearance().connected()) {
-                continue;
-            }
-            final ClientSubLevel csub = byId.get(placed.solid().body());
-            if (csub == null) {
-                continue;
-            }
-            final com.ovo.sablestopnow.sketch.Features.Graph graph =
-                    com.ovo.sablestopnow.sketch.Features.of(placed);
-            if (graph.faces().isEmpty()) {
-                continue;
-            }
-            final Pose3dc cp = csub.renderPose();
-            final float[] border = {0.22f, 0.22f, 0.22f};
-            for (final com.ovo.sablestopnow.sketch.Features.Face f : graph.faces()) {
-                if (!f.planar()) {
-                    continue;
-                }
-                for (final Vector3d[] seg : com.ovo.sablestopnow.sketch.CtmBorder.borderOf(
-                        f, graph.faces())) {
-                    quadLine(vcq, pose, world(cameraPos, cp, seg[0]),
-                            world(cameraPos, cp, seg[1]), border);
-                    drawn++;
-                }
-            }
-        }
+        // 连接纹理边框现在直接贴在有纹理的实体边缘上（drawTextureBorder），
+        // 不再额外画一圈深灰色几何线。
         // ★ item 7：**基准面特征**画成半透明面片 + 描边 ✓
         // ★ 基准面特征在 placeAll 里被跳过（不是材料）⇒ 不能从 placed 里找，
         //   必须从**全部实体**里找，否则"创建了但看不见"（用户实测）✓
@@ -592,6 +593,7 @@ public final class SketchRenderer {
                 continue;
             }
             drawn += drawPlaneFeature(vcq, pose, cameraPos, psub, plane, planeSolid.id());
+            pendingPlaneLabels.add(new Object[] {psub.renderPose(), plane, planeSolid.id()});
         }
         // ★ item 6：**树行悬停 ⇒ 高亮对应特征** ✓（橙色描边，不改选择集）
         if (!sketching && com.ovo.sablestopnow.client.model.FeatureHighlight.id() != null) {
@@ -651,6 +653,8 @@ public final class SketchRenderer {
                 drawn += drawSketchTexts(ps, cp, rp, sk);
             }
             pendingTexts.clear();
+            drawn += drawPlaneLabels(pose, cameraPos, mc);
+            pendingPlaneLabels.clear();
             // ★ 诊断：确认细条真的写进缓冲并被 flush（"还是 1px" 时用来判断是哪一环断了）
             final String qdiag = "quads=" + quadsWritten;
             if (!qdiag.equals(lastQuadDiag)) {
@@ -817,6 +821,104 @@ public final class SketchRenderer {
             }
         }
         return idx.length / 4;
+    }
+
+    /** 连接材质的**无边框**底图：把 sprite 子矩形四周各剪掉一个边框比例。 */
+    private static SolidTextureCache.Faces insetFaces(final SolidTextureCache.Faces faces,
+                                                      final double frac) {
+        if (faces == null) {
+            return null;
+        }
+        return new SolidTextureCache.Faces(inset(faces.capUp(), frac),
+                inset(faces.capDown(), frac), inset(faces.side(), frac), faces.particle());
+    }
+
+    private static com.ovo.sablestopnow.sketch.SolidUv.SpriteRect inset(
+            final com.ovo.sablestopnow.sketch.SolidUv.SpriteRect r, final double frac) {
+        final double du = (r.u1() - r.u0()) * frac;
+        final double dv = (r.v1() - r.v0()) * frac;
+        return new com.ovo.sablestopnow.sketch.SolidUv.SpriteRect(
+                r.u0() + du, r.u1() - du, r.v0() + dv, r.v1() - dv);
+    }
+
+    /**
+     * 沿着相连面的**真实外边缘**贴一圈纹理边框 ✓
+     *
+     * <p>底图用内缩后的“无边框”sprite；这里再用原 sprite 的外圈像素
+     * 沿没有邻居的边画四边形条带。这样边框会跟着模型面边缘走，而不是
+     * 以前那条深灰色几何线。
+     */
+    private static void drawTextureBorder(final VertexConsumer vc, final PoseStack.Pose pose,
+                                          final Vec3 cameraPos, final Pose3dc renderPose,
+                                          final com.ovo.sablestopnow.sketch.Solid.Placed placed,
+                                          final SolidTextureCache.Faces faces,
+                                          final net.minecraft.resources.ResourceLocation borderTexture) {
+        final com.ovo.sablestopnow.sketch.Features.Graph graph =
+                com.ovo.sablestopnow.sketch.Features.of(placed);
+        if (graph == null || graph.faces().isEmpty() || faces == null) {
+            return;
+        }
+        final com.ovo.sablestopnow.sketch.SolidUv.SpriteRect side = faces.side();
+        final float bw = 0.0625f;
+        final org.joml.Quaterniondc rot = renderPose.orientation();
+        for (final com.ovo.sablestopnow.sketch.Features.Face face : graph.faces()) {
+            if (!face.planar()) {
+                continue;
+            }
+            for (final com.ovo.sablestopnow.sketch.CtmBorder.Strip strip
+                    : com.ovo.sablestopnow.sketch.CtmBorder.stripsOf(face, graph.faces())) {
+                final Vector3d lift = new Vector3d(strip.normal()).mul(0.0025);
+                final Vec3 a = world(cameraPos, renderPose,
+                        new Vector3d(strip.outer0()).add(lift));
+                final Vec3 b = world(cameraPos, renderPose,
+                        new Vector3d(strip.outer1()).add(lift));
+                final Vec3 c = world(cameraPos, renderPose,
+                        new Vector3d(strip.inner1()).add(lift));
+                final Vec3 d = world(cameraPos, renderPose,
+                        new Vector3d(strip.inner0()).add(lift));
+                final Vector3d n = rot.transform(new Vector3d(strip.normal()), new Vector3d());
+                float uO;
+                float uI;
+                float vO;
+                float vI;
+                if (borderTexture != null) {
+                    // 生成的边框图：整张 0..1；按边选对应的一条环
+                    switch (strip.side()) {
+                        case 0 -> { uO = 0.0f; uI = bw; vO = 0.0f; vI = 1.0f; }
+                        case 1 -> { uO = 1.0f; uI = 1.0f - bw; vO = 0.0f; vI = 1.0f; }
+                        case 2 -> { uO = 0.0f; uI = 1.0f; vO = 0.0f; vI = bw; }
+                        default -> { uO = 0.0f; uI = 1.0f; vO = 1.0f; vI = 1.0f - bw; }
+                    }
+                } else {
+                    // 图集/REPEAT 原图：从该 sprite 的对应边取一条像素带
+                    final float su0 = (float) side.u0();
+                    final float su1 = (float) side.u1();
+                    final float sv0 = (float) side.v0();
+                    final float sv1 = (float) side.v1();
+                    switch (strip.side()) {
+                        case 0 -> { uO = su0; uI = su0 + (su1 - su0) * bw; vO = sv0; vI = sv1; }
+                        case 1 -> { uO = su1; uI = su1 - (su1 - su0) * bw; vO = sv0; vI = sv1; }
+                        case 2 -> { uO = su0; uI = su1; vO = sv0; vI = sv0 + (sv1 - sv0) * bw; }
+                        default -> { uO = su0; uI = su1; vO = sv1; vI = sv1 - (sv1 - sv0) * bw; }
+                    }
+                }
+                final Vec3[] ps = {a, b, c, d};
+                final float[][] uv;
+                if (strip.side() <= 1) {
+                    uv = new float[][] {{uO, vO}, {uO, vI}, {uI, vI}, {uI, vO}};
+                } else {
+                    uv = new float[][] {{uO, vO}, {uI, vO}, {uI, vI}, {uO, vI}};
+                }
+                for (int k = 0; k < 4; k++) {
+                    vc.addVertex(pose, (float) ps[k].x, (float) ps[k].y, (float) ps[k].z)
+                            .setColor(255, 255, 255, (int) (ghostAlpha * 255.0f))
+                            .setUv(uv[k][0], uv[k][1])
+                            .setOverlay(net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY)
+                            .setLight(FULL_BRIGHT)
+                            .setNormal(pose, (float) n.x, (float) n.y, (float) n.z);
+                }
+            }
+        }
     }
 
     /**
@@ -2329,6 +2431,10 @@ public final class SketchRenderer {
 
     /** 本帧待画的文字（收集后统一在最后画）✓ */
     private static final java.util.List<Object[]> pendingTexts = new java.util.ArrayList<>();
+    /** 基准面编号的世界空间标签（画在方框左上角，跟随平面，不是屏幕 HUD）✓ */
+    private static final java.util.List<Object[]> pendingPlaneLabels =
+            new java.util.ArrayList<>();
+
 
     /**
      * 本帧创建的即时缓冲 ✓
@@ -2360,7 +2466,82 @@ public final class SketchRenderer {
         FRAME_BUFFERS.clear();
     }
 
-    /** 把基准面画成**描边方框** ✓（item 7；与预览共用 {@code Plane.corners} ✓） */
+    /**
+     * 基准面编号的**世界空间文字** ✓
+     *
+     * <p>以前是在 HUD 上把方框角投影到屏幕再画字（用户实测要求改成
+     * “渲染在世界里、渲染在基准面上”）。这里用平面的 u/v 基向量构造文字矩阵，
+     * 位置取方框左上角，文字随结构移动/旋转，也会随视角透视。
+     */
+    private static int drawPlaneLabels(final PoseStack.Pose pose, final Vec3 cameraPos,
+                                       final Minecraft mc) {
+        if (pendingPlaneLabels.isEmpty()) {
+            return 0;
+        }
+        final MultiBufferSource.BufferSource texBuf = immediate(1 << 16);
+        int n = 0;
+        for (final Object[] item : pendingPlaneLabels) {
+            final dev.ryanhcode.sable.companion.math.Pose3dc rp =
+                    (dev.ryanhcode.sable.companion.math.Pose3dc) item[0];
+            final Solid.Shape.Plane plane = (Solid.Shape.Plane) item[1];
+            final java.util.UUID id = (java.util.UUID) item[2];
+            final java.util.List<Vector3d> cs = plane.corners(1.0);
+            final Vector3d o0 = rp.transformPosition(new Vector3d(cs.get(0)), new Vector3d());
+            final Vector3d p1 = rp.transformPosition(new Vector3d(cs.get(1)), new Vector3d());
+            final Vector3d p3 = rp.transformPosition(new Vector3d(cs.get(3)), new Vector3d());
+            final Vector3d uW = new Vector3d(p1).sub(o0).normalize();
+            final Vector3d vW = new Vector3d(p3).sub(o0).normalize();
+            final Vector3d nW = new Vector3d(uW).cross(vW).normalize();
+            // 左上角朝里缩一点，再沿法线抬一点，避免和方框/模型 z-fighting
+            final Vector3d at = new Vector3d(p3)
+                    .fma(0.055, uW).fma(-0.045, vW).fma(0.012, nW);
+            final org.joml.Matrix4f m = new org.joml.Matrix4f(pose.pose())
+                    .translate((float) (at.x - cameraPos.x),
+                            (float) (at.y - cameraPos.y),
+                            (float) (at.z - cameraPos.z))
+                    .mul(new org.joml.Matrix4f().set(
+                            (float) uW.x, (float) uW.y, (float) uW.z, 0.0f,
+                            (float) -vW.x, (float) -vW.y, (float) -vW.z, 0.0f,
+                            (float) -nW.x, (float) -nW.y, (float) -nW.z, 0.0f,
+                            0.0f, 0.0f, 0.0f, 1.0f))
+                    .scale(0.024f);
+            final boolean hot = id.equals(
+                    com.ovo.sablestopnow.client.model.PlanePick.hoveredSolidId());
+            final String text = net.minecraft.network.chat.Component
+                    .translatable("model.plane.label", planeIndex(id)).getString();
+            mc.font.drawInBatch(text, 0, 0, hot ? 0xFFFFCC55 : 0xFFBFE4FF,
+                    false, m, texBuf, net.minecraft.client.gui.Font.DisplayMode.SEE_THROUGH,
+                    0, 0xF000F0);
+            n++;
+        }
+        texBuf.endBatch();
+        return n;
+    }
+
+    /** 基准面特征的树序号（只用于标签；稳定按实体 id 排序）。 */
+    private static int planeIndex(final java.util.UUID id) {
+        final Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
+            return 1;
+        }
+        final java.util.List<com.ovo.sablestopnow.sketch.Solid> planes =
+                new java.util.ArrayList<>();
+        for (final com.ovo.sablestopnow.sketch.Solid s
+                : com.ovo.sablestopnow.sketch.SolidClientState.in(
+                        mc.level.dimension().location())) {
+            if (s.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Plane) {
+                planes.add(s);
+            }
+        }
+        planes.sort(java.util.Comparator.comparing(
+                (com.ovo.sablestopnow.sketch.Solid s) -> s.index()));
+        for (int i = 0; i < planes.size(); i++) {
+            if (planes.get(i).id().equals(id)) {
+                return planes.get(i).index();
+            }
+        }
+        return 1;
+    }
     private static int drawPlaneFeature(final VertexConsumer vcq, final PoseStack.Pose pose,
                                         final Vec3 cameraPos, final ClientSubLevel sub,
                                         final Solid.Shape.Plane plane,

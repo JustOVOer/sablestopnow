@@ -656,6 +656,11 @@ public final class ModelInput {
                         : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
                 com.ovo.sablestopnow.client.SketchClient.active(),
                 com.ovo.sablestopnow.client.SketchClient.editing());
+        // ★ 没选物理结构时的草图工具：这次点击直接拿基准面/模型面开草图。
+        if (com.ovo.sablestopnow.client.model.ModelUi.sketchAwaitingStart()) {
+            com.ovo.sablestopnow.client.model.ModelUi.tryStartSketchFromWorld(mc);
+            return;
+        }
         // ★ 四个特征工具**优先**：它们不属于草图交互，必须在草图分支之前分流
         //   （之前这些分支被误放进 SketchClient.active() 里 ⇒ 进工具后点击永远进不来）
         if (handleFeatureToolClick()) {

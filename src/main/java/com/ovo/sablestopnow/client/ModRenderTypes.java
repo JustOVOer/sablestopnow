@@ -151,7 +151,7 @@ public class ModRenderTypes {
             true,
             RenderType.CompositeState.builder()
                     .setShaderState(RenderStateShard.POSITION_COLOR_SHADER)
-                    .setLayeringState(RenderStateShard.VIEW_OFFSET_Z_LAYERING)
+                    .setLayeringState(RenderStateShard.NO_LAYERING)
                     .setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
                     .setOutputState(RenderStateShard.ITEM_ENTITY_TARGET)
                     .setWriteMaskState(RenderStateShard.COLOR_WRITE)

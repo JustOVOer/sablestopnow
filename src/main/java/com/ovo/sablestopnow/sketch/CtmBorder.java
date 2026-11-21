@@ -108,6 +108,107 @@ public final class CtmBorder {
         return out;
     }
 
+    /** 一条**带宽度**的边框四边形：outer → inner，四角按外/内顺序 ✓ */
+    public record Strip(Vector3d outer0, Vector3d outer1,
+                        Vector3d inner1, Vector3d inner0, Vector3d normal,
+                        int side) {
+    }
+
+    /**
+     * 贴图式边框：返回沿面**真实边缘**的四边形条带（而不是一条内缩线）。
+     *
+     * <p>只在该边**没有相邻面**时输出；条带从外边界向内缩 {@link #INSET}，
+     * 渲染侧用贴图边缘的像素填满它。
+     */
+    public static List<Strip> stripsOf(final Features.Face face,
+                                       final List<Features.Face> all) {
+        final List<Strip> out = new ArrayList<>();
+        if (face == null || all == null || face.triangles().isEmpty()) {
+            return out;
+        }
+        double minX = Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double minZ = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+        double maxZ = -Double.MAX_VALUE;
+        for (final Vector3d[] tri : face.triangles()) {
+            for (final Vector3d p : tri) {
+                minX = Math.min(minX, p.x);
+                minY = Math.min(minY, p.y);
+                minZ = Math.min(minZ, p.z);
+                maxX = Math.max(maxX, p.x);
+                maxY = Math.max(maxY, p.y);
+                maxZ = Math.max(maxZ, p.z);
+            }
+        }
+        final double sx = Math.max(1.0e-6, maxX - minX);
+        final double sy = Math.max(1.0e-6, maxY - minY);
+        final double sz = Math.max(1.0e-6, maxZ - minZ);
+        final int thin = sz <= sx && sz <= sy ? 2 : (sy <= sx ? 1 : 0);
+        final int a1 = (thin + 1) % 3;
+        final int a2 = (thin + 2) % 3;
+        final double[] lo = {minX, minY, minZ};
+        final double[] hi = {maxX, maxY, maxZ};
+        final double inset1 = (hi[a1] - lo[a1]) * INSET;
+        final double inset2 = (hi[a2] - lo[a2]) * INSET;
+        final double plane = (lo[thin] + hi[thin]) * 0.5;
+        final boolean[] has = new boolean[4];
+        for (final Features.Face other : all) {
+            if (other == face) {
+                continue;
+            }
+            final int[] sides = sidesTouching(face, other, thin, a1, a2, lo, hi);
+            for (int i = 0; i < 4; i++) {
+                if (sides[i] > 0) {
+                    has[i] = true;
+                }
+            }
+        }
+        final Vector3d n = face.normal() == null
+                ? new Vector3d(0, 1, 0) : new Vector3d(face.normal()).normalize();
+        for (int side = 0; side < 4; side++) {
+            if (has[side]) {
+                continue;
+            }
+            final double[] o0 = new double[3];
+            final double[] o1 = new double[3];
+            final double[] i0 = new double[3];
+            final double[] i1 = new double[3];
+            for (final double[] p : new double[][] {o0, o1, i0, i1}) {
+                p[thin] = plane;
+            }
+            if (side == 0 || side == 1) {
+                final double outer = side == 0 ? lo[a1] : hi[a1];
+                final double inner = side == 0 ? lo[a1] + inset1 : hi[a1] - inset1;
+                o0[a1] = outer;
+                o1[a1] = outer;
+                i0[a1] = inner;
+                i1[a1] = inner;
+                o0[a2] = lo[a2];
+                i0[a2] = lo[a2] + inset2;
+                o1[a2] = hi[a2];
+                i1[a2] = hi[a2] - inset2;
+            } else {
+                final double outer = side == 2 ? lo[a2] : hi[a2];
+                final double inner = side == 2 ? lo[a2] + inset2 : hi[a2] - inset2;
+                o0[a2] = outer;
+                o1[a2] = outer;
+                i0[a2] = inner;
+                i1[a2] = inner;
+                o0[a1] = lo[a1];
+                i0[a1] = lo[a1] + inset1;
+                o1[a1] = hi[a1];
+                i1[a1] = hi[a1] - inset1;
+            }
+            out.add(new Strip(new Vector3d(o0[0], o0[1], o0[2]),
+                    new Vector3d(o1[0], o1[1], o1[2]),
+                    new Vector3d(i1[0], i1[1], i1[2]),
+                    new Vector3d(i0[0], i0[1], i0[2]), n, side));
+        }
+        return out;
+    }
+
     /** 判断 other 贴着 face 的哪几条边（返回长度 4 的计数数组）✓ */
     private static int[] sidesTouching(final Features.Face face, final Features.Face other,
                                        final int thin, final int a1, final int a2,

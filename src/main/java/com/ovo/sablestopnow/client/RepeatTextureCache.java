@@ -192,8 +192,12 @@ public final class RepeatTextureCache {
             final ResourceLocation borderTex = registerRepeat(mc, "sablestopnow_ctm_border/" + key, ring);
             final Connected out = new Connected(baseTex, borderTex);
             CONNECTED.put(blockId, out);
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[ctm] generated borderless/border for {} {}x{} b={}", blockId, w, h, b);
             return out;
         } catch (final Throwable t) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.warn(
+                    "[ctm] failed to build connected texture for {}: {}", blockId, t.toString());
             FAILED.add(blockId);
             return null;
         }

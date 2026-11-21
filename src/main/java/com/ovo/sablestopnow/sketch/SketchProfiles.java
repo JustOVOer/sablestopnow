@@ -291,8 +291,11 @@ public final class SketchProfiles {
     /** 弧的采样段数：整圈段数按半径自适应，再按扫过的角度缩放。 */
     private static int arcSegments(final Sketch sketch, final Sketch.Entity arc,
                                    final Sampling sampling) {
-        // ⚠ 半径与扫角都**现算**（弧存的是圆心 + 起点 + 终点 ✓ 见 EntityKind.ARC ✓）
-        final double sweep = sketch.arcSweep(arc);
+        // ⚠ 半径与扫角都现算（弧存的是圆心 + 起点 + 终点 ✓ 见 EntityKind.ARC ✓）
+        // ★ 必须取绝对值：顺时针弧的 arcSweep 是**负角**，直接乘会得到负数，
+        //   Math.max(3, 负数) ⇒ 永远只用 3 段！用户实测的“180° 半圆槽转出来
+        //   是台体-柱体-台体”就是这条：半圆被 3 段弦近似。
+        final double sweep = Math.abs(sketch.arcSweep(arc));
         final double radius = sketch.arcRadius(arc);
         final int perTurn = Math.max(sampling.arcSegmentsPerTurn(), sampling.segmentsFor(radius));
         return Math.max(3, (int) Math.ceil(perTurn * sweep / (2.0 * Math.PI)));

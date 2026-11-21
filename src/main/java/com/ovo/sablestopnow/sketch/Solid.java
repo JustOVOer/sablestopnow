@@ -60,6 +60,13 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         record Cut(Extrude.Params params) implements Shape {
         }
 
+        /** 旋转切割：把旋转体从同 body 的材料里减掉（与拉伸切割独立）✓。 */
+        record RevolutionCut(Revolve.Params params) implements Shape {
+            public RevolutionCut {
+                Objects.requireNonNull(params, "旋转切割参数不能为空");
+            }
+        }
+
         /**
          * **基准面特征** ✓（item 7）。
          *
@@ -533,6 +540,13 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 new Shape.Cut(params), SolidAppearance.EMPTY);
     }
 
+    /** 新建一个**旋转切割**实体（独立于拉伸切割）✓。 */
+    public static Solid createRevolutionCut(final UUID body, final UUID sketchId,
+                                            final int index, final Revolve.Params params) {
+        return new Solid(UUID.randomUUID(), body, sketchId, index,
+                new Shape.RevolutionCut(params), SolidAppearance.EMPTY);
+    }
+
     /** 新建一个**旋转**实体。 */
     public static Solid createRevolution(final UUID body, final UUID sketchId, final int index,
                                          final Revolve.Params params) {        return createRevolution(body, sketchId, index, params, SolidAppearance.EMPTY);
@@ -549,6 +563,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     /** 是拉伸还是旋转（UI 与存档要用）。 */
     public boolean isRevolution() {
         return shape instanceof Shape.Revolution;
+    }
+
+    /** 切割特征（拉伸切割或旋转切割）✓。 */
+    public boolean isCut() {
+        return shape instanceof Shape.Cut || shape instanceof Shape.RevolutionCut;
     }
 
     /** 拉伸参数；不是拉伸实体时返回 null。 */
@@ -618,6 +637,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
         final List<SolidCollision.OrientedBox> raw = switch (shape) {
             case Shape.Cut c -> List.of(); // 切割体没有自己的碰撞 ✓
+            case Shape.RevolutionCut c -> List.of(); // 旋转切割同样不提供碰撞 ✓
             case Shape.Plane p -> List.of(); // 基准面不是材料 ✓
             case Shape.Fillet f -> List.of(); // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
             case Shape.Mirror m -> List.of(); // 镜像的材料由反射得出 ✓
@@ -717,6 +737,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             }
             case Shape.Revolution r -> volumeOfRevolution(r.params(), regions, area);
             case Shape.Cut c -> 0.0; // 切割体不提供材料体积 ✓
+            case Shape.RevolutionCut c -> 0.0; // 旋转切割不提供材料体积 ✓
             case Shape.Plane p -> 0.0; // 基准面不是材料 ✓
             case Shape.Fillet f -> 0.0; // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
             case Shape.Mirror m -> 0.0; // 镜像的材料由反射得出 ✓
@@ -831,6 +852,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Extrusion e -> SolidMesh.build(sketch, e.params());
             case Shape.Revolution r -> Revolve.mesh(sketch, r.params());
             case Shape.Cut c -> EMPTY_MESH; // 切割体不渲染 ✓
+            case Shape.RevolutionCut c -> EMPTY_MESH; // 旋转切割不渲染 ✓
             case Shape.Plane p -> EMPTY_MESH; // 基准面不是材料 ✓
             case Shape.Fillet f -> EMPTY_MESH; // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
             case Shape.Mirror m -> EMPTY_MESH; // 镜像的材料由反射得出 ✓
@@ -853,6 +875,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             case Shape.Extrusion e -> Extrude.prismEdges(sketch, e.params());
             case Shape.Revolution r -> Revolve.edges(sketch, r.params());
             case Shape.Cut c -> List.of(); // 切割体不画线框 ✓
+            case Shape.RevolutionCut c -> List.of(); // 旋转切割不画线框 ✓
             case Shape.Plane p -> List.of(); // 基准面不是材料 ✓
             case Shape.Fillet f -> List.of(); // 圆角本身不产生材料（它产生"要挖掉的盒子"）✓
             case Shape.Mirror m -> List.of(); // 镜像的材料由反射得出 ✓
@@ -1028,7 +1051,14 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     }
 
     private record CutFeat(SketchPlane plane, Sketch sketch, Extrude.Params params,
-                           List<double[]> boxes) {
+                           Revolve.Params revolve, List<double[]> boxes) {
+
+        SolidMesh.Mesh cutterMesh() {
+            if (revolve != null) {
+                return Revolve.mesh(sketch, revolve);
+            }
+            return SolidMesh.build(sketch, params);
+        }
     }
 
     /** 一个**被选中特征**的求值结果（只含选中的材料/切割/圆角，供克隆使用）✓ */
@@ -1181,19 +1211,24 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         //   盒子层布尔：稳、快、与碰撞天然一致（物理只吃盒子 ✓）
         final java.util.Map<UUID, List<CutFeat>> cutters = new java.util.HashMap<>();
         for (final Solid solid : solids) {
-            if (!(solid.shape() instanceof Shape.Cut cut)) {
-                continue;
+            if (solid.shape() instanceof final Shape.Cut cut) {
+                final Sketch cs = solid.resolve(sketches);
+                if (cs == null) {
+                    lastCsgDiag = "cutResolve=null body=" + solid.body();
+                    continue;
+                }
+                cutters.computeIfAbsent(solid.body(), k -> new ArrayList<>())
+                        .add(new CutFeat(cs.plane(), cs, cut.params(), null,
+                                Extrude.boxesOf(cs, cut.params())));
+            } else if (solid.shape() instanceof final Shape.RevolutionCut rc) {
+                final Sketch cs = solid.resolve(sketches);
+                if (cs == null) {
+                    lastCsgDiag = "revCutResolve=null body=" + solid.body();
+                    continue;
+                }
+                cutters.computeIfAbsent(solid.body(), k -> new ArrayList<>())
+                        .add(new CutFeat(cs.plane(), cs, null, rc.params(), List.of()));
             }
-            final Sketch cs = solid.resolve(sketches);
-            if (cs == null) {
-                // ★ 诊断：切割体**解析不到它的草图** ⇒ 这次切割什么都不会发生 ✓
-                //   （实测"完全没有切割"也可能就是这一条 ✓ 常见于草图集合没传全 ✓）
-                lastCsgDiag = "cutResolve=null body=" + solid.body();
-                continue;
-            }
-            cutters.computeIfAbsent(solid.body(), k -> new ArrayList<>())
-                    .add(new CutFeat(cs.plane(), cs, cut.params(),
-                            Extrude.boxesOf(cs, cut.params())));
         }
         // ★ item 8：**圆角**要挖掉的盒子（局部坐标，直接可用 ✓ 不需要平面换算）
         final java.util.Map<UUID, Solid> byId = new java.util.HashMap<>();
@@ -1559,9 +1594,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 List<Csg.Polygon> acc = ensureOutward(CsgMesh.fromMesh(targetMesh, null));
                 int cutterTris = 0;
                 for (final CutFeat f : feats) {
-                    SolidMesh.Mesh cutterMesh = SolidMesh.build(f.sketch(), f.params());
+                    SolidMesh.Mesh cutterMesh = f.cutterMesh();
                     if (cutterMesh == null || cutterMesh.isEmpty()) {
                         cutterMesh = boxesInLocal(f.sketch(), f.boxes());
+                    }
+                    if (cutterMesh == null || cutterMesh.isEmpty()) {
+                        continue;
                     }
                     cutterTris += cutterMesh.indices().length / 3;
                     // ★ 修实测"仍然没有切割"✗ ✗

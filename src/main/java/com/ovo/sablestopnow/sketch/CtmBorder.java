@@ -168,9 +168,9 @@ public final class CtmBorder {
         final Vector3d n = face.normal() == null
                 ? new Vector3d(0, 1, 0) : new Vector3d(face.normal()).normalize();
         for (int side = 0; side < 4; side++) {
-            if (has[side]) {
-                continue;
-            }
+            // ★ 贴图边框沿**每个平面面的四条边**走（立方体每个面都要有框）。
+            //   以前只画“没有相邻面”的边 ⇒ 立方体边都有垂直邻面 ⇒ 一条边框都没有，
+            //   用户实测“连接材质完全没生效”。
             final double[] o0 = new double[3];
             final double[] o1 = new double[3];
             final double[] i0 = new double[3];

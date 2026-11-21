@@ -199,6 +199,15 @@ public class SolidData extends SavedData {
                 entry.putDouble("d1", c.params().depth1());
                 entry.putDouble("d2", c.params().depth2());
             }
+            case Solid.Shape.RevolutionCut c -> {
+                entry.putString("shape", "revolution_cut");
+                entry.putDouble("au", c.params().axisU());
+                entry.putDouble("av", c.params().axisV());
+                entry.putDouble("du", c.params().dirU());
+                entry.putDouble("dv", c.params().dirV());
+                entry.putDouble("angle", c.params().angleDeg());
+                entry.putInt("direction", c.params().direction());
+            }
               case Solid.Shape.Plane p -> {
                   // ★ item 7：基准面特征 ✓（中心点 + 法线 + 距离 + 源面）
                   entry.putString("shape", "plane");
@@ -352,6 +361,10 @@ public class SolidData extends SavedData {
             final String shape = entry.contains("shape") ? entry.getString("shape") : "extrusion";
             final Solid.Shape parsed = switch (shape) {
                 case "revolution" -> new Solid.Shape.Revolution(new Revolve.Params(
+                        entry.getDouble("au"), entry.getDouble("av"),
+                        entry.getDouble("du"), entry.getDouble("dv"),
+                        entry.getDouble("angle"), entry.getInt("direction")));
+                case "revolution_cut" -> new Solid.Shape.RevolutionCut(new Revolve.Params(
                         entry.getDouble("au"), entry.getDouble("av"),
                         entry.getDouble("du"), entry.getDouble("dv"),
                         entry.getDouble("angle"), entry.getInt("direction")));

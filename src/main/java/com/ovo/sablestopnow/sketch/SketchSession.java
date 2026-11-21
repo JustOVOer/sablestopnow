@@ -1339,6 +1339,9 @@ public final class SketchSession {
         }
         KeyPoint best = null;
         double bestDistance = tolerance;
+        // ★ 吸附优先级：先“点/端点”（0），再“圆心”（1），最后“中点”（2）。
+        //   以前只按距离比，中点常常抢走端点 ⇒ 用户实测“想吸线段端点却吸到中点”。
+        int bestPriority = Integer.MAX_VALUE;
         for (final Sketch.Entity entity : working.entities()) {
             final int[] e = entity.vars();
             switch (entity.kind()) {
@@ -1346,7 +1349,9 @@ public final class SketchSession {
                     final KeyPoint kp = new KeyPoint(working.variable(e[0]), working.variable(e[1]),
                             KeyKind.ENDPOINT, entity, e[0], e[1]);
                     final double d = Math.hypot(u - kp.u(), v - kp.v());
-                    if (d <= bestDistance) {
+                    if (d <= tolerance
+                            && (0 < bestPriority || (0 == bestPriority && d <= bestDistance))) {
+                        bestPriority = 0;
                         bestDistance = d;
                         best = kp;
                     }
@@ -1361,7 +1366,9 @@ public final class SketchSession {
                     final int[][] endVars = {{e[0], e[1]}, {e[2], e[3]}};
                     for (int i = 0; i < 2; i++) {
                         final double d = Math.hypot(u - ends[i][0], v - ends[i][1]);
-                        if (d <= bestDistance) {
+                        if (d <= tolerance
+                                && (0 < bestPriority || (0 == bestPriority && d <= bestDistance))) {
+                            bestPriority = 0;
                             bestDistance = d;
                             best = new KeyPoint(ends[i][0], ends[i][1], KeyKind.ENDPOINT,
                                     entity, endVars[i][0], endVars[i][1]);
@@ -1371,7 +1378,9 @@ public final class SketchSession {
                     final double mx = (ax + bx) * 0.5;
                     final double my = (ay + by) * 0.5;
                     final double dm = Math.hypot(u - mx, v - my);
-                    if (dm <= bestDistance) {
+                    if (dm <= tolerance
+                            && (2 < bestPriority || (2 == bestPriority && dm <= bestDistance))) {
+                        bestPriority = 2;
                         bestDistance = dm;
                         best = new KeyPoint(mx, my, KeyKind.MIDPOINT, entity, -1, -1);
                     }
@@ -1382,8 +1391,12 @@ public final class SketchSession {
                     // ★ 用户要求：**圆心/端点这类"图元上的点"吸附时应当优先** ✓
                     //   做法：距离打个 0.8 折扣 ⇒ 与"线/弧上的普通位置"打平时点会赢 ✓
                     //   （与 `pickEntity` 里"点优先"的处理是同一思路 ✓）
-                    final double d = Math.hypot(u - kp.u(), v - kp.v()) * 0.8;
-                    if (d <= bestDistance) {
+                    // 圆心优先级低于端点、高于中点（不再用 0.8 距离折扣，
+                    // 折扣会让远端圆心抢走近处端点）。
+                    final double d = Math.hypot(u - kp.u(), v - kp.v());
+                    if (d <= tolerance
+                            && (1 < bestPriority || (1 == bestPriority && d <= bestDistance))) {
+                        bestPriority = 1;
                         bestDistance = d;
                         best = kp;
                     }
@@ -1393,8 +1406,10 @@ public final class SketchSession {
                     final double cx = working.variable(e[0]);
                     final double cy = working.variable(e[1]);
                     // 圆心同样**优先** ✓（0.8 折扣 ✓ 与圆的圆心一致 ✓）
-                    final double dc = Math.hypot(u - cx, v - cy) * 0.8;
-                    if (dc <= bestDistance) {
+                    final double dc = Math.hypot(u - cx, v - cy);
+                    if (dc <= tolerance
+                            && (1 < bestPriority || (1 == bestPriority && dc <= bestDistance))) {
+                        bestPriority = 1;
                         bestDistance = dc;
                         best = new KeyPoint(cx, cy, KeyKind.CENTER, entity, e[0], e[1]);
                     }
@@ -1407,7 +1422,10 @@ public final class SketchSession {
                     if (ends != null) {
                         for (int i = 0; i < ends.length; i++) {
                             final double d = Math.hypot(u - ends[i][0], v - ends[i][1]);
-                            if (d <= bestDistance) {
+                            if (d <= tolerance
+                                    && (0 < bestPriority
+                                    || (0 == bestPriority && d <= bestDistance))) {
+                                bestPriority = 0;
                                 bestDistance = d;
                                 best = new KeyPoint(ends[i][0], ends[i][1], KeyKind.ENDPOINT,
                                         entity, endVars[i][0], endVars[i][1]);
@@ -1423,7 +1441,10 @@ public final class SketchSession {
                     final int[][] bEndVars = {{bv[0], bv[1]}, {bv[6], bv[7]}};
                     for (int i = 0; i < bEnds.length; i++) {
                         final double d = Math.hypot(u - bEnds[i][0], v - bEnds[i][1]);
-                        if (d <= bestDistance) {
+                        if (d <= tolerance
+                                && (0 < bestPriority
+                                || (0 == bestPriority && d <= bestDistance))) {
+                            bestPriority = 0;
                             bestDistance = d;
                             best = new KeyPoint(bEnds[i][0], bEnds[i][1], KeyKind.ENDPOINT,
                                     entity, bEndVars[i][0], bEndVars[i][1]);

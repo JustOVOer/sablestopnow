@@ -512,6 +512,17 @@ public final class ModelUi {
      */
     private static void buildRevolveControls(final com.ovo.sablestopnow.client.gui.lib.Container body,
                                              final com.ovo.sablestopnow.sketch.Sketch source) {
+        // ★ 切割与旋转是两个独立开关：旋转面板里也必须能切切割，
+        //   否则用户一切换到旋转就“看不到切割状态”，只能切回拉伸。
+        final var cutBtn = new com.ovo.sablestopnow.client.gui.lib.Button(
+                Component.translatable(cutMode ? "model.extrude.cut_on" : "model.extrude.cut"),
+                () -> {
+                    cutMode = !cutMode;
+                    refreshLeftPanel();
+                });
+        cutBtn.prefW = com.ovo.sablestopnow.client.gui.lib.Widget.FILL;
+        cutBtn.toggled = cutMode;
+        body.add(cutBtn);
         body.add(new Label(Component.translatable("model.revolve.pick_axis")).color(0xFF8FA0D8));
         int lineNo = 0;
         boolean any = false;
@@ -968,14 +979,20 @@ public final class ModelUi {
             return false;
         }
         // ★ 编辑已有旋转 ⇒ 原地更新（同 id / 序号 / 草图）✓
-        if (commitShape(new com.ovo.sablestopnow.sketch.Solid.Shape.Revolution(params))) {
+        final com.ovo.sablestopnow.sketch.Solid.Shape next = cutMode
+                ? new com.ovo.sablestopnow.sketch.Solid.Shape.RevolutionCut(params)
+                : new com.ovo.sablestopnow.sketch.Solid.Shape.Revolution(params);
+        if (commitShape(next)) {
             com.ovo.sablestopnow.client.model.FeaturePreview.clear();
             lastPreviewSig = "";
             return true;
         }
-        com.ovo.sablestopnow.network.SolidNetworking.sendSave(
-                com.ovo.sablestopnow.sketch.Solid.createRevolution(
-                        source.body(), source.id(), index, params));
+        final com.ovo.sablestopnow.sketch.Solid created = cutMode
+                ? com.ovo.sablestopnow.sketch.Solid.createRevolutionCut(
+                        source.body(), source.id(), index, params)
+                : com.ovo.sablestopnow.sketch.Solid.createRevolution(
+                        source.body(), source.id(), index, params);
+        com.ovo.sablestopnow.network.SolidNetworking.sendSave(created);
         com.ovo.sablestopnow.client.model.FeaturePreview.clear(); // 已提交 ⇒ 释放预览 ✓
         lastPreviewSig = "";
         ModelMode.prompt("model.prompt.extrude_created");
@@ -2043,10 +2060,8 @@ public final class ModelUi {
     }
 
     /** 进入拉伸工具：先选一个结构，再在树里点一张草图作为拉伸源。 */
-    public static void startExtrude() {        if (ModelMode.selectedModel() == null) {
-            ModelMode.prompt("model.prompt.extrude_pick_body");
-            return;
-        }
+    public static void startExtrude() {
+        // ★ 用户要求：不先选结构也能进入拉伸/切割，然后在左栏直接选草图。
         extrudeSource = null;
         ModelMode.setTool(ModelTools.EXTRUDE);
         ModelMode.prompt("model.prompt.extrude_pick_sketch");
@@ -3842,6 +3857,15 @@ public final class ModelUi {
             extrudeDepth.set(c.params().depth1());
             extrudeBackDepth.set(c.params().depth2());
             extrudeMode = c.params().mode();
+        } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.RevolutionCut r) {
+            ModelMode.setTool(ModelTools.EXTRUDE);
+            revolveMode = true;
+            cutMode = true;
+            extrudeSource = solid.sketchId();
+            final com.ovo.sablestopnow.sketch.Revolve.Params p = r.params();
+            revolveAxis = new double[] {p.axisU(), p.axisV(), p.dirU(), p.dirV()};
+            revolveAngle.set(p.angleDeg());
+            revolveDirection = p.direction();
         } else if (shape instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Revolution r) {
             ModelMode.setTool(ModelTools.EXTRUDE);
             revolveMode = true;
@@ -5588,14 +5612,35 @@ public final class ModelUi {
             if (source == null) {
                 body.add(new Label(Component.translatable("model.prompt.extrude_pick_sketch"))
                         .color(0xFFCFD8FF));
-                // 除了在树里点，也直接列出来 —— 树可能要展开好几层才看得到草图
+                // 除了在树里点，也直接列出来 —— 树可能要展开好几层才看得到草图。
+                // 没选结构时列出**当前维度所有未被吸收的草图**，不用先选 body。
+                final java.util.List<com.ovo.sablestopnow.sketch.Sketch> candidates =
+                        new java.util.ArrayList<>();
                 if (extrudeBody != null) {
-                    for (final com.ovo.sablestopnow.sketch.Sketch candidate
-                            : currentSketchesOf(extrudeBody)) {
-                        body.add(new Button(Component.literal(
-                                sketchDisplayName(candidate.body(), candidate)),
-                                () -> selectExtrudeSource(candidate)).width(Widget.FILL));
+                    candidates.addAll(currentSketchesOf(extrudeBody));
+                } else {
+                    final net.minecraft.client.Minecraft mc0 =
+                            net.minecraft.client.Minecraft.getInstance();
+                    if (mc0 != null && mc0.level != null) {
+                        final java.util.Set<java.util.UUID> used = new java.util.HashSet<>();
+                        for (final com.ovo.sablestopnow.sketch.Solid s
+                                : com.ovo.sablestopnow.sketch.SolidClientState.current(mc0.level)) {
+                            if (s.sketchId() != null) {
+                                used.add(s.sketchId());
+                            }
+                        }
+                        for (final com.ovo.sablestopnow.sketch.Sketch s
+                                : com.ovo.sablestopnow.sketch.SketchClientState.current(mc0.level)) {
+                            if (!used.contains(s.id())) {
+                                candidates.add(s);
+                            }
+                        }
                     }
+                }
+                for (final com.ovo.sablestopnow.sketch.Sketch candidate : candidates) {
+                    body.add(new Button(Component.literal(
+                            sketchDisplayName(candidate.body(), candidate)),
+                            () -> selectExtrudeSource(candidate)).width(Widget.FILL));
                 }
             } else {
                 body.add(new Label(Component.translatable("model.extrude.source",
@@ -5869,6 +5914,7 @@ public final class ModelUi {
         textureBlockQuery.set("");
         textureSearchApplied.set("");
         editingSolidId = null;
+        selectedSolidId = null;
         sketchAwaitingStart = false;
         ModelMode.setTool(ModelTools.NONE);
         ModelMode.clearPicks();

@@ -67,6 +67,9 @@ public final class FeatureNames {
         if (solid.shape() instanceof Solid.Shape.Cut) {
             return "切割";
         }
+        if (solid.shape() instanceof Solid.Shape.RevolutionCut) {
+            return "切割";
+        }
         if (solid.isRevolution()) {
             return "旋转";
         }

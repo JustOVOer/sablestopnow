@@ -531,6 +531,16 @@ public final class SketchRenderer {
             }
             final boolean editing = editingId != null && editingId.equals(sketch.id());
             final float[] color = editing ? EDITING_COLOR : IDLE_COLOR;
+            // ★ 用户要求：选中未吸收草图进入拉伸/切割时，要能看见这张草图。
+            //   退出编辑后草图默认隐藏（避免常驻重影），这里只对当前拉伸/切割源例外。
+            final boolean extrudeSource = com.ovo.sablestopnow.client.model.ModelTools.EXTRUDE
+                    .equals(com.ovo.sablestopnow.client.model.ModelMode.tool())
+                    && sketch.id().equals(com.ovo.sablestopnow.client.model.ModelUi.extrudeSourceId());
+            if (extrudeSource && !sketchUsed.contains(sketch.id())) {
+                final float[] sourceColor = {1.00f, 0.72f, 0.20f};
+                drawn += drawSketch(vcq, pose, cameraPos, sub.renderPose(), sketch, sourceColor);
+                drawn += drawRevolveAxis(vcq, pose, cameraPos, sub.renderPose(), sketch);
+            }
             // ★★ 用户要求（2026-10）：**草图只在编辑时显示** —— 退出编辑后不画曲线，
             //   否则不论什么颜色，草图线都会一直叠在实体上（"常驻显示"）。
             //   文字/尺寸标注仍然常驻（早前明确要求"退出草图后文字也要常驻"）。
@@ -620,7 +630,8 @@ public final class SketchRenderer {
         if (!sketching) {
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit fh =
                     com.ovo.sablestopnow.client.model.FeatureHover.get();
-            if (fh != null) {
+            // 鼠标在基准面方框上时不要再高亮后面的模型面（用户实测“同时选到”）
+            if (fh != null && com.ovo.sablestopnow.client.model.PlanePick.hovered() == null) {
                 drawn += drawFeatureHighlight(pose, cameraPos, fh);
             }
         }

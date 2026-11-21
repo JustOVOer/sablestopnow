@@ -135,7 +135,7 @@ public final class SolidClientState {
         final Map<String, BodyCache> next = new HashMap<>();
         final List<Solid.Placed> out = new ArrayList<>(solids.size());
         for (final Map.Entry<UUID, List<Solid>> e : groups.entrySet()) {
-            final String bodySig = bodySignature(e.getValue(), sketchSig);
+            final String bodySig = bodySignature(e.getValue(), sketches);
             final String key = dimension + "#" + e.getKey();
             final BodyCache cached = BODY_CACHE.get(key);
             final List<Solid.Placed> part;
@@ -160,14 +160,28 @@ public final class SolidClientState {
         return placedCache;
     }
 
-    /** 一个 body 的内容签名（实体 + 全局草图签名）。 */
-    private static String bodySignature(final List<Solid> bodySolids, final StringBuilder sketchSig) {
+    /** 一个 body 的内容签名（实体 + **它自己的**草图）。 */
+    private static String bodySignature(final List<Solid> bodySolids,
+                                        final List<Sketch> allSketches) {
         final StringBuilder sb = new StringBuilder(64);
         for (final Solid s : bodySolids) {
             sb.append(s.id()).append(':').append(s.index()).append(':')
                     .append(s.shape().hashCode()).append(':').append(s.hashCode()).append(';');
         }
-        return sb.append('|').append(sketchSig).toString();
+        // ★ 只把**属于这个 body** 的草图算进签名。
+        //   以前这里拼的是全局 sketchSig ⇒ 任何一张草图改动都会让所有 body 缓存失效，
+        //   提交草图后整维度重算（实测 9.7s，其中 7a3d 大 body 9.0s）。
+        final UUID body = bodySolids.get(0).body();
+        for (final Sketch k : allSketches) {
+            if (!body.equals(k.body())) {
+                continue;
+            }
+            sb.append("sk:").append(k.id()).append(':')
+                    .append(java.util.Arrays.hashCode(k.variables())).append(':')
+                    .append(k.constraints().size()).append(':')
+                    .append(k.entities().size()).append(';');
+        }
+        return sb.toString();
     }
 
     /** 有没有跨 body 的特征引用（有就退回整维度求值）。 */

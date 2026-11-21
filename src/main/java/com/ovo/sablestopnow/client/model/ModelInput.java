@@ -434,6 +434,14 @@ public final class ModelInput {
             }
             return true;
         }
+        // ★ 旋转：直接点世界里的草图线定轴（旋转模式下才接管）
+        if (com.ovo.sablestopnow.client.model.ModelTools.EXTRUDE.equals(ModelMode.tool())
+                && com.ovo.sablestopnow.client.model.ModelUi.revolveAxisPicking()) {
+            if (com.ovo.sablestopnow.client.model.ModelUi.pickRevolveAxis(
+                    net.minecraft.client.Minecraft.getInstance())) {
+                return true;
+            }
+        }
         // 克隆：点特征上的**面**把该拉伸/圆角加入/移出源选择；其它点击只浏览。
         if (com.ovo.sablestopnow.client.model.ModelTools.CLONE.equals(ModelMode.tool())) {
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit ch =

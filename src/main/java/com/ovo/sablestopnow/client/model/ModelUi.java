@@ -1356,6 +1356,8 @@ public final class ModelUi {
                 ModelForceUi.select(null);
                 MateClientState.setHighlightedMate(null);
             } else if (item.data instanceof com.ovo.sablestopnow.sketch.Sketch sketch) {
+                // 记住最近选过的草图：退出编辑后进拉伸/切割时自动作为源
+                lastSketchId = sketch.id();
                 // 选草图（无论是"选为拉伸源"还是"进编辑"）都要让贴图面板让位
                 textureSolidId = null;
                 textureBlockQuery.set("");
@@ -1664,6 +1666,84 @@ public final class ModelUi {
     }
 
     /**
+     * 旋转模式下**直接点世界里的草图线**定轴 ✓
+     *
+     * <p>以前只有左栏那一列线段按钮能选轴；草图画在模型上时"点哪条线"更符合
+     * SolidWorks 的手感。这里用草图平面把鼠标射线投成 uv，再找最近的 LINE。
+     */
+    public static boolean pickRevolveAxis(final net.minecraft.client.Minecraft mc) {
+        if (mc == null || mc.level == null) {
+            return false;
+        }
+        final com.ovo.sablestopnow.sketch.Sketch sketch = currentExtrudeSource();
+        if (sketch == null || sketch.plane() == null) {
+            return false;
+        }
+        final dev.ryanhcode.sable.sublevel.ClientSubLevel sub =
+                com.ovo.sablestopnow.client.model.BoxPick.sub(mc.level, sketch.body());
+        if (sub == null || sub.renderPose() == null) {
+            return false;
+        }
+        final var pose = sub.renderPose();
+        final net.minecraft.world.phys.Vec3 from =
+                com.ovo.sablestopnow.client.model.ModelCamera.rayOrigin(mc);
+        final net.minecraft.world.phys.Vec3 dir =
+                com.ovo.sablestopnow.client.model.ModelCamera.rayDirection(mc);
+        if (from == null || dir == null) {
+            return false;
+        }
+        final org.joml.Vector3d lf = pose.transformPositionInverse(
+                new org.joml.Vector3d(from.x, from.y, from.z), new org.joml.Vector3d());
+        final org.joml.Vector3d lfar = pose.transformPositionInverse(
+                new org.joml.Vector3d(from.x + dir.x * 512.0,
+                        from.y + dir.y * 512.0, from.z + dir.z * 512.0),
+                new org.joml.Vector3d());
+        final org.joml.Vector3d ld = lfar.sub(lf).normalize();
+        final org.joml.Vector3d uv = sketch.plane().rayIntersect(lf, ld);
+        if (uv == null) {
+            return false;
+        }
+        com.ovo.sablestopnow.sketch.Sketch.Entity best = null;
+        double bestD = 0.12; // uv 容差（格）
+        for (final com.ovo.sablestopnow.sketch.Sketch.Entity e : sketch.entities()) {
+            if (e.kind() != com.ovo.sablestopnow.sketch.Sketch.EntityKind.LINE) {
+                continue;
+            }
+            final int[] v = e.vars();
+            if (v.length < 4) {
+                continue;
+            }
+            final double ax = sketch.variable(v[0]);
+            final double ay = sketch.variable(v[1]);
+            final double bx = sketch.variable(v[2]);
+            final double by = sketch.variable(v[3]);
+            final double dx = bx - ax;
+            final double dy = by - ay;
+            final double len2 = dx * dx + dy * dy;
+            if (len2 < 1.0e-12) {
+                continue;
+            }
+            double t = ((uv.x - ax) * dx + (uv.y - ay) * dy) / len2;
+            t = Math.max(0.0, Math.min(1.0, t));
+            final double qx = ax + t * dx;
+            final double qy = ay + t * dy;
+            final double d = Math.hypot(uv.x - qx, uv.y - qy);
+            if (d < bestD) {
+                bestD = d;
+                best = e;
+            }
+        }
+        if (best == null) {
+            return false;
+        }
+        if (setRevolveAxisFromLine(sketch, best)) {
+            com.ovo.sablestopnow.client.SketchRenderer.setRevolveAxis(sketch.body(), revolveAxis);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * 用草图里的**一条线**作为旋转轴 ✓（item 1：不用按键，直接点线）。
      *
      * <p>轴点 = 线段起点，方向 = 终点 − 起点 ✓；辅助线/参考线也接受（作轴最常见）✓
@@ -1811,6 +1891,22 @@ public final class ModelUi {
      */
     @Nullable
     private static java.util.UUID extrudeSource;
+    /** 最近点过的草图（树里点草图会进编辑；退出后点拉伸/切割时用它当默认源）✓ */
+    @Nullable
+    private static java.util.UUID lastSketchId;
+
+    /** 当前拉伸/切割源草图 id（渲染侧用来显示未吸收草图）。 */
+    @Nullable
+    public static java.util.UUID extrudeSourceId() {
+        return extrudeSource;
+    }
+
+    /** 草图完成/进入编辑时记住它，供随后点拉伸/切割自动选源 ✓。 */
+    public static void noteSketchSelected(final java.util.UUID sketchId) {
+        if (sketchId != null) {
+            lastSketchId = sketchId;
+        }
+    }
 
     /**
      * **验证用**：在当前选中的结构上造一个**半径 1 的球体**（带描边）。
@@ -1960,6 +2056,7 @@ public final class ModelUi {
     /** 选为拉伸源。只接受**已保存**的草图（树里的草图都是已保存的）。 */
     public static void selectExtrudeSource(final com.ovo.sablestopnow.sketch.Sketch sketch) {
         extrudeSource = sketch.id();
+        lastSketchId = sketch.id();
         ModelMode.selectModel(sketch.body());
         refreshLeftPanel();
     }
@@ -3308,6 +3405,11 @@ public final class ModelUi {
         if (mc == null || mc.level == null) {
             return null;
         }
+        com.ovo.sablestopnow.client.model.PlanePick.update(mc);
+        // 基准面方框在鼠标下时，**不要**再命中它后面的模型面（用户实测）
+        if (com.ovo.sablestopnow.client.model.PlanePick.hovered() != null) {
+            return null;
+        }
         com.ovo.sablestopnow.client.model.FeatureHover.update(mc);
         return com.ovo.sablestopnow.client.model.FeatureHover.get();
     }
@@ -4276,9 +4378,7 @@ public final class ModelUi {
             // 同一个 key 在两个结构下出现会撞车（配合那边踩过：第二个位置拿到第一个的控件）。
             final TreeView.TreeItem row = new TreeView.TreeItem(
                     "sketch:" + bodyId + ":" + sketch.id())
-                    .label(Component.literal("#"
-                            + (sketchOrder.indexOf(sketch.id()) + 1) + " "
-                            + sketch.name()));
+                    .label(Component.literal(sketchDisplayName(bodyId, sketch)));
             row.data = sketch;
             node.child(row);
         }
@@ -4300,6 +4400,26 @@ public final class ModelUi {
             return java.util.List.of();
         }
         return com.ovo.sablestopnow.sketch.SketchClientState.ofBody(level, bodyId);
+    }
+
+    /**
+     * 草图显示名：与特征一致，按稳定顺序叫「草图1」「草图2」……
+     *
+     * <p>不再显示 `#3 Sketch 1` 这种序号 + 英文默认名混排（用户实测要求）。
+     * 顺序按草图 UUID 排序，所以被吸收/删除/新建不会让已有草图改名。
+     */
+    private static String sketchDisplayName(final UUID bodyId,
+                                            final com.ovo.sablestopnow.sketch.Sketch sketch) {
+        if (sketch == null) {
+            return "草图";
+        }
+        final java.util.List<java.util.UUID> order = new java.util.ArrayList<>();
+        for (final com.ovo.sablestopnow.sketch.Sketch s : currentSketchesOf(bodyId)) {
+            order.add(s.id());
+        }
+        order.sort(java.util.Comparator.comparing(java.util.UUID::toString));
+        final int idx = order.indexOf(sketch.id());
+        return "草图" + (idx < 0 ? 1 : idx + 1);
     }
 
     /** 当前维度里属于某个结构的拉伸实体；没有客户端世界时返回空表。 */
@@ -4435,8 +4555,9 @@ public final class ModelUi {
                 //（几何是现算的）。不说清的话玩家改完发现别处也变了，会以为是 bug。
                 final int consumers = grouping.consumerCount(sketchId);
                 child.label(consumers > 1
-                        ? Component.translatable("model.sketch.shared", owned.name(), consumers)
-                        : Component.literal(owned.name()));
+                        ? Component.translatable("model.sketch.shared",
+                                sketchDisplayName(bodyId, owned), consumers)
+                        : Component.literal(sketchDisplayName(bodyId, owned)));
                 child.data = owned;
                 row.child(child);
             }
@@ -5385,12 +5506,14 @@ public final class ModelUi {
                 if (extrudeBody != null) {
                     for (final com.ovo.sablestopnow.sketch.Sketch candidate
                             : currentSketchesOf(extrudeBody)) {
-                        body.add(new Button(Component.literal(candidate.name()),
+                        body.add(new Button(Component.literal(
+                                sketchDisplayName(candidate.body(), candidate)),
                                 () -> selectExtrudeSource(candidate)).width(Widget.FILL));
                     }
                 }
             } else {
-                body.add(new Label(Component.translatable("model.extrude.source", source.name()))
+                body.add(new Label(Component.translatable("model.extrude.source",
+                        sketchDisplayName(source.body(), source)))
                         .color(0xFFCFD8FF));
                 // 成形方式：拉伸 / 旋转。两套参数完全不同，所以整段控件按它分支。
                 final var shapeRow = new com.ovo.sablestopnow.client.gui.lib.Container();
@@ -5408,7 +5531,9 @@ public final class ModelUi {
             }
             // 该结构上已有的实体：列出来 + 可删。
             // 放在这里而不是塞进树行里：树行很窄，而且行是按 key 复用的，加控件容易出问题。
-            if (extrudeBody != null) {
+            // 该结构上已有的实体不再塞进新建/编辑拉伸面板（用户要求）。
+            // 贴图/删除仍可在右侧树对应特征行操作。
+            if (false && extrudeBody != null) {
                 final java.util.List<com.ovo.sablestopnow.sketch.Solid> existing =
                         currentSolidsOf(extrudeBody);
                 if (!existing.isEmpty()) {
@@ -5475,9 +5600,11 @@ public final class ModelUi {
         }
 
         if (completeButton != null) {
-            // ★ 判据统一走 leftEditing()：贴图面板、特征编辑态也算“在编辑”，
-            //   否则面板在显示、按钮却是灰的（用户实测）。
-            completeButton.enabled = leftEditing();
+            // ★ 用户实测：新建特征时底部「完成」是灰的。
+            //   不再用 leftEditing() 做启用判据 —— 只要左栏有「完成」就允许点，
+            //   completeTool 内部会按当前工具/编辑对象决定动作；没有可完成的东西时
+            //   它本身就是安全 no-op。这样不会出现“面板开着但按钮灰”的死路。
+            completeButton.enabled = true;
         }
     }
 
@@ -5757,6 +5884,21 @@ public final class ModelUi {
           // ★ 同时清掉贴图编辑：它会让左栏永远停在贴图页（工具面板就看不见了）
           textureSolidId = null;
           textureBlockQuery.set("");
+          // ★ 用户要求：未被吸收的草图被选中后，进入切割/拉伸时应当直接显示为源。
+          //   树里点草图立即进编辑，所以"选中"状态实际存在 lastSketchId；
+          //   退出草图后再点拉伸/切割，这里自动把它接上。
+          if (ModelTools.EXTRUDE.equals(toolId) && lastSketchId != null) {
+              final net.minecraft.client.Minecraft mcAuto =
+                      net.minecraft.client.Minecraft.getInstance();
+              final net.minecraft.world.level.Level lvAuto =
+                      mcAuto == null ? null : mcAuto.level;
+              final com.ovo.sablestopnow.sketch.Sketch skAuto = lvAuto == null ? null
+                      : com.ovo.sablestopnow.sketch.SketchClientState.byId(lvAuto, lastSketchId);
+              if (skAuto != null) {
+                  extrudeSource = skAuto.id();
+                  ModelMode.selectModel(skAuto.body());
+              }
+          }
         ModelMode.setTool(toolId);
         ModelMode.clearPicks();
         chosenType = null;

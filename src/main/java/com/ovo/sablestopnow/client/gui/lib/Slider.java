@@ -163,13 +163,9 @@ public class Slider extends Widget {
 
     @Override
     public boolean mouseScroll(final UiContext ctx, final double mx, final double my, final double delta) {
-        if (!enabled) {
-            return false;
-        }
-        final double s = step > 0 ? step : Math.max(0.01, (max - min) / 50.0);
-        setLocal(snap(value() + Math.signum(delta) * s));
-        commit();
-        return true;
+        // ★ 用户要求：**禁用所有数值滑条的滚轮调节**。
+        //   滚轮只负责滚动父级 ScrollPane；滑条值只能拖动/点按/输入。
+        return false;
     }
 
     /** 键盘微调（左栏里用方向键），命中时由父容器转发。 */

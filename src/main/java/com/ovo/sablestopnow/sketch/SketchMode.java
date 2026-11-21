@@ -293,7 +293,7 @@ public final class SketchMode {
                 if (hit == null) {
                     return false; // 点空了 —— 让这次点击落到别处（比如转视角），不要吞掉
                 }
-                session.choosePlane(hit.plane().plane(), "Sketch1");
+                session.choosePlane(hit.plane().plane(), "草图1");
                 planes = List.of();   // 选完面就不再显示那三块板
                 hovered = null;
                 return true;
@@ -401,7 +401,7 @@ public final class SketchMode {
             return false;
         }
         // 原点取面中心：草图的 (0,0) 就落在玩家点的那块面的正中间
-        session.choosePlane(SketchPlane.onFace(faceCenter, normal, upHint), "Sketch1");
+        session.choosePlane(SketchPlane.onFace(faceCenter, normal, upHint), "草图1");
         planes = List.of();
         hovered = null;
         return true;

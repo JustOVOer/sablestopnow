@@ -908,6 +908,9 @@ public final class SketchClient {
             }
         }
         MODE.edit(sketch);
+        if (sketch != null) {
+            com.ovo.sablestopnow.client.model.ModelUi.noteSketchSelected(sketch.id());
+        }
         SketchRenderer.setEditing(sketch.id());
         // ★ 用户要求：**从右侧栏进入草图时也要自动正视** ✓
         //   （以前只有"点模型面建草图"那条路会正视 ⇒ 从树里进去是斜着看 ✗）
@@ -1143,6 +1146,7 @@ public final class SketchClient {
 
     /** 完成并提交给服务端；没在编辑就什么都不做。 */
     public static void finish() {
+        final long t0 = System.nanoTime();
         com.ovo.sablestopnow.client.SketchHud.closeEdit(); // ★ 退出草图 ⇒ 关掉改值浮层 ✓（否则输入被挡住 ✓）
         final Sketch sketch = MODE.finish();
         com.ovo.sablestopnow.SablestopNow.LOGGER.info(
@@ -1153,8 +1157,11 @@ public final class SketchClient {
                 MODE.session() == null ? "none" : MODE.session().tool());
         SketchRenderer.setEditing(null);
         if (sketch != null) {
+            com.ovo.sablestopnow.client.model.ModelUi.noteSketchSelected(sketch.id());
             SketchNetworking.sendSave(sketch);
         }
+        System.out.println("[load] sketch-finish ms="
+                + ((System.nanoTime() - t0) / 1_000_000L) + " saved=" + (sketch != null));
     }
 
     /** 放弃（不提交）。 */

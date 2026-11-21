@@ -598,6 +598,17 @@ public final class SketchClient {
             final var ss = MODE.session();
             if (ss != null && ss.stage() == com.ovo.sablestopnow.sketch.SketchSession.Stage.CHOOSING_PLANE
                     && mc.level != null) {
+                // ★ 先用统一的基准面方框拾取（与渲染高亮同一份命中数据）
+                final com.ovo.sablestopnow.client.model.PlanePick.Hit ph =
+                        com.ovo.sablestopnow.client.model.PlanePick.pickNow(mc);
+                if (ph != null && choosePlaneAt(ph.body(),
+                        new org.joml.Vector3d(ph.localHit()),
+                        new org.joml.Vector3d(ph.plane().nx(), ph.plane().ny(),
+                                ph.plane().nz()).normalize())) {
+                    com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                            "[sketch-plane] picked datum plane feature id={}", ph.solidId());
+                    return true;
+                }
                 for (final com.ovo.sablestopnow.sketch.Solid sd
                         : com.ovo.sablestopnow.sketch.SolidClientState.in(
                                 mc.level.dimension().location())) {

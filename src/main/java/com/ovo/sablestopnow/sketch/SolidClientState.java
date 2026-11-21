@@ -180,43 +180,67 @@ public final class SolidClientState {
             final UUID own = s.body();
             if (s.shape() instanceof final Solid.Shape.Fillet f) {
                 for (final Solid.Shape.EdgeRef ref : f.edges()) {
-                    if (ref.solidId() != null && !java.util.Objects.equals(bodyOf.get(ref.solidId()), own)) {
+                    if (isOtherBody(bodyOf, ref.solidId(), own, s, "fillet-edge")) {
                         return true;
                     }
                 }
             }
             if (s.shape() instanceof final Solid.Shape.Mirror m) {
-                if (m.planeSolidId() != null
-                        && !java.util.Objects.equals(bodyOf.get(m.planeSolidId()), own)) {
+                if (isOtherBody(bodyOf, m.planeSolidId(), own, s, "mirror-plane")) {
                     return true;
                 }
                 for (final UUID src : m.sources()) {
-                    if (!java.util.Objects.equals(bodyOf.get(src), own)) {
+                    if (isOtherBody(bodyOf, src, own, s, "mirror-source")) {
                         return true;
                     }
                 }
             }
             if (s.shape() instanceof final Solid.Shape.Pattern p) {
                 for (final UUID src : p.sources()) {
-                    if (!java.util.Objects.equals(bodyOf.get(src), own)) {
+                    if (isOtherBody(bodyOf, src, own, s, "pattern-source")) {
                         return true;
                     }
                 }
             }
             if (s.shape() instanceof final Solid.Shape.Clone c) {
                 for (final UUID src : c.sources()) {
-                    if (!java.util.Objects.equals(bodyOf.get(src), own)) {
+                    if (isOtherBody(bodyOf, src, own, s, "clone-source")) {
                         return true;
                     }
                 }
             }
-            if (s.shape() instanceof final Solid.Shape.Plane p
-                    && p.sourceSolid() != null
-                    && !java.util.Objects.equals(bodyOf.get(p.sourceSolid()), own)) {
-                return true;
+            if (s.shape() instanceof final Solid.Shape.Plane p) {
+                if (isOtherBody(bodyOf, p.sourceSolid(), own, s, "plane-source")) {
+                    return true;
+                }
             }
         }
         return false;
+    }
+
+    /**
+     * 只有"这个 id **确实存在**且属于另一个 body"才算跨 body。
+     *
+     * <p>⚠ 以前把"查不到这个 id"（源特征已被删/还没同步）也当成跨 body ⇒
+     * 整维度退回全局求值，所有 body 的缓存全作废。实测每次改模型都会重跑
+     * 8–13 秒（用户反馈的"克隆/进存档卡顿"）；而一个悬空引用根本不需要
+     * 别的 body 参与，不应该触发全局回退。
+     */
+    private static boolean isOtherBody(final Map<UUID, UUID> bodyOf, final UUID ref,
+                                       final UUID own, final Solid owner, final String what) {
+        if (ref == null) {
+            return false;
+        }
+        final UUID refBody = bodyOf.get(ref);
+        if (refBody == null) {
+            return false; // 悬空引用：跳过（该特征本来就算不出来）
+        }
+        if (refBody.equals(own)) {
+            return false;
+        }
+        System.out.println("[load] cross-body-ref body=" + own + " feature="
+                + owner.index() + " kind=" + what + " ref=" + ref + " refBody=" + refBody);
+        return true;
     }
 
     public static List<Solid.Placed> placed(final Level level) {

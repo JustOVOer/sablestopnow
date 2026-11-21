@@ -434,20 +434,26 @@ public final class ModelInput {
             }
             return true;
         }
-        // 克隆没有"点棱定方向"这一步；参数全在左栏，点世界只当作浏览/不误清选择。
+        // 克隆：点特征上的**面**把该拉伸/圆角加入/移出源选择；其它点击只浏览。
         if (com.ovo.sablestopnow.client.model.ModelTools.CLONE.equals(ModelMode.tool())) {
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit ch =
+                    com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
+            com.ovo.sablestopnow.client.model.ModelUi.toggleSourceFromHit(
+                    ch, com.ovo.sablestopnow.client.model.ModelTools.CLONE);
             return true;
         }
         // item 10: pattern tool - click edges to add directions
         if (com.ovo.sablestopnow.client.model.ModelTools.PATTERN.equals(ModelMode.tool())) {
-              com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                      "[pick] tool=pattern featureHover={} boxHover={}",
-                      com.ovo.sablestopnow.client.model.FeatureHover.get() == null
-                              ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
-                      ModelMode.hoveredRef() == null ? "null"
-                              : ModelMode.hoveredRef().describe());
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit pf2 =
                     com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
+            if (pf2 != null && pf2.kind()
+                    == com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE) {
+                // ★ 点面 = 选/取消源特征（拉伸/圆角）✓
+                if (com.ovo.sablestopnow.client.model.ModelUi.toggleSourceFromHit(
+                        pf2, com.ovo.sablestopnow.client.model.ModelTools.PATTERN)) {
+                    return true;
+                }
+            }
             if (pf2 != null) {
                 com.ovo.sablestopnow.client.model.PatternTool.pickEdge(pf2);
             } else {
@@ -455,20 +461,29 @@ public final class ModelInput {
             }
             return true;
         }
-        // item 9: mirror tool - click a face to set / confirm the mirror plane
+        // item 9: mirror tool - 基准面方框/面设镜像面；已有镜像面后点特征面加源
         if (com.ovo.sablestopnow.client.model.ModelTools.MIRROR.equals(ModelMode.tool())) {
-              com.ovo.sablestopnow.SablestopNow.LOGGER.info(
-                      "[pick] tool=mirror featureHover={} boxHover={}",
-                      com.ovo.sablestopnow.client.model.FeatureHover.get() == null
-                              ? "null" : com.ovo.sablestopnow.client.model.FeatureHover.get().kind(),
-                      ModelMode.hoveredRef() == null ? "null"
-                              : ModelMode.hoveredRef().describe());
+            // ① 基准面特征方框：直接点选作镜像面（用户要求）
+            final com.ovo.sablestopnow.client.model.PlanePick.Hit ph =
+                    com.ovo.sablestopnow.client.model.PlanePick.pickNow(
+                            net.minecraft.client.Minecraft.getInstance());
+            if (ph != null) {
+                com.ovo.sablestopnow.client.model.ModelUi.mirrorPickPlaneFeature(ph);
+                return true;
+            }
             final com.ovo.sablestopnow.client.model.FeatureHover.Hit mf =
                     com.ovo.sablestopnow.client.model.ModelUi.pickOnDemand();
-            if (mf != null) {
+            if (mf == null) {
+                ModelMode.prompt("model.mirror.pick_plane");
+                return true;
+            }
+            if (!com.ovo.sablestopnow.client.model.ModelUi.mirrorHasPlane()) {
+                // ② 还没有镜像面：这次点击设面
                 com.ovo.sablestopnow.client.model.ModelUi.mirrorPickPlane(mf);
             } else {
-                ModelMode.prompt("model.mirror.pick_plane");
+                // ③ 已有镜像面：点特征面加/移出源（拉伸/圆角）
+                com.ovo.sablestopnow.client.model.ModelUi.toggleSourceFromHit(
+                        mf, com.ovo.sablestopnow.client.model.ModelTools.MIRROR);
             }
             return true;
         }

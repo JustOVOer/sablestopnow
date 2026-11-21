@@ -500,8 +500,6 @@ public final class ModelUi {
             body.add(backField);
         }
 
-        body.add(new Button(applyLabel("model.extrude.create"),
-                () -> createExtrude()).width(Widget.FILL));
         body.add(reselectButton());
     }
 
@@ -571,8 +569,6 @@ public final class ModelUi {
         });
         body.add(angleField);
 
-        body.add(new Button(applyLabel("model.revolve.create"),
-                () -> createRevolve()).width(Widget.FILL));
         body.add(reselectButton());
     }
 
@@ -2192,6 +2188,195 @@ public final class ModelUi {
         updateMirrorPreview();
         forceRefreshLeft();
         return true;
+    }
+
+    /** 镜像工具：是否已经有镜像面。 */
+    public static boolean mirrorHasPlane() {
+        return mirrorPlaneOrigin != null && mirrorPlaneNormal != null;
+    }
+
+    /** 镜像工具：直接点中**基准面特征的方框** ⇒ 用它当镜像面 ✓ */
+    public static boolean mirrorPickPlaneFeature(final PlanePick.Hit hit) {
+        if (hit == null) {
+            return false;
+        }
+        final com.ovo.sablestopnow.sketch.Solid.Shape.Plane plane = hit.plane();
+        final double[] o = plane.offsetOrigin();
+        mirrorPlaneOrigin = new org.joml.Vector3d(o[0], o[1], o[2]);
+        mirrorPlaneNormal = new org.joml.Vector3d(plane.nx(), plane.ny(), plane.nz()).normalize();
+        mirrorBody = hit.body();
+        mirrorPlaneSolidId = hit.solidId(); // 跟随该基准面特征
+        final java.util.List<double[]> segs = new java.util.ArrayList<>();
+        final java.util.List<org.joml.Vector3d> cs = plane.corners(1.2);
+        for (int i = 0; i < 4; i++) {
+            final org.joml.Vector3d a = cs.get(i);
+            final org.joml.Vector3d b = cs.get((i + 1) % 4);
+            segs.add(new double[] {a.x, a.y, a.z, b.x, b.y, b.z});
+        }
+        mirrorPlaneSegs = segs;
+        updateMirrorPreview();
+        forceRefreshLeft();
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[mirror] plane via datum feature idx={}", hit.solidId());
+        return true;
+    }
+
+    /**
+     * 点击模型上的一张**面**，把对应特征加入/移出克隆/阵列/镜像的源选择 ✓。
+     *
+     * <p>只接受**拉伸**与**圆角**：
+     * <ul>
+     *   <li>点到拉伸的普通面 ⇒ 选/取消该拉伸；</li>
+     *   <li>点到圆角曲面 ⇒ 选/取消对应的圆角特征（同时自动补上被倒圆的材料依赖）；</li>
+     *   <li>其它特征（切割/镜像/阵列/克隆）忽略。</li>
+     * </ul>
+     *
+     * @return true = 这次点击已被消费
+     */
+    public static boolean toggleSourceFromHit(
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit,
+            final String tool) {
+        if (hit == null || hit.solidId() == null
+                || hit.kind() != com.ovo.sablestopnow.client.model.FeatureHover.Kind.FACE) {
+            return false;
+        }
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final net.minecraft.world.level.Level level = mc == null ? null : mc.level;
+        if (level == null) {
+            return false;
+        }
+        final com.ovo.sablestopnow.sketch.Solid base =
+                com.ovo.sablestopnow.sketch.SolidClientState.byId(level, hit.solidId());
+        if (base == null) {
+            return false;
+        }
+        com.ovo.sablestopnow.sketch.Solid target = null;
+        if (base.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Extrusion) {
+            target = base;
+            // 圆角曲面优先：点在倒圆出来的曲面上 ⇒ 选圆角特征，而不是材料特征
+            if (hit.face() != null
+                    && hit.face().kind() == com.ovo.sablestopnow.sketch.Features.Kind.CURVED) {
+                final com.ovo.sablestopnow.sketch.Solid fillet =
+                        nearestFillet(level, hit, base);
+                if (fillet != null) {
+                    target = fillet;
+                }
+            }
+        } else if (base.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Fillet) {
+            target = base;
+        }
+        if (target == null) {
+            return false;
+        }
+        final java.util.UUID id = target.id();
+        final boolean on = !sourceSelected(tool, id);
+        // 圆角依赖：先把它倒圆的那块材料加进去（否则复选框都不可见）
+        if (target.isFillet()) {
+            for (final java.util.UUID dep : filletDeps(target)) {
+                if (!sourceSelected(tool, dep)) {
+                    setSource(tool, dep, true, target.body());
+                }
+            }
+        }
+        setSource(tool, id, on, target.body());
+        com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                "[pick] tool={} toggle source idx={} id={} on={}",
+                tool, target.index(), id.toString().substring(0, 8), on);
+        lastLeftSignature = null;
+        refreshLeftPanel();
+        if (ModelTools.MIRROR.equals(tool)) {
+            updateMirrorPreview();
+        }
+        return true;
+    }
+
+    private static boolean sourceSelected(final String tool, final java.util.UUID id) {
+        if (ModelTools.MIRROR.equals(tool)) {
+            return mirrorSources.contains(id);
+        }
+        if (ModelTools.PATTERN.equals(tool)) {
+            return PatternTool.hasSource(id);
+        }
+        return CloneTool.hasSource(id);
+    }
+
+    private static void setSource(final String tool, final java.util.UUID id,
+                                  final boolean on, final java.util.UUID body) {
+        if (ModelTools.MIRROR.equals(tool)) {
+            if (on) {
+                if (!mirrorSources.contains(id)) {
+                    mirrorSources.add(id);
+                }
+            } else {
+                mirrorSources.remove(id);
+            }
+            mirrorSourceProp(id).set(on);
+            return;
+        }
+        if (ModelTools.PATTERN.equals(tool)) {
+            PatternTool.setSource(id, on, body);
+            PATTERN_SRC_PROPS.computeIfAbsent(id, k ->
+                    com.ovo.sablestopnow.client.gui.lib.Prop.of(
+                            "pattern.src." + k.toString().substring(0, 8), on)).set(on);
+            return;
+        }
+        CloneTool.setSource(id, on, body);
+        CLONE_SRC_PROPS.computeIfAbsent(id, k ->
+                com.ovo.sablestopnow.client.gui.lib.Prop.of(
+                        "clone.src." + k.toString().substring(0, 8), on)).set(on);
+    }
+
+    /** 点到圆角曲面时，找距离命中点最近、且引用该材料的圆角特征。 */
+    @Nullable
+    private static com.ovo.sablestopnow.sketch.Solid nearestFillet(
+            final net.minecraft.world.level.Level level,
+            final com.ovo.sablestopnow.client.model.FeatureHover.Hit hit,
+            final com.ovo.sablestopnow.sketch.Solid material) {
+        final org.joml.Vector3d p = hit.localHit();
+        com.ovo.sablestopnow.sketch.Solid best = null;
+        double bestD = Double.MAX_VALUE;
+        for (final com.ovo.sablestopnow.sketch.Solid sd
+                : com.ovo.sablestopnow.sketch.SolidClientState.ofBody(level, hit.body())) {
+            if (!(sd.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Fillet f)) {
+                continue;
+            }
+            for (final com.ovo.sablestopnow.sketch.Solid.Shape.EdgeRef ref : f.edges()) {
+                if (!material.id().equals(ref.solidId())) {
+                    continue;
+                }
+                double d = distToSegment(p, ref.ax(), ref.ay(), ref.az(),
+                        ref.bx(), ref.by(), ref.bz());
+                for (final double[] s : ref.curveSegs()) {
+                    d = Math.min(d, distToSegment(p, s[0], s[1], s[2], s[3], s[4], s[5]));
+                }
+                if (d < bestD) {
+                    bestD = d;
+                    best = sd;
+                }
+            }
+        }
+        return best != null && bestD <= ((com.ovo.sablestopnow.sketch.Solid.Shape.Fillet)
+                best.shape()).radius() + 0.20 ? best : null;
+    }
+
+    private static double distToSegment(final org.joml.Vector3d p,
+                                        final double ax, final double ay, final double az,
+                                        final double bx, final double by, final double bz) {
+        final double dx = bx - ax;
+        final double dy = by - ay;
+        final double dz = bz - az;
+        final double len2 = dx * dx + dy * dy + dz * dz;
+        if (len2 < 1.0e-12) {
+            return Math.sqrt((p.x - ax) * (p.x - ax) + (p.y - ay) * (p.y - ay)
+                    + (p.z - az) * (p.z - az));
+        }
+        double t = ((p.x - ax) * dx + (p.y - ay) * dy + (p.z - az) * dz) / len2;
+        t = Math.max(0.0, Math.min(1.0, t));
+        final double qx = ax + t * dx;
+        final double qy = ay + t * dy;
+        final double qz = az + t * dz;
+        return Math.sqrt((p.x - qx) * (p.x - qx) + (p.y - qy) * (p.y - qy)
+                + (p.z - qz) * (p.z - qz));
     }
 
     /** Mirror tool: clicking a feature row toggles it as a mirror source. */
@@ -4556,11 +4741,6 @@ public final class ModelUi {
               });
               body.add(planeDist);
               if (planeFaceOrigin != null) {
-                  body.add(new Button(applyLabel("model.plane.create"), () -> {
-                      createPlaneFeature(planeDistance.get());
-                      lastLeftSignature = null;
-                      refreshLeftPanel();
-                  }).width(Widget.FILL));
                   body.add(new Button(Component.translatable("model.plane.cancel"), () -> {
                       planeFaceOrigin = null;
                       planeFaceNormal = null;
@@ -4592,11 +4772,6 @@ public final class ModelUi {
               });
               body.add(radiusField);
               if (!filletPicks.isEmpty()) {
-                  body.add(new Button(applyLabel("model.fillet.create"), () -> {
-                      createFilletFeature(filletRadius.get());
-                      lastLeftSignature = null;
-                      refreshLeftPanel();
-                  }).width(Widget.FILL));
                   body.add(new Button(Component.translatable("model.fillet.clear"), () -> {
                       filletPicks.clear();
                       filletPickSeq = 0;
@@ -4630,18 +4805,8 @@ public final class ModelUi {
               //   后续点击落到已经销毁的控件上 ⇒ 用户实测"只能选到第一个"✗
               //   复选框自己保存状态、不触发重建 ✓
               body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
-              // ★ 创建按钮放在**列表上方** ✓（源特征多时列表很长，按钮会被挤出可视区 ⇒ 用户"看不到创建键"）
-              body.add(new Button(Component.translatable("model.mirror.confirm"), () -> {
-                  // ★ 按钮**始终存在** ✓（以前要"选了面 + 勾了源"才出现 ⇒ 用户以为没有按钮）
-                  if (mirrorPlaneOrigin == null || mirrorPlaneNormal == null) {
-                      ModelMode.prompt("model.mirror.pick_plane");
-                  } else if (mirrorSources.isEmpty()) {
-                      ModelMode.prompt("model.mirror.no_sources");
-                  } else {
-                      createMirrorFeature();
-                  }
-                  forceRefreshLeft();
-              }).width(Widget.FILL));
+              // ★ 用户要求：所有创建/修改统一走左栏底部的「完成」，这里不再放
+              //   “创建镜像”按钮；源特征列表/清空仍保留。
               body.add(new Button(Component.translatable("model.mirror.clear"), () -> {
                   mirrorSources.clear();
                   MIRROR_SRC_PROPS.forEach((k, prop) -> prop.set(false));
@@ -4777,11 +4942,7 @@ public final class ModelUi {
                       "model.pattern.n2", CMD_PATTERN_N2, patternN2, 1, 64));
               body.add(com.ovo.sablestopnow.client.gui.lib.UiField.number(
                       "model.pattern.s2", CMD_PATTERN_S2, patternS2, -32.0, 32.0, 0.25));
-              body.add(new Button(applyLabel("model.pattern.create"), () -> {
-                  createPatternFeature((int) (double) patternN1.get(), patternS1.get(),
-                          (int) (double) patternN2.get(), patternS2.get());
-                  forceRefreshLeft();
-              }).width(Widget.FILL));
+              // ★ 创建统一走底部「完成」；这里保留清空选择
               body.add(new Button(Component.translatable("model.pattern.clear"), () -> {
                   PatternTool.reset();
                   forceRefreshLeft();
@@ -4894,19 +5055,7 @@ public final class ModelUi {
                               0.05, 16.0, 0.05);
               scaleField.format(v -> String.format(java.util.Locale.ROOT, "%.2f", v));
               body.add(scaleField);
-              // ---- 创建 / 清空 ----
-              body.add(new Button(applyLabel("model.clone.create"), () -> {
-                  final net.minecraft.client.Minecraft mc0 =
-                          net.minecraft.client.Minecraft.getInstance();
-                  final net.minecraft.world.level.Level lv0 =
-                          mc0 == null ? null : mc0.level;
-                  if (lv0 == null) {
-                      return;
-                  }
-                  createCloneFeature(cloneTx.get(), cloneTy.get(), cloneTz.get(),
-                          cloneRx.get(), cloneRy.get(), cloneRz.get(), cloneScale.get());
-                  forceRefreshLeft();
-              }).width(Widget.FILL));
+              // ---- 清空（创建统一走底部「完成」）----
               body.add(new Button(Component.translatable("model.clone.clear"), () -> {
                   CloneTool.clearSources();
                   CLONE_SRC_PROPS.forEach((k, prop) -> prop.set(false));
@@ -5351,6 +5500,14 @@ public final class ModelUi {
      * <p>所以判据改成「<b>有没有正在编辑的东西</b>」而不是「当前是哪个工具」：
      * 只要左栏在编辑某个对象，「完成」就结束编辑。工具与选择是两条正交的线，不该互相决定对方能不能结束。
      */
+    /** 「完成」需要执行“新建/更新”的工具（用户要求统一语义）✓。 */
+    private static boolean isFeatureCreateTool(final String tool) {
+        return ModelTools.PLANE.equals(tool) || ModelTools.FILLET.equals(tool)
+                || ModelTools.MIRROR.equals(tool) || ModelTools.PATTERN.equals(tool)
+                || ModelTools.CLONE.equals(tool) || ModelTools.EXTRUDE.equals(tool);
+    }
+
+    /** 文本编辑/贴图等其它“完成”动作的原始入口（供上面的分支复用）✓。 */
     public static void completeTool() {
         final String tool = ModelMode.tool();
 
@@ -5369,6 +5526,18 @@ public final class ModelUi {
             }
             // ★ 同 commitShape：完成编辑后必须清掉"选中的特征"，
             //   否则左栏会常驻特征操作面板（上移/下移/贴图/删除），挡住其它界面。
+            selectedSolidId = null;
+            ModelMode.setTool(ModelTools.NONE);
+            ModelMode.clearPicks();
+            afterEdit();
+            return;
+        }
+
+        // ③ 新建特征：统一由底部「完成」触发（左栏不再有“创建xxx”按钮）✓
+        if (isFeatureCreateTool(tool)) {
+            if (!applyLeftEditor()) {
+                return; // 缺参数/源：applyLeftEditor 已提示，保持面板
+            }
             selectedSolidId = null;
             ModelMode.setTool(ModelTools.NONE);
             ModelMode.clearPicks();

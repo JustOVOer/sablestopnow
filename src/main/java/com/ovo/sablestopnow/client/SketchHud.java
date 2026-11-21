@@ -379,9 +379,64 @@ public final class SketchHud {
     private SketchHud() {
     }
 
+    /** 基准面方框左上角的**编号**（模型模式常驻；悬停时变金色）✓ */
+    private static void drawPlaneNumbers(final net.minecraft.client.gui.GuiGraphics g,
+                                         final Minecraft mc) {
+        if (mc.level == null) {
+            return;
+        }
+        final java.util.UUID hovered =
+                com.ovo.sablestopnow.client.model.PlanePick.hoveredSolidId();
+        for (final com.ovo.sablestopnow.sketch.Solid sd
+                : com.ovo.sablestopnow.sketch.SolidClientState.in(
+                        mc.level.dimension().location())) {
+            if (!(sd.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Plane plane)) {
+                continue;
+            }
+            final dev.ryanhcode.sable.sublevel.ClientSubLevel sub =
+                    com.ovo.sablestopnow.client.model.BoxPick.sub(mc.level, sd.body());
+            if (sub == null || sub.renderPose() == null) {
+                continue;
+            }
+            final var pose = sub.renderPose();
+            final java.util.List<org.joml.Vector3d> cs = plane.corners(1.0);
+            double sx = Double.MAX_VALUE;
+            double sy = Double.MAX_VALUE;
+            double best = Double.MAX_VALUE;
+            for (final org.joml.Vector3d c : cs) {
+                final org.joml.Vector3d w = pose.transformPosition(
+                        new org.joml.Vector3d(c), new org.joml.Vector3d());
+                final double[] p = com.ovo.sablestopnow.client.model.ModelCamera
+                        .projectToScreen(new net.minecraft.world.phys.Vec3(w.x, w.y, w.z), mc);
+                if (p == null) {
+                    continue;
+                }
+                final double score = p[0] + p[1];
+                if (score < best) {
+                    best = score;
+                    sx = p[0];
+                    sy = p[1];
+                }
+            }
+            if (sx == Double.MAX_VALUE) {
+                continue;
+            }
+            final boolean hot = sd.id().equals(hovered);
+            final String text = Component.translatable("model.plane.label", sd.index()).getString();
+            com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, mc.font, text,
+                    (int) Math.round(sx) + 3, (int) Math.round(sy) + 2,
+                    hot ? 0xFFFFCC55 : 0xFFB9E0FF, 0.75f, true);
+        }
+    }
+
+
     @SubscribeEvent
     public static void onRenderGui(final RenderGuiEvent.Post event) {
         final Minecraft mc = Minecraft.getInstance();
+        // ★ 基准面编号：模型模式里常驻显示（左上角），不只在草图里 ✓
+        if (com.ovo.sablestopnow.client.model.ModelMode.isOn()) {
+            drawPlaneNumbers(event.getGuiGraphics(), mc);
+        }
         if (!SketchClient.active() || mc.player == null || mc.level == null) {
             Ui.close(LAYER);
             Ui.close(EDIT_LAYER); // ★ 草图不在时必须关掉**改值浮层** ✓

@@ -280,8 +280,10 @@ public final class SketchRenderer {
         //   模型模式的按钮/树/草图都在 ModelMode 内，普通游戏不需要这份数据。
         if (!sketching && com.ovo.sablestopnow.client.model.ModelMode.isOn()) {
             com.ovo.sablestopnow.client.model.FeatureHover.update(mc);
+            com.ovo.sablestopnow.client.model.PlanePick.update(mc);
         } else {
             com.ovo.sablestopnow.client.model.FeatureHover.clear();
+            com.ovo.sablestopnow.client.model.PlanePick.clear();
         }
         // ★ 需求：进入草图时**其它模型半透明 10%** ✓
         ghostAlpha = sketching ? 0.10f : 1.0f;
@@ -579,7 +581,7 @@ public final class SketchRenderer {
             if (psub == null) {
                 continue;
             }
-            drawn += drawPlaneFeature(vcq, pose, cameraPos, psub, plane);
+            drawn += drawPlaneFeature(vcq, pose, cameraPos, psub, plane, planeSolid.id());
         }
         // ★ item 6：**树行悬停 ⇒ 高亮对应特征** ✓（橙色描边，不改选择集）
         if (!sketching && com.ovo.sablestopnow.client.model.FeatureHighlight.id() != null) {
@@ -2350,12 +2352,21 @@ public final class SketchRenderer {
     /** 把基准面画成**描边方框** ✓（item 7；与预览共用 {@code Plane.corners} ✓） */
     private static int drawPlaneFeature(final VertexConsumer vcq, final PoseStack.Pose pose,
                                         final Vec3 cameraPos, final ClientSubLevel sub,
-                                        final Solid.Shape.Plane plane) {
+                                        final Solid.Shape.Plane plane,
+                                        final java.util.UUID solidId) {
         final Pose3dc rp = sub.renderPose();
         final org.joml.Vector3d n = new org.joml.Vector3d(plane.nx(), plane.ny(), plane.nz())
                 .normalize();
         quadUp = new Vec3(n.x, n.y, n.z).normalize();
-        final float[] colour = {0.55f, 0.75f, 1.00f};
+        final boolean hovered = solidId.equals(
+                com.ovo.sablestopnow.client.model.PlanePick.hoveredSolidId());
+        final float[] colour = hovered
+                ? new float[] {1.00f, 0.82f, 0.25f}
+                : new float[] {0.55f, 0.75f, 1.00f};
+        final double oldScale = barScale;
+        if (hovered) {
+            barScale = Math.max(barScale, 2.0);
+        }
         final java.util.List<org.joml.Vector3d> cs = plane.corners(1.0);
         int drawn = 0;
         for (int i = 0; i < 4; i++) {
@@ -2364,6 +2375,7 @@ public final class SketchRenderer {
             quadLine(vcq, pose, a, b, colour);
             drawn++;
         }
+        barScale = oldScale;
         return drawn;
     }
 

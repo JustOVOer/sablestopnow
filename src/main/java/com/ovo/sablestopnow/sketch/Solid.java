@@ -1663,8 +1663,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                 new ArrayList<>(cutterPolys));
                         final List<Csg.Polygon> resB = Csg.subtract(targetB,
                                 new ArrayList<>(flippedCutter));
-                        final List<Csg.Polygon> inter = Csg.intersect(targetC,
-                                new ArrayList<>(cutterPolys));
+                        final List<Csg.Polygon> inter = ensureOutward(
+                                Csg.intersect(targetC, new ArrayList<>(cutterPolys)));
                         final double volA = Math.abs(polysVolume(resA));
                         final double volB = Math.abs(polysVolume(resB));
                         final double interVol = Math.abs(polysVolume(inter));
@@ -1699,6 +1699,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                 + " volA=" + String.format(java.util.Locale.ROOT, "%.6f", volA)
                                 + " volB=" + String.format(java.util.Locale.ROOT, "%.6f", volB)
                                 + " volC=" + String.format(java.util.Locale.ROOT, "%.6f", volC)
+                                + " cutterOpen=" + boundaryEdgeCount(cutterPolys)
+                                + " interOpen=" + boundaryEdgeCount(inter)
                                 + " choose=" + (chosen == resA ? "A" : chosen == resB ? "B" : "C"));
                     } else {
                         chosen = Csg.subtract(new ArrayList<>(acc),
@@ -3515,6 +3517,34 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             out.add(new Csg.Polygon(vs, plane));
         }
         return out;
+    }
+
+    /** 诊断：只出现一次的边数（>0 = 网格有开口）。 */
+    private static int boundaryEdgeCount(final List<Csg.Polygon> polys) {
+        if (polys == null || polys.isEmpty()) {
+            return 0;
+        }
+        final java.util.Map<String, Integer> edges = new java.util.HashMap<>();
+        for (final Csg.Polygon p : polys) {
+            final List<Csg.Vertex> vs = p.vertices;
+            for (int i = 0; i < vs.size(); i++) {
+                final Csg.V3 a = vs.get(i).pos();
+                final Csg.V3 b = vs.get((i + 1) % vs.size()).pos();
+                final String ka = Math.round(a.x() * 1.0e5) + ","
+                        + Math.round(a.y() * 1.0e5) + "," + Math.round(a.z() * 1.0e5);
+                final String kb = Math.round(b.x() * 1.0e5) + ","
+                        + Math.round(b.y() * 1.0e5) + "," + Math.round(b.z() * 1.0e5);
+                final String key = ka.compareTo(kb) <= 0 ? ka + "|" + kb : kb + "|" + ka;
+                edges.merge(key, 1, Integer::sum);
+            }
+        }
+        int boundary = 0;
+        for (final int c : edges.values()) {
+            if (c == 1) {
+                boundary++;
+            }
+        }
+        return boundary;
     }
 
     /**

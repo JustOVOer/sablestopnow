@@ -1057,7 +1057,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
 
         SolidMesh.Mesh cutterMesh() {
             if (revolve != null) {
-                return Revolve.mesh(sketch, revolve);
+                return Revolve.mesh(sketch, revolve, 0.02);
             }
             return SolidMesh.build(sketch, params);
         }

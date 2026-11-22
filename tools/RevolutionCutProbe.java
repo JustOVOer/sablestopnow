@@ -70,7 +70,7 @@ public final class RevolutionCutProbe {
                 if (cutSketch == null) {
                     continue;
                 }
-                final SolidMesh.Mesh cutterMesh = Revolve.mesh(cutSketch, rc.params());
+                final SolidMesh.Mesh cutterMesh = Revolve.mesh(cutSketch, rc.params(), 0.02);
                 if (cutterMesh == null || cutterMesh.isEmpty()) {
                     continue;
                 }
@@ -115,6 +115,8 @@ public final class RevolutionCutProbe {
                 for (final var e : cutSketch.entities()) {
                     final int[] ev = e.vars();
                     final StringBuilder sb = new StringBuilder(e.kind().name());
+                    sb.append(" construction=").append(cutSketch.isConstruction(e));
+                    sb.append(" reference=").append(cutSketch.isReference(e));
                     for (final int vi : ev) {
                         sb.append(' ').append(String.format(java.util.Locale.ROOT,
                                 "%.4f", cutSketch.variable(vi)));
@@ -134,6 +136,17 @@ public final class RevolutionCutProbe {
                         "  cleanProfile cutterVol=%.6f resultVol=%.6f inter=%.6f%n",
                         Math.abs(volume(cleanCutter)), Math.abs(volume(cleanResult)),
                         Math.abs(volume(cleanInter)));
+                for (final double off : new double[] {0.001, 0.002, 0.005, 0.01, 0.02, 0.05}) {
+                    final Sketch offSketch = offsetProfile(cutSketch, off);
+                    final SolidMesh.Mesh offMesh = Revolve.mesh(offSketch, rc.params());
+                    final List<Csg.Polygon> rr = Csg.subtract(
+                            CsgMesh.fromMesh(targetMesh, null),
+                            CsgMesh.fromMesh(offMesh, null));
+                    System.out.printf(java.util.Locale.ROOT,
+                            "  offset=%.4f cutterVol=%.6f resultVol=%.6f%n",
+                            off, Math.abs(volume(CsgMesh.fromMesh(offMesh, null))),
+                            Math.abs(volume(rr)));
+                }
                 final List<Csg.Polygon> a = CsgMesh.fromMesh(targetMesh, null);
                 final List<Csg.Polygon> b = CsgMesh.fromMesh(cutterMesh, null);
                 final double tv = volume(a);
@@ -208,6 +221,27 @@ public final class RevolutionCutProbe {
             }
         }
         System.out.println("dumped=" + dumped);
+    }
+
+    private static Sketch offsetProfile(final Sketch src, final double off) {
+        final Sketch out = new Sketch(java.util.UUID.randomUUID(),
+                java.util.UUID.randomUUID(), "offset", src.plane());
+        for (final Sketch.Entity e : src.entities()) {
+            if (src.isConstruction(e) || src.isReference(e)) {
+                continue;
+            }
+            final int[] v = e.vars();
+            if (e.kind() == Sketch.EntityKind.ARC) {
+                out.addArcPoints(
+                        src.variable(v[0]), src.variable(v[1]) + off,
+                        src.variable(v[2]), src.variable(v[3]) + off,
+                        src.variable(v[4]), src.variable(v[5]) + off, e.cw());
+            } else if (e.kind() == Sketch.EntityKind.LINE) {
+                out.addLine(src.variable(v[0]), src.variable(v[1]) + off,
+                        src.variable(v[2]), src.variable(v[3]) + off);
+            }
+        }
+        return out;
     }
 
     private static Sketch cleanInternalRadii(final Sketch src) {

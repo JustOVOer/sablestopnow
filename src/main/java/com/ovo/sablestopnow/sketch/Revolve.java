@@ -427,12 +427,24 @@ public final class Revolve {
      * @return 网格；没有可回转区域时返回空网格
      */
     public static SolidMesh.Mesh mesh(final Sketch sketch, final Params params) {
+        return mesh(sketch, params, 0.0);
+    }
+
+    /**
+     * @param axisOffset 整圈切割体专用：轮廓整体向远离轴的方向平移的量。
+     *                   贴轴轮廓转出的是两个漏斗相交于一点，轴处非流形，
+     *                   BSP 必然少切；0.02 格即可让交点变成细轴孔。
+     */
+    public static SolidMesh.Mesh mesh(final Sketch sketch, final Params params,
+                                      final double axisOffset) {
         final List<SolidMesh.Vertex> verts = new ArrayList<>();
         final List<Integer> indices = new ArrayList<>();
         final SketchPlane plane = sketch.plane();
         final double total = params.signedRadians();
         final int steps = stepsFor(params);
         final boolean full = params.fullTurn();
+        final boolean needsAxisOffset = full && axisOffset != 0.0
+                && touchesAxis(sketch, params);
 
         for (final SketchProfiles.Region region
                 : SketchProfiles.nest(SketchProfiles.findLoops(
@@ -442,12 +454,20 @@ public final class Revolve {
                 continue;
             }
             // 外圈统一逆时针、孔统一顺时针 ⇒ 下面的“右侧法线”就一定是朝外。
-            final List<double[]> outer = orientRing(region.outer().points(), true);
+            List<double[]> outerPts = region.outer().points();
+            if (needsAxisOffset) {
+                outerPts = offsetProfileRing(outerPts, params, axisOffset);
+            }
+            final List<double[]> outer = orientRing(outerPts, true);
             emitRevolveRing(verts, indices, plane, params, outer,
                     true, total, steps);
             // 孔：材料在环外，平面法线要**反**过来（朝孔内）
             for (final SketchProfiles.Profile hole : region.holes()) {
-                final List<double[]> holeRing = orientRing(hole.points(), false);
+                List<double[]> holePts = hole.points();
+                if (needsAxisOffset) {
+                    holePts = offsetProfileRing(holePts, params, axisOffset);
+                }
+                final List<double[]> holeRing = orientRing(holePts, false);
                 emitRevolveRing(verts, indices, plane, params, holeRing,
                         false, total, steps);
             }
@@ -461,6 +481,50 @@ public final class Revolve {
             }
         }
         return new SolidMesh.Mesh(List.copyOf(verts), toIntArray(indices));
+    }
+
+    /** 轮廓是否有顶点贴到旋转轴（含相切）✓。 */
+    private static boolean touchesAxis(final Sketch sketch, final Params params) {
+        final double len = Math.hypot(params.dirU(), params.dirV());
+        final double du = params.dirU() / len;
+        final double dv = params.dirV() / len;
+        for (final SketchProfiles.Profile profile : SketchProfiles.findLoops(sketch)) {
+            for (final double[] p : profile.points()) {
+                final double wu = p[0] - params.axisU();
+                final double wv = p[1] - params.axisV();
+                if (Math.abs(-dv * wu + du * wv) < 1.0e-4) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** 把一条闭合轮廓整体沿“远离旋转轴”的方向平移 eps（平面 u/v 坐标）✓。 */
+    private static List<double[]> offsetProfileRing(final List<double[]> ring,
+                                                    final Params params,
+                                                    final double eps) {
+        final double len = Math.hypot(params.dirU(), params.dirV());
+        final double du = params.dirU() / len;
+        final double dv = params.dirV() / len;
+        double sum = 0.0;
+        for (final double[] p : ring) {
+            final double wu = p[0] - params.axisU();
+            final double wv = p[1] - params.axisV();
+            sum += -dv * wu + du * wv;
+        }
+        final double sign = sum >= 0.0 ? 1.0 : -1.0;
+        final List<double[]> out = new java.util.ArrayList<>(ring.size());
+        for (final double[] p : ring) {
+            final double wu = p[0] - params.axisU();
+            final double wv = p[1] - params.axisV();
+            final double t = wu * du + wv * dv;
+            final double s = -dv * wu + du * wv + sign * eps;
+            out.add(new double[] {
+                    params.axisU() + t * du - s * dv,
+                    params.axisV() + t * dv + s * du});
+        }
+        return out;
     }
 
     /** 统一环的走向（外圈 CCW、孔 CW）✓。 */

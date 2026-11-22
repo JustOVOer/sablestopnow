@@ -1722,6 +1722,22 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         chosen = Csg.subtract(new ArrayList<>(acc),
                                 new ArrayList<>(cutterPolys));
                     }
+                    if (f.revolve() != null) {
+                        // ★ 主切割体外移 0.02 后，切面最外侧可能留一层
+                        //   约 0.006 厚的残皮。再用外移 0.014 的“回切体”
+                        //   削掉最外层，只多切 0.006 格（<0.1px）。
+                        final SolidMesh.Mesh trimMesh = Revolve.mesh(
+                                f.sketch(), f.revolve(), 0.014);
+                        final List<Csg.Polygon> trimPolys =
+                                CsgMesh.fromMesh(trimMesh, null);
+                        if (!trimPolys.isEmpty()) {
+                            final int before = chosen.size();
+                            chosen = Csg.subtract(new ArrayList<>(chosen), trimPolys);
+                            trace("[csg] trim-skin removed="
+                                    + Math.max(0, before - chosen.size())
+                                    + " solid=" + solid.index());
+                        }
+                    }
                     acc = chosen;
                     if (f.revolve() != null) {
                         final int before = acc.size();

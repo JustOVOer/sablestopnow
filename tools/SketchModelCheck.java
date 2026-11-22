@@ -131,6 +131,103 @@ public final class SketchModelCheck {
         check(mesh.indices().length >= 36, "csg: 结果网格三角形数合理");
     }
 
+    /**
+     * 共面 corner case：切割体有一个面与目标面**严格重合**。
+     *
+     * <p>目标 2×2×2（体积 8）；切割体 1×1×2，z 从 0 到 2，与目标底面/顶面
+     * 完全共面。正确差集体积 = 8 − 2 = 6。BSP 常见错误是留下零厚度皮或
+     * 少切，用户实测的“2.5px 半圆锥”就是这一类。
+     */
+    private static void csgCoplanarFace() {
+        final java.util.List<double[]> targetBoxes = new java.util.ArrayList<>();
+        targetBoxes.add(new double[] {0, 0, 0, 2, 2, 2});
+        final java.util.List<double[]> cutterBoxes = new java.util.ArrayList<>();
+        cutterBoxes.add(new double[] {0.5, 0.5, 0, 1.5, 1.5, 2});
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh target =
+                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(targetBoxes);
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh cutter =
+                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(cutterBoxes);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> a =
+                com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(target, null);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> b =
+                com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(cutter, null);
+        final double volA = com.ovo.sablestopnow.sketch.Solid.polysVolume(a);
+        final double volB = com.ovo.sablestopnow.sketch.Solid.polysVolume(b);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> r =
+                com.ovo.sablestopnow.sketch.csg.Csg.subtract(a, b);
+        final double volR = com.ovo.sablestopnow.sketch.Solid.polysVolume(r);
+        System.out.println("  coplanar diag: targetVol=" + volA
+                + " cutterVol=" + volB + " resultVol=" + volR
+                + " polys=" + r.size());
+        check(Math.abs(volA - 8.0) < 1.0e-6, "csg-coplanar: 目标体积 8");
+        check(Math.abs(volB - 2.0) < 1.0e-6, "csg-coplanar: 切割体体积 2");
+        check(Math.abs(volR - 6.0) < 1.0e-3, "csg-coplanar: 差集体积应为 6（实际 "
+                + String.format(java.util.Locale.ROOT, "%.6f", volR) + "）");
+    }
+
+    /**
+     * 旋转切割离线复现：一个绕 Y 轴的圆环切割体，与目标盒子共用一个底面。
+     *
+     * <p>这正是用户“半圆锥没切掉”的几何类型：Revolve.mesh 的环面 + 与目标
+     * 共面的平面。用体素采样得到理论相交体积，再检查 CSG 差集体积。
+     */
+    private static void csgRevolveCutter() {
+        final com.ovo.sablestopnow.sketch.Sketch cutterSketch =
+                new com.ovo.sablestopnow.sketch.Sketch(
+                        java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                        "rev-cutter",
+                        com.ovo.sablestopnow.sketch.SketchPlane.base(
+                                com.ovo.sablestopnow.sketch.SketchPlane.Base.FRONT,
+                                new org.joml.Vector3d(0, 0, 0)));
+        cutterSketch.addLine(0.9, 0.0, 1.1, 0.0);
+        cutterSketch.addLine(1.1, 0.0, 1.1, 0.5);
+        cutterSketch.addLine(1.1, 0.5, 0.9, 0.5);
+        cutterSketch.addLine(0.9, 0.5, 0.9, 0.0);
+        final com.ovo.sablestopnow.sketch.Revolve.Params params =
+                new com.ovo.sablestopnow.sketch.Revolve.Params(0, 0, 0, 1, 360.0, 1);
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh cutterMesh =
+                com.ovo.sablestopnow.sketch.Revolve.mesh(cutterSketch, params);
+        final double[] targetBox = {0.5, 0.0, -0.5, 1.5, 0.5, 0.5};
+        final java.util.List<double[]> targetBoxes = new java.util.ArrayList<>();
+        targetBoxes.add(targetBox);
+        final com.ovo.sablestopnow.sketch.SolidMesh.Mesh targetMesh =
+                com.ovo.sablestopnow.sketch.SolidMesh.fromBoxes(targetBoxes);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> target =
+                com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(targetMesh, null);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> cutter =
+                com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(cutterMesh, null);
+        final double targetVol = com.ovo.sablestopnow.sketch.Solid.polysVolume(target);
+        final double cutterVol = com.ovo.sablestopnow.sketch.Solid.polysVolume(cutter);
+        final java.util.List<com.ovo.sablestopnow.sketch.csg.Csg.Polygon> result =
+                com.ovo.sablestopnow.sketch.csg.Csg.subtract(target, cutter);
+        final double resultVol = com.ovo.sablestopnow.sketch.Solid.polysVolume(result);
+        // 体素求 target ∩ cutter 体积（固定网格；解析环面与盒子的交）
+        final int n = 180;
+        long inside = 0;
+        for (int ix = 0; ix < n; ix++) {
+            final double x = 0.5 + (ix + 0.5) / n;
+            for (int iy = 0; iy < n; iy++) {
+                final double y = (iy + 0.5) * 0.5 / n;
+                for (int iz = 0; iz < n; iz++) {
+                    final double z = -0.5 + (iz + 0.5) / n;
+                    final double r = Math.hypot(x, z);
+                    if (r >= 0.9 && r <= 1.1 && y >= 0.0 && y <= 0.5) {
+                        inside++;
+                    }
+                }
+            }
+        }
+        final double expectedOverlap = (double) inside / ((double) n * n * n) * 0.5;
+        final double expected = targetVol - expectedOverlap;
+        System.out.println("  revolve-csg diag: targetVol=" + targetVol
+                + " cutterVol=" + cutterVol + " overlap~=" + expectedOverlap
+                + " expected=" + expected + " resultVol=" + resultVol
+                + " polys=" + result.size());
+        check(Math.abs(targetVol - 0.5) < 1.0e-4, "csg-revolve: 目标体积 0.5");
+        check(Math.abs(resultVol - expected) < 0.02,
+                "csg-revolve: 差集体积应≈" + expected + "（实际 " + resultVol + "）");
+    }
+
     /** 特征图离线用例 ✓（立方体 6 面 / 12 棱 / 8 顶点）。 */
     private static void featuresFromMesh() {
         final java.util.List<double[]> boxes = new java.util.ArrayList<>();
@@ -1633,6 +1730,8 @@ public final class SketchModelCheck {
         referenceNotInDof();
         featuresFromMesh();
         csgBoolean();
+        csgCoplanarFace();
+        csgRevolveCutter();
         System.out.println("=== 草图模型层离线自检 ===");
 
         basePlanesAreOrthonormal();

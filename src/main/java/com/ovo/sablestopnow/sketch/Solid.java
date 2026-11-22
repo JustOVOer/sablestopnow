@@ -1625,6 +1625,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     if (cutterPolys.isEmpty()) {
                         continue;
                     }
+                    final List<Csg.Polygon> cutterRaw = cutterPolys;
                     if (f.revolve() != null) {
                         cutterPolys = expandedCutter(cutterPolys, 1.0005);
                     }
@@ -1645,26 +1646,33 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                     List<Csg.Polygon> chosen;
                     if (f.revolve() != null) {
-                        // ★ 旋转体网格可能有混合绕序（凹槽轮廓/接缝），
-                        //   直接 subtract 可能把整块切没。做两个朝向，取“非空且更小”的
-                        //   正体积结果；正常朝向通常产生 0..target 的合理结果。
-                        final List<Csg.Polygon> flippedCutter = new ArrayList<>(cutterPolys.size());
-                        for (final Csg.Polygon p : cutterPolys) {
+                        // ★ 先把目标/切割体平移到包围盒中心附近再算。
+                        //   模型局部坐标在 2e7 附近，BSP 的平面 w/分割在这么大坐标下
+                        //   会产生共面误判，表现为切口边缘少切一圈（2.5px 半圆锥）。
+                        final List<Csg.Polygon> targetBase = ensureOutward(
+                                CsgMesh.fromMesh(targetMesh, null));
+                        final double[] tb = boundsArray(targetBase);
+                        if (tb == null) {
+                            continue;
+                        }
+                        final double cx = (tb[0] + tb[3]) * 0.5;
+                        final double cy = (tb[1] + tb[4]) * 0.5;
+                        final double cz = (tb[2] + tb[5]) * 0.5;
+                        final List<Csg.Polygon> targetShift =
+                                translatePolys(targetBase, -cx, -cy, -cz);
+                        final List<Csg.Polygon> cutterShift =
+                                translatePolys(cutterPolys, -cx, -cy, -cz);
+                        final List<Csg.Polygon> flippedCutter = new ArrayList<>(cutterShift.size());
+                        for (final Csg.Polygon p : cutterShift) {
                             flippedCutter.add(p.flipped());
                         }
-                        final double targetVol2 = targetVol;
-                        final List<Csg.Polygon> targetA = ensureOutward(
-                                CsgMesh.fromMesh(targetMesh, null));
-                        final List<Csg.Polygon> targetB = ensureOutward(
-                                CsgMesh.fromMesh(targetMesh, null));
-                        final List<Csg.Polygon> targetC = ensureOutward(
-                                CsgMesh.fromMesh(targetMesh, null));
-                        final List<Csg.Polygon> resA = Csg.subtract(targetA,
-                                new ArrayList<>(cutterPolys));
-                        final List<Csg.Polygon> resB = Csg.subtract(targetB,
-                                new ArrayList<>(flippedCutter));
+                        final double targetVol2 = Math.abs(polysVolume(targetShift));
+                        final List<Csg.Polygon> resA = Csg.subtract(
+                                copyPolys(targetShift), copyPolys(cutterShift));
+                        final List<Csg.Polygon> resB = Csg.subtract(
+                                copyPolys(targetShift), copyPolys(flippedCutter));
                         final List<Csg.Polygon> inter = ensureOutward(
-                                Csg.intersect(targetC, new ArrayList<>(cutterPolys)));
+                                Csg.intersect(copyPolys(targetShift), copyPolys(cutterShift)));
                         final double volA = Math.abs(polysVolume(resA));
                         final double volB = Math.abs(polysVolume(resB));
                         final double interVol = Math.abs(polysVolume(inter));
@@ -1673,11 +1681,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         //   但交集是准确的；target − intersection 数学上就是正确差集。
                         final List<Csg.Polygon> resC;
                         if (inter.isEmpty()) {
-                            resC = ensureOutward(CsgMesh.fromMesh(targetMesh, null));
+                            resC = copyPolys(targetShift);
                         } else {
-                            final List<Csg.Polygon> targetD = ensureOutward(
-                                    CsgMesh.fromMesh(targetMesh, null));
-                            resC = Csg.subtract(targetD, new ArrayList<>(inter));
+                            resC = Csg.subtract(copyPolys(targetShift), copyPolys(inter));
                         }
                         final double volC = Math.abs(polysVolume(resC));
                         // 正确差集的体积 = 目标体积 − 相交体积。
@@ -1692,6 +1698,16 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         } else {
                             chosen = resB;
                         }
+                        final String pick = chosen == resA ? "A" : chosen == resB ? "B" : "C";
+                        chosen = translatePolys(chosen, cx, cy, cz);
+                        if (CSG_DUMPED.add(solid.id())) {
+                            final String base = "revcut_" + solid.index() + "_"
+                                    + shortId(solid.id());
+                            dumpObj(base + "_target", targetBase);
+                            dumpObj(base + "_cutter_raw", cutterRaw);
+                            dumpObj(base + "_cutter_expanded", cutterPolys);
+                            dumpObj(base + "_result", chosen);
+                        }
                         trace("[csg] revolve-orient targetVol="
                                 + String.format(java.util.Locale.ROOT, "%.6f", targetVol)
                                 + " interVol=" + String.format(java.util.Locale.ROOT, "%.6f", interVol)
@@ -1699,9 +1715,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                 + " volA=" + String.format(java.util.Locale.ROOT, "%.6f", volA)
                                 + " volB=" + String.format(java.util.Locale.ROOT, "%.6f", volB)
                                 + " volC=" + String.format(java.util.Locale.ROOT, "%.6f", volC)
-                                + " cutterOpen=" + boundaryEdgeCount(cutterPolys)
+                                + " cutterOpen=" + boundaryEdgeCount(cutterShift)
                                 + " interOpen=" + boundaryEdgeCount(inter)
-                                + " choose=" + (chosen == resA ? "A" : chosen == resB ? "B" : "C"));
+                                + " choose=" + pick);
                     } else {
                         chosen = Csg.subtract(new ArrayList<>(acc),
                                 new ArrayList<>(cutterPolys));
@@ -3517,6 +3533,78 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             out.add(new Csg.Polygon(vs, plane));
         }
         return out;
+    }
+
+    /** 把一片 CSG 多边形平移到局部原点附近再算（大坐标 2e7 下 BSP 的精度/共面分类更稳）。 */
+    private static List<Csg.Polygon> translatePolys(final List<Csg.Polygon> polys,
+                                                    final double dx, final double dy,
+                                                    final double dz) {
+        final List<Csg.Polygon> out = new ArrayList<>(polys.size());
+        for (final Csg.Polygon p : polys) {
+            final List<Csg.Vertex> vs = new ArrayList<>(p.vertices.size());
+            for (final Csg.Vertex v : p.vertices) {
+                final Csg.V3 q = v.pos();
+                vs.add(new Csg.Vertex(new Csg.V3(q.x() + dx, q.y() + dy, q.z() + dz),
+                        v.normal(), v.uv()));
+            }
+            Csg.Plane plane = p.plane;
+            if (vs.size() >= 3) {
+                final Csg.Plane np = Csg.Plane.fromPoints(
+                        vs.get(0).pos(), vs.get(1).pos(), vs.get(2).pos());
+                if (np != null) {
+                    plane = np;
+                }
+            }
+            out.add(new Csg.Polygon(vs, plane));
+        }
+        return out;
+    }
+
+    private static List<Csg.Polygon> copyPolys(final List<Csg.Polygon> polys) {
+        return translatePolys(polys, 0.0, 0.0, 0.0);
+    }
+
+    /** 已导出的旋转切割（每个 solid 一次；供离线复现）✓ */
+    private static final java.util.Set<java.util.UUID> CSG_DUMPED =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+    /** 把 CSG 多边形写成 OBJ（离线复现用；失败不影响渲染）✓ */
+    private static void dumpObj(final String name, final List<Csg.Polygon> polys) {
+        if (polys == null || polys.isEmpty()) {
+            return;
+        }
+        try {
+            final java.nio.file.Path dir = java.nio.file.Path.of("csg-dump");
+            java.nio.file.Files.createDirectories(dir);
+            final java.nio.file.Path file = dir.resolve(name + ".obj");
+            final StringBuilder sb = new StringBuilder(1 << 16);
+            sb.append("# sablestopnow csg dump\n");
+            final java.util.Map<String, Integer> index = new java.util.HashMap<>();
+            int next = 1;
+            for (final Csg.Polygon p : polys) {
+                sb.append("f");
+                for (final Csg.Vertex v : p.vertices) {
+                    final Csg.V3 q = v.pos();
+                    final String key = Math.round(q.x() * 1.0e7) + ","
+                            + Math.round(q.y() * 1.0e7) + "," + Math.round(q.z() * 1.0e7);
+                    Integer id = index.get(key);
+                    if (id == null) {
+                        id = next++;
+                        index.put(key, id);
+                        sb.append(' ').append(id);
+                        sb.append(String.format(java.util.Locale.ROOT,
+                                "\nv %.7f %.7f %.7f", q.x(), q.y(), q.z()));
+                    } else {
+                        sb.append(' ').append(id);
+                    }
+                }
+                sb.append('\n');
+            }
+            java.nio.file.Files.writeString(file, sb.toString());
+            System.out.println("[csg-dump] " + file.toAbsolutePath());
+        } catch (final Throwable t) {
+            System.out.println("[csg-dump] failed " + name + ": " + t);
+        }
     }
 
     /** 诊断：只出现一次的边数（>0 = 网格有开口）。 */

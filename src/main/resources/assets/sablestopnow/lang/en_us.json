@@ -839,5 +839,11 @@
   "model.sketch.entity.arc": "Arc",
   "model.sketch.entity.point": "Point",
   "model.sketch.entity.bezier": "Bezier",
-  "model.sketch.entities": "Entities"
+  "model.sketch.entities": "Entities",
+  "model.sketch.closed_yes": "Closed profile exists ✓",
+  "model.sketch.closed_no": "No closed profile",
+  "model.sketch.group_colors": "Color connected groups / fill closed profiles yellow",
+  "model.sketch.close_endpoints": "Close endpoints (≤0.01)",
+  "model.sketch.close_done": "Connected %1$s endpoint pairs",
+  "model.sketch.close_none": "No endpoints to close"
 }

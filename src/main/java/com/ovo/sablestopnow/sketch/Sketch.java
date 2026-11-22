@@ -1151,6 +1151,17 @@ public final class Sketch {
         this.preSolve = vars.clone();
         final double extentBefore = extent(vars);
         final SketchSolver.Result result = solver.solve(vars, toOps(), toConsts());
+        // ★ FIXED 的实际值必须精确落地：求解器收敛容差约 1e-3，
+        //   会把“网格吸附到整数”的坐标留成 1.0009 这类值。固定约束是硬约束，
+        //   求解后再把对应变量写回常量，保证网格线/固定点真的在整数上。
+        for (final Constraint c : constraints) {
+            if (c.kind() == SketchSolver.FIXED && c.operands().length >= 1) {
+                final int v = c.operands()[0];
+                if (v >= 0 && v < vars.length) {
+                    vars[v] = c.value();
+                }
+            }
+        }
         // ⚠ 不许解塌。
         //
         // 欠约束的草图有无穷多解，其中**包含退化解**：比如"四条边两两水平竖直 + 四角重合"

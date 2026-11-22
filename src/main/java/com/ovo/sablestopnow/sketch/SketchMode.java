@@ -208,9 +208,37 @@ public final class SketchMode {
         //   "关键点小方框 + 名称提示"立刻复用 ✓ 玩家一眼看出"这次选的是点、不是直线" ✓
         if (hoveredEntity != null && hoveredEntity.kind() == Sketch.EntityKind.POINT) {
             final int[] pv = hoveredEntity.vars();
-            snapAt = new SketchSession.KeyPoint(
-                    session.working().variable(pv[0]), session.working().variable(pv[1]),
-                    SketchSession.KeyKind.ENDPOINT, hoveredEntity, pv[0], pv[1]);
+            final double pu0 = session.working().variable(pv[0]);
+            final double pv0 = session.working().variable(pv[1]);
+            // ★ 端点上的“点图元”不应把所在的直线抢掉：
+            //   用户要求悬停端点时高亮**一条直线 + 它的端点**，右上名称也显示直线。
+            //   找到端点与这个点重合的线 ⇒ 以线作为 hovered，snap 仍落在线端点上。
+            Boolean found = false;
+            for (final Sketch.Entity line : session.working().entities()) {
+                if (line.kind() != Sketch.EntityKind.LINE) {
+                    continue;
+                }
+                final int[] lv = line.vars();
+                final double ax = session.working().variable(lv[0]);
+                final double ay = session.working().variable(lv[1]);
+                final double bx = session.working().variable(lv[2]);
+                final double by = session.working().variable(lv[3]);
+                final boolean atA = Math.hypot(ax - pu0, ay - pv0) < 1.0e-4;
+                final boolean atB = Math.hypot(bx - pu0, by - pv0) < 1.0e-4;
+                if (!atA && !atB) {
+                    continue;
+                }
+                hoveredEntity = line;
+                snapAt = new SketchSession.KeyPoint(pu0, pv0,
+                        SketchSession.KeyKind.ENDPOINT, line,
+                        atA ? lv[0] : lv[2], atA ? lv[1] : lv[3]);
+                found = true;
+                break;
+            }
+            if (!found) {
+                snapAt = new SketchSession.KeyPoint(pu0, pv0,
+                        SketchSession.KeyKind.ENDPOINT, hoveredEntity, pv[0], pv[1]);
+            }
         }
         // 预览落点 = 真按下去会用的那个点。**必须和 click() 走同一条路径**：
         // 先吸关键点，再（画直线时）做水平/竖直推理。少了任何一步，

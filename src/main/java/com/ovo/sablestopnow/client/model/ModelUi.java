@@ -1834,6 +1834,14 @@ public final class ModelUi {
     private static final com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> textureConnected =
             com.ovo.sablestopnow.client.gui.lib.Prop.of("solid.texture.connected", false);
 
+    /** 草图里是否按“是否相连”给图元分组着色，并给闭合轮廓铺半透明黄。 */
+    private static final com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> sketchGroupColors =
+            com.ovo.sablestopnow.client.gui.lib.Prop.of("sketch.group.colors", false);
+
+    public static com.ovo.sablestopnow.client.gui.lib.Prop<Boolean> sketchGroupColors() {
+        return sketchGroupColors;
+    }
+
     private static final com.ovo.sablestopnow.client.gui.lib.Prop<Double> textureScale =
             com.ovo.sablestopnow.client.gui.lib.Prop.of("solid.texture.scale", 1.0);
     private static final String CMD_TEXTURE_SCALE = "solid.texture.scale";
@@ -4197,6 +4205,8 @@ public final class ModelUi {
         // 不加的话，点"标注"看不到任何变化 —— 又是一次"数据对了但没生效"。
         final var workingSketch = com.ovo.sablestopnow.client.SketchClient.mode().working();
         sb.append('#').append(workingSketch == null ? "-" : workingSketch.constraints().size());
+        // 图元数量也要进指纹：实时闭合轮廓状态/一键闭合结果需要重建左栏。
+        sb.append('#').append(workingSketch == null ? -1 : workingSketch.entities().size());
         return sb.toString();
     }
     /** 上次建树时的内容签名：内容没变就不重建（重建会重置展开动画，表现为反复抽动）。 */
@@ -4430,6 +4440,125 @@ public final class ModelUi {
             return java.util.List.of();
         }
         return com.ovo.sablestopnow.sketch.SketchClientState.ofBody(level, bodyId);
+    }
+
+    /**
+     * 与拉伸/切割完全相同的闭合轮廓判定 ✓：
+     * {@code findLoops → nest → Extrude.extrudable}。
+     */
+    private static boolean hasClosedProfile(final com.ovo.sablestopnow.sketch.Sketch sketch) {
+        if (sketch == null) {
+            return false;
+        }
+        try {
+            for (final com.ovo.sablestopnow.sketch.SketchProfiles.Region region
+                    : com.ovo.sablestopnow.sketch.SketchProfiles.nest(
+                            com.ovo.sablestopnow.sketch.SketchProfiles.findLoops(sketch))) {
+                if (com.ovo.sablestopnow.sketch.Extrude.extrudable(region)) {
+                    return true;
+                }
+            }
+        } catch (final Throwable ignored) {
+            return false;
+        }
+        return false;
+    }
+
+    /** 图元端点（只包含端点，不包含中点/圆心）✓。 */
+    private record SketchEndpoint(com.ovo.sablestopnow.sketch.Sketch.Entity entity,
+                                  int uVar, int vVar, double u, double v) {
+    }
+
+    private static java.util.List<SketchEndpoint> endpointsOf(
+            final com.ovo.sablestopnow.sketch.Sketch sketch,
+            final com.ovo.sablestopnow.sketch.Sketch.Entity e) {
+        final java.util.List<SketchEndpoint> out = new java.util.ArrayList<>();
+        final int[] v = e.vars();
+        switch (e.kind()) {
+            case LINE -> {
+                if (v.length >= 4) {
+                    out.add(new SketchEndpoint(e, v[0], v[1],
+                            sketch.variable(v[0]), sketch.variable(v[1])));
+                    out.add(new SketchEndpoint(e, v[2], v[3],
+                            sketch.variable(v[2]), sketch.variable(v[3])));
+                }
+            }
+            case ARC -> {
+                if (v.length >= 6) {
+                    out.add(new SketchEndpoint(e, v[2], v[3],
+                            sketch.variable(v[2]), sketch.variable(v[3])));
+                    out.add(new SketchEndpoint(e, v[4], v[5],
+                            sketch.variable(v[4]), sketch.variable(v[5])));
+                }
+            }
+            case BEZIER -> {
+                if (v.length >= 8) {
+                    out.add(new SketchEndpoint(e, v[0], v[1],
+                            sketch.variable(v[0]), sketch.variable(v[1])));
+                    out.add(new SketchEndpoint(e, v[6], v[7],
+                            sketch.variable(v[6]), sketch.variable(v[7])));
+                }
+            }
+            case POINT -> {
+                if (v.length >= 2) {
+                    out.add(new SketchEndpoint(e, v[0], v[1],
+                            sketch.variable(v[0]), sketch.variable(v[1])));
+                }
+            }
+            default -> {
+            }
+        }
+        return out;
+    }
+
+    /** 一键把距离 &lt; 1e-2 的**图元端点**连起来（中点不算）✓。 */
+    private static int closeSketchEndpoints(final com.ovo.sablestopnow.sketch.Sketch sketch) {
+        if (sketch == null) {
+            return 0;
+        }
+        final java.util.List<SketchEndpoint> eps = new java.util.ArrayList<>();
+        for (final com.ovo.sablestopnow.sketch.Sketch.Entity e : sketch.entities()) {
+            eps.addAll(endpointsOf(sketch, e));
+        }
+        int added = 0;
+        for (int i = 0; i < eps.size(); i++) {
+            for (int j = i + 1; j < eps.size(); j++) {
+                final SketchEndpoint a = eps.get(i);
+                final SketchEndpoint b = eps.get(j);
+                if (a.entity() == b.entity()) {
+                    continue;
+                }
+                if (Math.hypot(a.u() - b.u(), a.v() - b.v()) >= 1.0e-2) {
+                    continue;
+                }
+                if (coincidentAlready(sketch, a, b)) {
+                    continue;
+                }
+                sketch.addConstraint(com.ovo.sablestopnow.sketch.SketchSolver.COINCIDENT,
+                        0.0, a.uVar(), a.vVar(), b.uVar(), b.vVar());
+                added++;
+            }
+        }
+        return added;
+    }
+
+    private static boolean coincidentAlready(final com.ovo.sablestopnow.sketch.Sketch sketch,
+                                            final SketchEndpoint a, final SketchEndpoint b) {
+        for (final com.ovo.sablestopnow.sketch.Sketch.Constraint c : sketch.constraints()) {
+            if (c.kind() != com.ovo.sablestopnow.sketch.SketchSolver.COINCIDENT
+                    || c.operands().length < 4) {
+                continue;
+            }
+            final int[] o = c.operands();
+            final boolean ab = (o[0] == a.uVar() && o[1] == a.vVar()
+                    && o[2] == b.uVar() && o[3] == b.vVar())
+                    || (o[0] == b.uVar() && o[1] == b.vVar()
+                    && o[2] == a.uVar() && o[3] == a.vVar());
+            if (ab) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -5454,6 +5583,29 @@ public final class ModelUi {
                 constructionTool.toggled = session.constructionDraw();
                 toolButtons.add(constructionTool);
                 buildToolRows(body, toolButtons);
+                // ★ 实时闭合轮廓状态 + 分组着色 + 一键闭合端点
+                final com.ovo.sablestopnow.sketch.Sketch liveSketch =
+                        com.ovo.sablestopnow.client.SketchClient.mode().working();
+                if (liveSketch != null) {
+                    final boolean hasClosed = hasClosedProfile(liveSketch);
+                    body.add(new Label(Component.translatable(
+                            hasClosed ? "model.sketch.closed_yes" : "model.sketch.closed_no"))
+                            .color(hasClosed ? 0xFF7CFF9A : 0xFFFF8A72));
+                    body.add(new com.ovo.sablestopnow.client.gui.lib.Checkbox(
+                            sketchGroupColors, "model.sketch.group_colors"));
+                    body.add(new Button(Component.translatable("model.sketch.close_endpoints"),
+                            () -> {
+                                final int n = closeSketchEndpoints(liveSketch);
+                                if (n > 0) {
+                                    com.ovo.sablestopnow.client.SketchClient.mode().solve();
+                                    ModelMode.prompt("model.sketch.close_done", n);
+                                } else {
+                                    ModelMode.prompt("model.sketch.close_none");
+                                }
+                                lastLeftSignature = null;
+                                refreshLeftPanel();
+                            }).width(Widget.FILL));
+                }
                 body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
                 // 几何约束：作用在**当前选中的图元**上（左栏「选择」工具点中的那个）。
                 // 校验在模型层（圆不能加水平/竖直），失败时给提示而不是静默无反应。

@@ -1467,7 +1467,23 @@ public final class SketchSession {
      * @return 吸附后的点（{@code {u, v, kindIndex}}，kindIndex 为 -1 表示没吸到）
      */
     public double[] snap(final double u, final double v, final double tolerance) {
-        final KeyPoint kp = pickKeyPoint(u, v, tolerance);
+        KeyPoint kp = pickKeyPoint(u, v, tolerance);
+        // ★ 网格吸附也要真正进入落点（以前只有 hover 算了网格，click 没算 ⇒
+        //   通过网格画的线仍取原始浮点坐标，和整数差 1e-3 量级）。
+        if (kp == null) {
+            final double gridTol = Math.min(tolerance, 1.0 / 6.0);
+            final double gu = Math.round(u);
+            final double gv = Math.round(v);
+            final double du = Math.abs(u - gu);
+            final double dv = Math.abs(v - gv);
+            if (du <= gridTol && dv <= gridTol) {
+                kp = new KeyPoint(gu, gv, KeyKind.GRID, null, -1, -1);
+            } else if (du <= gridTol) {
+                kp = new KeyPoint(gu, v, KeyKind.GRID, null, -1, -1);
+            } else if (dv <= gridTol) {
+                kp = new KeyPoint(u, gv, KeyKind.GRID, null, -1, -1);
+            }
+        }
         // ⚠ 只在**第一个点**时记下吸附目标。第二次点击也会调 snap，
         // 若无条件覆盖，就变成"用终点的吸附去约束起点"，约束加错地方。
         if (pending.isEmpty()) {

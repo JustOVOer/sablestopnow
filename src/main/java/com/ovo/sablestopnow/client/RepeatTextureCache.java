@@ -51,6 +51,32 @@ public final class RepeatTextureCache {
     }
 
     private static final Map<String, Connected> CONNECTED = new HashMap<>();
+    private static final Map<String, Boolean> HAS_CONNECTED = new HashMap<>();
+
+    /** 这个方块是否存在 {@code <贴图>_connected.png}（Create 机壳等）✓。 */
+    public static boolean hasConnectedVariant(@Nullable final String blockId) {
+        if (blockId == null || blockId.isBlank()) {
+            return false;
+        }
+        final Boolean cached = HAS_CONNECTED.get(blockId);
+        if (cached != null) {
+            return cached;
+        }
+        boolean found = false;
+        try {
+            final Minecraft mc = Minecraft.getInstance();
+            final TextureAtlasSprite sprite = SolidTextureCache.previewSprite(blockId);
+            if (sprite != null) {
+                final ResourceLocation tex = sprite.contents().name();
+                final ResourceLocation sibling = ResourceLocation.fromNamespaceAndPath(
+                        tex.getNamespace(), tex.getPath() + "_connected.png");
+                found = mc.getResourceManager().getResource(sibling).isPresent();
+            }
+        } catch (final Throwable ignored) {
+        }
+        HAS_CONNECTED.put(blockId, found);
+        return found;
+    }
 
     /**
      * **失败也要记**（负缓存）。
@@ -138,6 +164,7 @@ public final class RepeatTextureCache {
     public static void clear() {
         CACHE.clear();
         CONNECTED.clear();
+        HAS_CONNECTED.clear();
         FAILED.clear();
     }
 

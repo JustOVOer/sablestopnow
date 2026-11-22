@@ -375,13 +375,15 @@ public final class SketchRenderer {
                     ? SolidTextureCache.resolve(look.blockId()) : null;
             if (faces != null && !placed.mesh().isEmpty() && placed.planeNormal() != null) {
                 final com.ovo.sablestopnow.client.RepeatTextureCache.Connected ctm =
-                        look.connected()
+                        (look.connected()
+                                || com.ovo.sablestopnow.client.RepeatTextureCache
+                                .hasConnectedVariant(look.blockId()))
                                 ? com.ovo.sablestopnow.client.RepeatTextureCache.connected(
                                         look.blockId())
                                 : null;
                 // 有“无边框底图”时不再内缩；回退路线才用 sprite 内缩近似。
                 final SolidTextureCache.Faces renderFaces =
-                        look.connected() && ctm == null ? insetFaces(faces, 0.0625) : faces;
+                        ctm != null ? insetFaces(faces, 0.0625) : faces;
                 // ⚠ **REPEAT 贴图路线**下每个实体可能是**不同的**贴图（不同方块），
                 //   所以各自用自己的 immediate 源与 RenderType ——
                 //   共用同一个 BufferSource 去取不同 RenderType 会**结束掉前一个 builder**
@@ -398,7 +400,7 @@ public final class SketchRenderer {
                                     : net.minecraft.client.renderer.RenderType.entityCutoutNoCull(repeatTex));
                     textured += drawTexturedSolid(vcRepeat, pose, cameraPos, sPose, placed, renderFaces,
                             look.blocksPerTile(), repeatTex);
-                    if (look.connected()) {
+                    if (ctm != null || look.connected()) {
                         if (ctm != null) {
                             final MultiBufferSource.BufferSource borderBuf = immediate(1 << 16);
                             final VertexConsumer vcBorder = borderBuf.getBuffer(
@@ -416,7 +418,7 @@ public final class SketchRenderer {
                 } else {
                     textured += drawTexturedSolid(vcTex, pose, cameraPos, sPose, placed, renderFaces,
                             look.blocksPerTile(), null);
-                    if (look.connected()) {
+                    if (ctm != null || look.connected()) {
                         drawTextureBorder(vcTex, pose, cameraPos, sPose, placed, faces, null);
                     }
                 }
@@ -443,9 +445,8 @@ public final class SketchRenderer {
         if (dbgBuf != null) {
             dbgBuf.endBatch();
         }
-        if (sketching) {
-            drawn += drawDatumPlanes(vcq, pose, cameraPos, byId);
-        }
+        // ★ 用户要求：草图视图不再渲染基准面（编辑/选面阶段都隐藏）。
+        //   基准面拾取仍由 PlanePick 工作，不依赖这里画出来的框。
         // ⚠ 正在编辑的那张草图是**独立对象**（SketchMode.working），**不在 SketchClientState 里** ——
         // 它要等「完成 -> 发服务端 -> 同步回来」才会进客户端镜像。
         // 不在这里单独画一次的话，编辑期间画的图元根本不显示，
@@ -585,6 +586,9 @@ public final class SketchRenderer {
         // ★ 基准面特征在 placeAll 里被跳过（不是材料）⇒ 不能从 placed 里找，
         //   必须从**全部实体**里找，否则"创建了但看不见"（用户实测）✓
         for (final Solid planeSolid : com.ovo.sablestopnow.sketch.SolidClientState.in(level.dimension().location())) {
+            if (com.ovo.sablestopnow.client.SketchClient.active()) {
+                break; // 草图视图内不画基准面
+            }
             if (!(planeSolid.shape() instanceof final Solid.Shape.Plane plane)) {
                 continue;
             }
@@ -989,6 +993,149 @@ public final class SketchRenderer {
     /** 调试用：碰撞盒描边的颜色（亮绿，和草图青/实体紫/轴橙都不撞）。 */
     private static final float[] DEBUG_BOX_COLOR = {0.25f, 1.0f, 0.35f};
 
+    /** 连接分组色（相邻组颜色不同；不参与选择/悬停高亮）。 */
+    private static final float[][] GROUP_COLORS = {
+            {0.35f, 0.85f, 1.00f}, {1.00f, 0.65f, 0.30f}, {0.55f, 1.00f, 0.55f},
+            {1.00f, 0.55f, 0.90f}, {0.95f, 0.95f, 0.45f}, {0.65f, 0.70f, 1.00f},
+            {0.35f, 1.00f, 0.80f}, {1.00f, 0.80f, 0.75f}
+    };
+
+    private record SketchEp(Sketch.Entity entity, int uVar, int vVar, double u, double v) {
+    }
+
+    private static java.util.List<SketchEp> endpointsOf(final Sketch sketch,
+                                                       final Sketch.Entity e) {
+        final java.util.List<SketchEp> out = new java.util.ArrayList<>();
+        final int[] v = e.vars();
+        switch (e.kind()) {
+            case LINE -> {
+                if (v.length >= 4) {
+                    out.add(new SketchEp(e, v[0], v[1], sketch.variable(v[0]), sketch.variable(v[1])));
+                    out.add(new SketchEp(e, v[2], v[3], sketch.variable(v[2]), sketch.variable(v[3])));
+                }
+            }
+            case ARC -> {
+                if (v.length >= 6) {
+                    out.add(new SketchEp(e, v[2], v[3], sketch.variable(v[2]), sketch.variable(v[3])));
+                    out.add(new SketchEp(e, v[4], v[5], sketch.variable(v[4]), sketch.variable(v[5])));
+                }
+            }
+            case BEZIER -> {
+                if (v.length >= 8) {
+                    out.add(new SketchEp(e, v[0], v[1], sketch.variable(v[0]), sketch.variable(v[1])));
+                    out.add(new SketchEp(e, v[6], v[7], sketch.variable(v[6]), sketch.variable(v[7])));
+                }
+            }
+            case POINT -> {
+                if (v.length >= 2) {
+                    out.add(new SketchEp(e, v[0], v[1], sketch.variable(v[0]), sketch.variable(v[1])));
+                }
+            }
+            default -> {
+            }
+        }
+        return out;
+    }
+
+    /** 按端点距离 &lt; 1e-3 做并查集；同一组给同一个颜色。 */
+    private static java.util.Map<Sketch.Entity, Integer> sketchGroups(final Sketch sketch) {
+        final java.util.List<Sketch.Entity> ents = new java.util.ArrayList<>(sketch.entities());
+        final int n = ents.size();
+        final int[] parent = new int[n];
+        final java.util.List<java.util.List<SketchEp>> eps = new java.util.ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            parent[i] = i;
+            eps.add(endpointsOf(sketch, ents.get(i)));
+        }
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                boolean join = false;
+                for (final SketchEp a : eps.get(i)) {
+                    for (final SketchEp b : eps.get(j)) {
+                        if (Math.hypot(a.u() - b.u(), a.v() - b.v()) < 1.0e-3) {
+                            join = true;
+                            break;
+                        }
+                    }
+                    if (join) {
+                        break;
+                    }
+                }
+                if (join) {
+                    final int ra = root(parent, i);
+                    final int rb = root(parent, j);
+                    if (ra != rb) {
+                        parent[rb] = ra;
+                    }
+                }
+            }
+        }
+        final java.util.Map<Sketch.Entity, Integer> out = new java.util.IdentityHashMap<>();
+        final java.util.Map<Integer, Integer> rootToGroup = new java.util.HashMap<>();
+        int next = 0;
+        for (int i = 0; i < n; i++) {
+            final int r = root(parent, i);
+            Integer g = rootToGroup.get(r);
+            if (g == null) {
+                g = next++;
+                rootToGroup.put(r, g);
+            }
+            out.put(ents.get(i), g);
+        }
+        return out;
+    }
+
+    private static int root(final int[] parent, final int i) {
+        int r = i;
+        while (parent[r] != r) {
+            r = parent[r];
+        }
+        int cur = i;
+        while (parent[cur] != cur) {
+            final int next = parent[cur];
+            parent[cur] = r;
+            cur = next;
+        }
+        return r;
+    }
+
+    /** 已有闭合轮廓铺半透明黄（与拉伸/切割同一个 findLoops/nest/extrudable 判定）。 */
+    private static void drawClosedProfileFills(final VertexConsumer vc, final PoseStack.Pose pose,
+                                               final Vec3 cameraPos, final Pose3dc renderPose,
+                                               final Sketch sketch) {
+        try {
+            for (final com.ovo.sablestopnow.sketch.SketchProfiles.Region region
+                    : com.ovo.sablestopnow.sketch.SketchProfiles.nest(
+                            com.ovo.sablestopnow.sketch.SketchProfiles.findLoops(sketch))) {
+                if (!com.ovo.sablestopnow.sketch.Extrude.extrudable(region)) {
+                    continue;
+                }
+                final java.util.List<double[]> pts = region.outer().points();
+                if (pts.size() < 3) {
+                    continue;
+                }
+                double cu = 0.0;
+                double cv = 0.0;
+                for (final double[] p : pts) {
+                    cu += p[0];
+                    cv += p[1];
+                }
+                cu /= pts.size();
+                cv /= pts.size();
+                final Vec3 center = world(cameraPos, renderPose, sketch, cu, cv);
+                final float[] fill = {1.0f, 0.86f, 0.25f, 0.18f};
+                for (int i = 0; i < pts.size(); i++) {
+                    final double[] a = pts.get(i);
+                    final double[] b = pts.get((i + 1) % pts.size());
+                    final Vec3 aw = world(cameraPos, renderPose, sketch, a[0], a[1]);
+                    final Vec3 bw = world(cameraPos, renderPose, sketch, b[0], b[1]);
+                    quadOf(vc, pose, center, aw, bw, bw, fill);
+                }
+            }
+        } catch (final Throwable ignored) {
+        }
+    }
+
     /** 画一张草图的全部图元，返回画出的线段数（诊断用）。 */
     private static int drawSketch(final VertexConsumer vc, final PoseStack.Pose pose,
                                   final Vec3 cameraPos, final Pose3dc renderPose,
@@ -1006,6 +1153,14 @@ public final class SketchRenderer {
         // 鼠标指到的图元：高亮它，并在它的关键点（端点/中点/圆心）上打标识。
         // 这两种反馈是玩家"确认自己对到哪里"的唯一依据 —— 没有它，画线时完全是盲的。
         final Sketch.Entity hovered = isWorking ? SketchClient.mode().hoveredEntity() : null;
+        // ★ 连接分组着色 + 闭合轮廓半透明黄（复选框开启时）
+        final boolean groupColors = isWorking
+                && com.ovo.sablestopnow.client.model.ModelUi.sketchGroupColors().get();
+        final java.util.Map<Sketch.Entity, Integer> groups =
+                groupColors ? sketchGroups(sketch) : null;
+        if (groupColors) {
+            drawClosedProfileFills(vc, pose, cameraPos, renderPose, sketch);
+        }
         // 约束状态着色（只在**正在编辑**的那张草图上做）：
         // 完全定义 = 暗淡（视觉上退到后面），欠定义 = 亮蓝，约束冲突 = 红（不敢标颜色时说真话）。
         // ⚠ SolidWorks 用黑色表示完全定义是因为它背景是白的；这里是暗色世界，
@@ -1044,6 +1199,9 @@ public final class SketchRenderer {
                 entityColor = HOVER_COLOR;
             } else if (hasConstraintVar(v)) {
                 entityColor = CONSTRAINT_HL_COLOR;
+            } else if (groups != null) {
+                entityColor = GROUP_COLORS[Math.floorMod(
+                        groups.getOrDefault(entity, 0), GROUP_COLORS.length)];
             } else if (dofFree == null) {
                 entityColor = color;
             } else if (conflicted) {
@@ -1064,6 +1222,16 @@ public final class SketchRenderer {
                     lines++;
                 }
                 case POINT -> {
+                    // ★ 用户要求：鼠标下只高亮**一个**图元。端点附近自动创建的
+                    //   点图元以前全部画十字 ⇒ 看起来同时选中了好几个点。
+                    //   现在只画：已选中的、hover 的、或当前吸附目标那个点。
+                    final SketchSession.KeyPoint snapNow =
+                            isWorking ? SketchClient.mode().snapAt() : null;
+                    final boolean pointRelevant = selected || entity.equals(hovered)
+                            || (snapNow != null && entity.equals(snapNow.owner()));
+                    if (!pointRelevant) {
+                        continue;
+                    }
                     // 点画成一个小十字（单纯一个点是看不见的）
                     final Vec3 c = world(cameraPos, renderPose, sketch,
                             sketch.variable(v[0]), sketch.variable(v[1]));

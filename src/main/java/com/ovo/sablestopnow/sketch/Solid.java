@@ -1723,6 +1723,14 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                 new ArrayList<>(cutterPolys));
                     }
                     acc = chosen;
+                    if (f.revolve() != null) {
+                        final int before = acc.size();
+                        acc = stripThinSheetPairs(acc, 0.01);
+                        if (acc.size() != before) {
+                            trace("[csg] thin-sheet removed=" + (before - acc.size())
+                                    + " solid=" + solid.index());
+                        }
+                    }
                     trace("[csg] body=" + shortId(solid.body())
                             + " solid=" + solid.index()
                             + " kind=" + (f.revolve() != null ? "revolutionCut" : "cut")
@@ -3605,6 +3613,120 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         } catch (final Throwable t) {
             System.out.println("[csg-dump] failed " + name + ": " + t);
         }
+    }
+
+    /**
+     * 清掉 CSG 在旋转切割切面处留下的**极薄双层片**。
+     *
+     * <p>贴轴轮廓外移后，轴上尖点消失，但 BSP 仍可能在切面附近留下
+     * 一对法线相反、间距 &lt; 0.01 格的小三角片（用户实测厚度 &lt;0.1px）。
+     * 正常实体表面不会出现这种背对背且贴在一起的成对片面，直接成对删除。
+     */
+    public static List<Csg.Polygon> stripThinSheetPairs(final List<Csg.Polygon> polys,
+                                                        final double tol) {
+        if (polys == null || polys.size() < 2) {
+            return polys;
+        }
+        final int n = polys.size();
+        final double[] cx = new double[n];
+        final double[] cy = new double[n];
+        final double[] cz = new double[n];
+        final double[] nx = new double[n];
+        final double[] ny = new double[n];
+        final double[] nz = new double[n];
+        final double[] area = new double[n];
+        for (int i = 0; i < n; i++) {
+            final Csg.Polygon p = polys.get(i);
+            final List<Csg.Vertex> vs = p.vertices;
+            double sx = 0.0;
+            double sy = 0.0;
+            double sz = 0.0;
+            double ax = 0.0;
+            double ay = 0.0;
+            double az = 0.0;
+            for (int k = 0; k < vs.size(); k++) {
+                final Csg.V3 a = vs.get(k).pos();
+                final Csg.V3 b = vs.get((k + 1) % vs.size()).pos();
+                sx += a.x();
+                sy += a.y();
+                sz += a.z();
+                ax += a.y() * b.z() - a.z() * b.y();
+                ay += a.z() * b.x() - a.x() * b.z();
+                az += a.x() * b.y() - a.y() * b.x();
+            }
+            cx[i] = sx / vs.size();
+            cy[i] = sy / vs.size();
+            cz[i] = sz / vs.size();
+            final double len = Math.sqrt(ax * ax + ay * ay + az * az);
+            area[i] = len * 0.5;
+            nx[i] = len > 1.0e-12 ? ax / len : 0.0;
+            ny[i] = len > 1.0e-12 ? ay / len : 0.0;
+            nz[i] = len > 1.0e-12 ? az / len : 0.0;
+        }
+        final java.util.Map<Long, java.util.List<Integer>> grid = new java.util.HashMap<>();
+        for (int i = 0; i < n; i++) {
+            final long key = cellKey(cx[i], cy[i], cz[i], tol);
+            grid.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(i);
+        }
+        final boolean[] remove = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            if (remove[i] || area[i] < 1.0e-12) {
+                continue;
+            }
+            final int gx = (int) Math.floor(cx[i] / tol);
+            final int gy = (int) Math.floor(cy[i] / tol);
+            final int gz = (int) Math.floor(cz[i] / tol);
+            boolean paired = false;
+            for (int dx = -1; dx <= 1 && !paired; dx++) {
+                for (int dy = -1; dy <= 1 && !paired; dy++) {
+                    for (int dz = -1; dz <= 1 && !paired; dz++) {
+                        final java.util.List<Integer> list =
+                                grid.get(cellKey(gx + dx, gy + dy, gz + dz));
+                        if (list == null) {
+                            continue;
+                        }
+                        for (final int j : list) {
+                            if (j <= i || remove[j] || area[j] < 1.0e-12) {
+                                continue;
+                            }
+                            final double d = Math.sqrt((cx[i] - cx[j]) * (cx[i] - cx[j])
+                                    + (cy[i] - cy[j]) * (cy[i] - cy[j])
+                                    + (cz[i] - cz[j]) * (cz[i] - cz[j]));
+                            if (d > tol) {
+                                continue;
+                            }
+                            final double dot = nx[i] * nx[j] + ny[i] * ny[j] + nz[i] * nz[j];
+                            final double ratio = Math.min(area[i], area[j])
+                                    / Math.max(area[i], area[j]);
+                            if (dot < -0.9 && ratio > 0.2) {
+                                remove[i] = true;
+                                remove[j] = true;
+                                paired = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        final List<Csg.Polygon> out = new java.util.ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            if (!remove[i]) {
+                out.add(polys.get(i));
+            }
+        }
+        return out;
+    }
+
+    private static long cellKey(final double x, final double y, final double z,
+                                final double cell) {
+        return cellKey((int) Math.floor(x / cell), (int) Math.floor(y / cell),
+                (int) Math.floor(z / cell));
+    }
+
+    private static long cellKey(final int x, final int y, final int z) {
+        return ((long) x & 0x1FFFFF) << 42 | ((long) y & 0x1FFFFF) << 21
+                | ((long) z & 0x1FFFFF);
     }
 
     /** 诊断：只出现一次的边数（>0 = 网格有开口）。 */

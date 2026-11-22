@@ -153,6 +153,8 @@ public final class RevolutionCutProbe {
                 final double cv = volume(b);
                 final List<Csg.Polygon> r = Csg.subtract(a, b);
                 final double rv = volume(r);
+                final List<Csg.Polygon> rClean = Solid.stripThinSheetPairs(r, 0.01);
+                final double rCleanV = volume(rClean);
                 // 离线复现游戏里的“平移到原点”分支：
                 final List<Csg.Polygon> a2 = CsgMesh.fromMesh(targetMesh, null);
                 final List<Csg.Polygon> b2 = CsgMesh.fromMesh(cutterMesh, null);
@@ -190,9 +192,11 @@ public final class RevolutionCutProbe {
                         "body=%s target(idx=%d,id=%s) cut(idx=%d,id=%s) "
                                 + "targetVol=%.6f cutterVol=%.6f resultVol=%.6f "
                                 + "shifted=%.6f inter=%.6f minusInter=%.6f AminusInter=%.6f "
+                                + "clean=%.6f cleanPolys=%d "
                                 + "targetBounds=%s cutterBounds=%s%n",
                         target.body(), target.index(), target.id(),
                         cut.index(), cut.id(), tv, cv, rv, rSv, iv, rCv, rAv,
+                        rCleanV, rClean.size(),
                         fmt(tb), fmt(cb));
                 for (final double dx : new double[] {0.0, 0.001, -0.001, 0.002, -0.002, 0.005, -0.005}) {
                     final List<Csg.Polygon> cc = translate(

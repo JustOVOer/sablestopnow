@@ -1621,9 +1621,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     //     ⇒ 差集切不到任何面 ⇒ 日志里 resultPolys 与 target 三角数一样 ✗）
                     // ⚠ 先回退：给切割体统一 ensureOutward 会改变圆角 CSG 的
                     //   输入朝向，用户实测圆角被搞坏。旋转切割的问题另行定位。
-                    final List<Csg.Polygon> cutterPolys = CsgMesh.fromMesh(cutterMesh, null);
+                    List<Csg.Polygon> cutterPolys = CsgMesh.fromMesh(cutterMesh, null);
                     if (cutterPolys.isEmpty()) {
                         continue;
+                    }
+                    if (f.revolve() != null) {
+                        cutterPolys = expandedCutter(cutterPolys, 1.0005);
                     }
                     // ★ 全链路体积日志（用户要求；圆角 bug 就是靠体积找出来的）：
                     //   目标/切割体/结果三者的带符号体积、以及各自三角数。
@@ -1640,26 +1643,40 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         for (final Csg.Polygon p : cutterPolys) {
                             flippedCutter.add(p.flipped());
                         }
+                        final double targetVol2 = targetVol;
                         final List<Csg.Polygon> targetA = ensureOutward(
                                 CsgMesh.fromMesh(targetMesh, null));
                         final List<Csg.Polygon> targetB = ensureOutward(
+                                CsgMesh.fromMesh(targetMesh, null));
+                        final List<Csg.Polygon> targetC = ensureOutward(
                                 CsgMesh.fromMesh(targetMesh, null));
                         final List<Csg.Polygon> resA = Csg.subtract(targetA,
                                 new ArrayList<>(cutterPolys));
                         final List<Csg.Polygon> resB = Csg.subtract(targetB,
                                 new ArrayList<>(flippedCutter));
+                        final List<Csg.Polygon> inter = Csg.intersect(targetC,
+                                new ArrayList<>(cutterPolys));
                         final double volA = Math.abs(polysVolume(resA));
                         final double volB = Math.abs(polysVolume(resB));
-                        if (volA < 1.0e-9 && volB >= 1.0e-9) {
+                        final double interVol = Math.abs(polysVolume(inter));
+                        // 正确差集的体积 = 目标体积 − 相交体积。
+                        // A 通常是正确差集；B 是绕序反了之后的交集/空集。
+                        final double expected = Math.max(0.0, targetVol2 - interVol);
+                        final double dA = Math.abs(volA - expected);
+                        final double dB = Math.abs(volB - expected);
+                        if (volA < 1.0e-9 && volB < 1.0e-9) {
+                            chosen = resA;
+                        } else if (volA < 1.0e-9) {
                             chosen = resB;
-                        } else if (volB < 1.0e-9 && volA >= 1.0e-9) {
+                        } else if (volB < 1.0e-9) {
                             chosen = resA;
                         } else {
-                            // 两边都非空：取更小的正体积（正确差集 ≤ 原体积）
-                            chosen = volA <= volB ? resA : resB;
+                            chosen = dA <= dB ? resA : resB;
                         }
                         trace("[csg] revolve-orient targetVol="
                                 + String.format(java.util.Locale.ROOT, "%.6f", targetVol)
+                                + " interVol=" + String.format(java.util.Locale.ROOT, "%.6f", interVol)
+                                + " expected=" + String.format(java.util.Locale.ROOT, "%.6f", expected)
                                 + " volA=" + String.format(java.util.Locale.ROOT, "%.6f", volA)
                                 + " volB=" + String.format(java.util.Locale.ROOT, "%.6f", volB)
                                 + " choose=" + (chosen == resA ? "A" : "B"));
@@ -3393,6 +3410,56 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
         return String.format(java.util.Locale.ROOT, "(%.3f,%.3f,%.3f)..(%.3f,%.3f,%.3f)",
                 minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    /** 把切割体绕包围盒中心轻微放大（1e-4），避免与目标面共面时留下零厚度皮/锥。 */
+    private static List<Csg.Polygon> expandedCutter(final List<Csg.Polygon> polys,
+                                                    final double factor) {
+        if (polys == null || polys.isEmpty()) {
+            return polys;
+        }
+        double cx = 0.0;
+        double cy = 0.0;
+        double cz = 0.0;
+        int n = 0;
+        for (final Csg.Polygon p : polys) {
+            for (final Csg.Vertex v : p.vertices) {
+                cx += v.pos().x();
+                cy += v.pos().y();
+                cz += v.pos().z();
+                n++;
+            }
+        }
+        if (n == 0) {
+            return polys;
+        }
+        cx /= n;
+        cy /= n;
+        cz /= n;
+        final List<Csg.Polygon> out = new ArrayList<>(polys.size());
+        for (final Csg.Polygon p : polys) {
+            final List<Csg.Vertex> vs = new ArrayList<>(p.vertices.size());
+            for (final Csg.Vertex v : p.vertices) {
+                final Csg.V3 q = v.pos();
+                final Csg.V3 pos = new Csg.V3(
+                        cx + (q.x() - cx) * factor,
+                        cy + (q.y() - cy) * factor,
+                        cz + (q.z() - cz) * factor);
+                vs.add(new Csg.Vertex(pos, v.normal(), v.uv()));
+            }
+            Csg.Plane plane = p.plane;
+            if (vs.size() >= 3) {
+                final Csg.V3 a = vs.get(0).pos();
+                final Csg.V3 b = vs.get(1).pos();
+                final Csg.V3 c = vs.get(2).pos();
+                final Csg.Plane np = Csg.Plane.fromPoints(a, b, c);
+                if (np != null) {
+                    plane = np;
+                }
+            }
+            out.add(new Csg.Polygon(vs, plane));
+        }
+        return out;
     }
 
     /**

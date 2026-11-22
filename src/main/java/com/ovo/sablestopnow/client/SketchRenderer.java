@@ -375,15 +375,16 @@ public final class SketchRenderer {
                     ? SolidTextureCache.resolve(look.blockId()) : null;
             if (faces != null && !placed.mesh().isEmpty() && placed.planeNormal() != null) {
                 final com.ovo.sablestopnow.client.RepeatTextureCache.Connected ctm =
-                        (look.connected()
-                                || com.ovo.sablestopnow.client.RepeatTextureCache
+                        CTM_BORDERS_ENABLED
+                                && (look.connected() || com.ovo.sablestopnow.client.RepeatTextureCache
                                 .hasConnectedVariant(look.blockId()))
                                 ? com.ovo.sablestopnow.client.RepeatTextureCache.connected(
                                         look.blockId())
                                 : null;
                 // 有“无边框底图”时不再内缩；回退路线才用 sprite 内缩近似。
                 final SolidTextureCache.Faces renderFaces =
-                        ctm != null ? insetFaces(faces, 0.0625) : faces;
+                        CTM_BORDERS_ENABLED && ctm != null
+                                ? insetFaces(faces, 0.0625) : faces;
                 // ⚠ **REPEAT 贴图路线**下每个实体可能是**不同的**贴图（不同方块），
                 //   所以各自用自己的 immediate 源与 RenderType ——
                 //   共用同一个 BufferSource 去取不同 RenderType 会**结束掉前一个 builder**
@@ -400,7 +401,7 @@ public final class SketchRenderer {
                                     : net.minecraft.client.renderer.RenderType.entityCutoutNoCull(repeatTex));
                     textured += drawTexturedSolid(vcRepeat, pose, cameraPos, sPose, placed, renderFaces,
                             look.blocksPerTile(), repeatTex);
-                    if (ctm != null || look.connected()) {
+                    if (CTM_BORDERS_ENABLED && (ctm != null || look.connected())) {
                         if (ctm != null) {
                             final MultiBufferSource.BufferSource borderBuf = immediate(1 << 16);
                             final VertexConsumer vcBorder = borderBuf.getBuffer(
@@ -418,7 +419,7 @@ public final class SketchRenderer {
                 } else {
                     textured += drawTexturedSolid(vcTex, pose, cameraPos, sPose, placed, renderFaces,
                             look.blocksPerTile(), null);
-                    if (ctm != null || look.connected()) {
+                    if (CTM_BORDERS_ENABLED && (ctm != null || look.connected())) {
                         drawTextureBorder(vcTex, pose, cameraPos, sPose, placed, faces, null);
                     }
                 }
@@ -2656,7 +2657,12 @@ public final class SketchRenderer {
         FRAME_BUFFERS.clear();
     }
 
-    /** 连接材质边框渲染诊断（每个实体只打一行）✓ */
+    /**
+     * 连接材质边框临时总开关：用户实测直棱圆角异常，先回退贴图边框，
+     * 隔离“几何问题”还是“边框条带盖住圆角”。定位后再打开。
+     */
+    private static final boolean CTM_BORDERS_ENABLED = false;
+
     private static final java.util.Set<java.util.UUID> CTM_LOGGED =
             java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 

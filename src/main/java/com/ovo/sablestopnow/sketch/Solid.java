@@ -474,7 +474,9 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
         for (final Shape.EdgeRef ref : f.edges()) {
             final Solid src = byId.get(ref.solidId());
-            if (src == null || src.shape instanceof Shape.Plane || src.shape instanceof Shape.Cut) {
+            if (src == null || src.shape instanceof Shape.Plane
+                    || src.shape instanceof Shape.Cut
+                    || src.shape instanceof Shape.RevolutionCut) {
                 continue;
             }
             // ★ 曲线棱：碰撞盒也要**逐段**做（用弦线会把弧内部整块切掉）✓
@@ -1282,7 +1284,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         //   ⇒ 弧棱永远倒不出来（预览用的是全体盒子，所以预览正常）
         final java.util.Map<UUID, List<double[]>> bodyProbeBoxes = new java.util.HashMap<>();
         for (final Solid s : solids) {
-            if (s.shape instanceof Shape.Cut || s.shape instanceof Shape.Plane
+            if (s.shape instanceof Shape.Cut || s.shape instanceof Shape.RevolutionCut
+                    || s.shape instanceof Shape.Plane
                     || s.shape instanceof Shape.Fillet || s.shape instanceof Shape.Mirror
                     || s.shape instanceof Shape.Pattern || s.shape instanceof Shape.Clone) {
                 continue;
@@ -1368,6 +1371,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 //   ⇒ 表现就是"预览正常、创建后模型不变"（实测）。这里统一改判为材料实体 ✓
                 if (src != null && (src.shape instanceof Shape.Plane
                         || src.shape instanceof Shape.Cut
+                        || src.shape instanceof Shape.RevolutionCut
                         || src.shape instanceof Shape.Mirror
                         || src.shape instanceof Shape.Pattern
                         || src.shape instanceof Shape.Fillet)) {
@@ -1384,7 +1388,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                 || cand.shape() instanceof Shape.Fillet
                                 || cand.shape() instanceof Shape.Mirror
                                 || cand.shape() instanceof Shape.Pattern
-                                || cand.shape() instanceof Shape.Cut) {
+                                || cand.shape() instanceof Shape.Cut
+                                || cand.shape() instanceof Shape.RevolutionCut) {
                             continue;
                         }
                         final Sketch csk = cand.resolve(sketches);
@@ -1497,7 +1502,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         final long tAll = System.nanoTime();
         for (final Solid solid : solids) {
             final long tSolid = System.nanoTime();
-            if (solid.shape() instanceof Shape.Cut) {
+            if (solid.shape() instanceof Shape.Cut
+                    || solid.shape() instanceof Shape.RevolutionCut) {
                 continue; // 切割体本身不产生材料/线框/网格 ✓
             }
             if (solid.shape() instanceof Shape.Plane) {

@@ -1608,15 +1608,28 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     //   ⇒ 切割体网格与目标网格**本来就在同一个空间** ⇒ **不需要再变换** ✓
                     //   （之前用 `CsgMesh.between` 又按平面坐标变换了一次 ⇒ 切割体被搬到别处
                     //     ⇒ 差集切不到任何面 ⇒ 日志里 resultPolys 与 target 三角数一样 ✗）
-                    // ★ 切割体也要**统一朝外**。旋转体的环朝向由轮廓方向决定，
-                    //   直接喂给 subtract 时如果朝内，结果会变成“只留下交集”
-                    //   （用户实测：凹槽旋转切割后只剩切割体与目标重合的部分）。
-                    final List<Csg.Polygon> cutterPolys =
-                            ensureOutward(CsgMesh.fromMesh(cutterMesh, null));
+                    // ⚠ 先回退：给切割体统一 ensureOutward 会改变圆角 CSG 的
+                    //   输入朝向，用户实测圆角被搞坏。旋转切割的问题另行定位。
+                    final List<Csg.Polygon> cutterPolys = CsgMesh.fromMesh(cutterMesh, null);
                     if (cutterPolys.isEmpty()) {
                         continue;
                     }
+                    // ★ 全链路体积日志（用户要求；圆角 bug 就是靠体积找出来的）：
+                    //   目标/切割体/结果三者的带符号体积、以及各自三角数。
+                    final double targetVol = polysVolume(acc);
+                    final double cutterVol = polysVolume(cutterPolys);
+                    final int targetPolys = acc.size();
+                    final int cutterPolysN = cutterPolys.size();
                     acc = Csg.subtract(acc, cutterPolys);
+                    trace("[csg] body=" + shortId(solid.body())
+                            + " solid=" + solid.index()
+                            + " kind=" + (f.revolve() != null ? "revolutionCut" : "cut")
+                            + " targetVol=" + String.format(java.util.Locale.ROOT, "%.6f", targetVol)
+                            + " cutterVol=" + String.format(java.util.Locale.ROOT, "%.6f", cutterVol)
+                            + " resultVol=" + String.format(java.util.Locale.ROOT, "%.6f",
+                                    polysVolume(acc))
+                            + " targetPolys=" + targetPolys + " cutterPolys=" + cutterPolysN
+                            + " resultPolys=" + acc.size());
                 }
                 lastCsgDiag = "tris target=" + targetTris + " cutter=" + cutterTris
                         + " resultPolys=" + acc.size();

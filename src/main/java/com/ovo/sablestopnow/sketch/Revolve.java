@@ -441,12 +441,14 @@ public final class Revolve {
             if (!Extrude.extrudable(region)) {
                 continue;
             }
-            // 外圈：材料在环内，平面法线朝环外
-            emitRevolveRing(verts, indices, plane, params, region.outer().points(),
+            // 外圈统一逆时针、孔统一顺时针 ⇒ 下面的“右侧法线”就一定是朝外。
+            final List<double[]> outer = orientRing(region.outer().points(), true);
+            emitRevolveRing(verts, indices, plane, params, outer,
                     true, total, steps);
             // 孔：材料在环外，平面法线要**反**过来（朝孔内）
             for (final SketchProfiles.Profile hole : region.holes()) {
-                emitRevolveRing(verts, indices, plane, params, hole.points(),
+                final List<double[]> holeRing = orientRing(hole.points(), false);
+                emitRevolveRing(verts, indices, plane, params, holeRing,
                         false, total, steps);
             }
             // 只转部分角度时，两端各有一个盖面；整圈时首尾相接，没有盖子。
@@ -459,6 +461,16 @@ public final class Revolve {
             }
         }
         return new SolidMesh.Mesh(List.copyOf(verts), toIntArray(indices));
+    }
+
+    /** 统一环的走向（外圈 CCW、孔 CW）✓。 */
+    private static List<double[]> orientRing(final List<double[]> ring,
+                                             final boolean ccw) {
+        final List<double[]> out = new ArrayList<>(ring);
+        if ((SketchProfiles.signedArea(out) > 0.0) != ccw) {
+            java.util.Collections.reverse(out);
+        }
+        return out;
     }
 
     /**
@@ -519,16 +531,11 @@ public final class Revolve {
             }
             final double tu = (q[0] - p[0]) / edge;
             final double tv = (q[1] - p[1]) / edge;
-            // 边的平面法线（垂直于边），先指离重心，再按环的类型决定是否反向
+            // ★ 环已经规范化（外圈 CCW / 孔 CW）⇒ 边的**右侧法线**始终朝外。
+            //   以前用“离重心远近”判断，凹形槽（半圆槽）的重心在凹口外，
+            //   部分边的法线会反掉 ⇒ 旋转切割只剩交集，且材料体也出现错误面。
             double nu = tv;
             double nv = -tu;
-            final double midU = (p[0] + q[0]) * 0.5;
-            final double midV = (p[1] + q[1]) * 0.5;
-            final boolean awayFromCentre = (midU - cu) * nu + (midV - cv) * nv >= 0.0;
-            if (awayFromCentre != outward) {
-                nu = -nu;
-                nv = -nv;
-            }
             for (int k = 0; k < steps; k++) {
                 final double phi0 = total * k / steps;
                 final double phi1 = total * (k + 1) / steps;
@@ -540,6 +547,8 @@ public final class Revolve {
                 final Vector3d want = rotateDir(plane, params, nu, nv, phiMid).normalize();
                 // 贴图：u 沿轮廓弧长；v 沿旋转方向（用中点的旋转半径换算成弧长，
                 // 这样不同半径处的纹理密度一致，而不是靠角度）
+                final double midU = (p[0] + q[0]) * 0.5;
+                final double midV = (p[1] + q[1]) * 0.5;
                 // ⚠⚠ **圆周方向的 v 必须累积**（用户 2026-10 反馈"圆柱面问题仍然未解决"）。
                 //   以前是 v0 = 0、v1 = rMid·|Δφ| —— 那只是"这一段的增量"，
                 //   于是**每一段都从 0 开始**，圆周上重复显示同一小块贴图，**绕不起来**。

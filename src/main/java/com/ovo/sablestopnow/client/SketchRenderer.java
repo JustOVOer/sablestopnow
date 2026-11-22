@@ -860,7 +860,27 @@ public final class SketchRenderer {
         final com.ovo.sablestopnow.sketch.Features.Graph graph =
                 com.ovo.sablestopnow.sketch.Features.of(placed);
         if (graph == null || graph.faces().isEmpty() || faces == null) {
+            if (CTM_LOGGED.add(placed.solid().id())) {
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                        "[ctm] border skip solid={} graphFaces={} faces={}",
+                        placed.solid().index(), graph == null ? -1 : graph.faces().size(),
+                        faces == null ? "null" : "ok");
+            }
             return;
+        }
+        int strips = 0;
+        final java.util.List<com.ovo.sablestopnow.sketch.Features.Face> painted = new java.util.ArrayList<>();
+        for (final com.ovo.sablestopnow.sketch.Features.Face face : graph.faces()) {
+            if (face.planar()) {
+                painted.add(face);
+                strips += com.ovo.sablestopnow.sketch.CtmBorder.stripsOf(face, graph.faces()).size();
+            }
+        }
+        if (CTM_LOGGED.add(placed.solid().id())) {
+            com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                    "[ctm] border draw solid={} faces={} planar={} strips={} tex={}",
+                    placed.solid().index(), graph.faces().size(), painted.size(), strips,
+                    borderTexture);
         }
         final com.ovo.sablestopnow.sketch.SolidUv.SpriteRect side = faces.side();
         final float bw = 0.0625f;
@@ -2635,6 +2655,10 @@ public final class SketchRenderer {
         }
         FRAME_BUFFERS.clear();
     }
+
+    /** 连接材质边框渲染诊断（每个实体只打一行）✓ */
+    private static final java.util.Set<java.util.UUID> CTM_LOGGED =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
     /**
      * 基准面编号的**世界空间文字** ✓

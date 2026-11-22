@@ -1162,6 +1162,28 @@ public final class Sketch {
                 }
             }
         }
+        // ★ 重合约束也精确落地：求解器 1e-3 容差会让本应闭合的端点差 1e-3，
+        //   轮廓焊接容差也正好是 1e-3 ⇒ 会出现“看着闭合、拉伸却说没有闭合轮廓”。
+        //   多跑几遍以处理共享端点的约束链。
+        for (int pass = 0; pass < 4; pass++) {
+            for (final Constraint c : constraints) {
+                if (c.kind() != SketchSolver.COINCIDENT || c.operands().length < 4) {
+                    continue;
+                }
+                final int[] o = c.operands();
+                if (o[0] < 0 || o[1] < 0 || o[2] < 0 || o[3] < 0
+                        || o[0] >= vars.length || o[1] >= vars.length
+                        || o[2] >= vars.length || o[3] >= vars.length) {
+                    continue;
+                }
+                final double u = (vars[o[0]] + vars[o[2]]) * 0.5;
+                final double v = (vars[o[1]] + vars[o[3]]) * 0.5;
+                vars[o[0]] = u;
+                vars[o[1]] = v;
+                vars[o[2]] = u;
+                vars[o[3]] = v;
+            }
+        }
         // ⚠ 不许解塌。
         //
         // 欠约束的草图有无穷多解，其中**包含退化解**：比如"四条边两两水平竖直 + 四角重合"

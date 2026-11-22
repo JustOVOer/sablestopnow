@@ -1634,6 +1634,15 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     final double cutterVol = polysVolume(cutterPolys);
                     final int targetPolys = acc.size();
                     final int cutterPolysN = cutterPolys.size();
+                    final double[] targetBounds = boundsArray(acc);
+                    final double[] cutterBounds = boundsArray(cutterPolys);
+                    if (!boundsOverlap(targetBounds, cutterBounds)) {
+                        trace("[csg] skip-disjoint body=" + shortId(solid.body())
+                                + " solid=" + solid.index()
+                                + " targetBounds=" + boundsOf(acc)
+                                + " cutterBounds=" + boundsOf(cutterPolys));
+                        continue;
+                    }
                     List<Csg.Polygon> chosen;
                     if (f.revolve() != null) {
                         // ★ 旋转体网格可能有混合绕序（凹槽轮廓/接缝），
@@ -1659,19 +1668,29 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         final double volA = Math.abs(polysVolume(resA));
                         final double volB = Math.abs(polysVolume(resB));
                         final double interVol = Math.abs(polysVolume(inter));
+                        // ★ 第三种：直接把 target∩cutter 当成切割体减掉。
+                        //   凹槽网格在某些边上会少切一点（留下一圈 2.5px 的半圆锥），
+                        //   但交集是准确的；target − intersection 数学上就是正确差集。
+                        final List<Csg.Polygon> resC;
+                        if (inter.isEmpty()) {
+                            resC = ensureOutward(CsgMesh.fromMesh(targetMesh, null));
+                        } else {
+                            final List<Csg.Polygon> targetD = ensureOutward(
+                                    CsgMesh.fromMesh(targetMesh, null));
+                            resC = Csg.subtract(targetD, new ArrayList<>(inter));
+                        }
+                        final double volC = Math.abs(polysVolume(resC));
                         // 正确差集的体积 = 目标体积 − 相交体积。
-                        // A 通常是正确差集；B 是绕序反了之后的交集/空集。
                         final double expected = Math.max(0.0, targetVol2 - interVol);
                         final double dA = Math.abs(volA - expected);
                         final double dB = Math.abs(volB - expected);
-                        if (volA < 1.0e-9 && volB < 1.0e-9) {
-                            chosen = resA;
-                        } else if (volA < 1.0e-9) {
-                            chosen = resB;
-                        } else if (volB < 1.0e-9) {
+                        final double dC = Math.abs(volC - expected);
+                        if (dC <= dA && dC <= dB) {
+                            chosen = resC;
+                        } else if (dA <= dB) {
                             chosen = resA;
                         } else {
-                            chosen = dA <= dB ? resA : resB;
+                            chosen = resB;
                         }
                         trace("[csg] revolve-orient targetVol="
                                 + String.format(java.util.Locale.ROOT, "%.6f", targetVol)
@@ -1679,7 +1698,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                 + " expected=" + String.format(java.util.Locale.ROOT, "%.6f", expected)
                                 + " volA=" + String.format(java.util.Locale.ROOT, "%.6f", volA)
                                 + " volB=" + String.format(java.util.Locale.ROOT, "%.6f", volB)
-                                + " choose=" + (chosen == resA ? "A" : "B"));
+                                + " volC=" + String.format(java.util.Locale.ROOT, "%.6f", volC)
+                                + " choose=" + (chosen == resA ? "A" : chosen == resB ? "B" : "C"));
                     } else {
                         chosen = Csg.subtract(new ArrayList<>(acc),
                                 new ArrayList<>(cutterPolys));
@@ -3384,6 +3404,41 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             sb.append(shortId(k));
         }
         return sb.toString();
+    }
+
+    /** 诊断/判交用：多边形包围盒 {minX,minY,minZ,maxX,maxY,maxZ}。 */
+    private static double[] boundsArray(final List<Csg.Polygon> polys) {
+        if (polys == null || polys.isEmpty()) {
+            return null;
+        }
+        double minX = Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double minZ = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+        double maxZ = -Double.MAX_VALUE;
+        for (final Csg.Polygon p : polys) {
+            for (final Csg.Vertex v : p.vertices) {
+                final Csg.V3 q = v.pos();
+                minX = Math.min(minX, q.x());
+                minY = Math.min(minY, q.y());
+                minZ = Math.min(minZ, q.z());
+                maxX = Math.max(maxX, q.x());
+                maxY = Math.max(maxY, q.y());
+                maxZ = Math.max(maxZ, q.z());
+            }
+        }
+        return new double[] {minX, minY, minZ, maxX, maxY, maxZ};
+    }
+
+    private static boolean boundsOverlap(final double[] a, final double[] b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        final double eps = 1.0e-6;
+        return a[0] <= b[3] + eps && b[0] <= a[3] + eps
+                && a[1] <= b[4] + eps && b[1] <= a[4] + eps
+                && a[2] <= b[5] + eps && b[2] <= a[5] + eps;
     }
 
     /** 诊断用：一组多边形的包围盒（CSG 是否在同一空间，一眼能看出来）✓ */

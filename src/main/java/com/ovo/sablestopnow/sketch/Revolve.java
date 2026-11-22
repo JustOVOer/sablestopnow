@@ -539,10 +539,15 @@ public final class Revolve {
             for (int k = 0; k < steps; k++) {
                 final double phi0 = total * k / steps;
                 final double phi1 = total * (k + 1) / steps;
+                // ★ 整圈的最后一段：几何角度强制回到 0。
+                //   sin(2π)/cos(2π) 不是精确的 (0,1)，会在接缝处留下 ~1e-16 的缝；
+                //   CSG 看到的是“没闭合”的切割体 ⇒ 差集会把整块切没（实测体积 16→0）。
+                final double phiGeo1 = (params.fullTurn() && k == steps - 1)
+                        ? 0.0 : phi1;
                 final double phiMid = (phi0 + phi1) * 0.5;
                 final Vector3d p0 = rotated(plane, params, p[0], p[1], phi0);
-                final Vector3d p1 = rotated(plane, params, p[0], p[1], phi1);
-                final Vector3d q1 = rotated(plane, params, q[0], q[1], phi1);
+                final Vector3d p1 = rotated(plane, params, p[0], p[1], phiGeo1);
+                final Vector3d q1 = rotated(plane, params, q[0], q[1], phiGeo1);
                 final Vector3d q0 = rotated(plane, params, q[0], q[1], phi0);
                 final Vector3d want = rotateDir(plane, params, nu, nv, phiMid).normalize();
                 // 贴图：u 沿轮廓弧长；v 沿旋转方向（用中点的旋转半径换算成弧长，

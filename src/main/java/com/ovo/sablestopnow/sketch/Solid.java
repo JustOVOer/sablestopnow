@@ -1545,6 +1545,11 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final Vector3d normal = sketch == null ? null : sketch.plane().normal();
             final List<double[]> rawBoxes = solid.boxes(sketch);
             final List<CutFeat> feats = cutters.get(solid.body());
+            trace("[csg] target idx=" + solid.index()
+                    + " shape=" + solid.shape().getClass().getSimpleName()
+                    + " sketch=" + shortId(solid.sketchId())
+                    + " rawBoxes=" + rawBoxes.size()
+                    + " cutters=" + (feats == null ? 0 : feats.size()));
             // ★ item 8：有圆角也算"要切" ⇒ 走 CSG（否则只有圆角时渲染不变、碰撞却变了 ✗）
             final List<double[]> filletCuts0 = localCutters.getOrDefault(solid.body(), List.of());
             final List<Csg.Polygon> filletPolys =
@@ -1630,6 +1635,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     trace("[csg] body=" + shortId(solid.body())
                             + " solid=" + solid.index()
                             + " kind=" + (f.revolve() != null ? "revolutionCut" : "cut")
+                            + " targetBounds=" + boundsOf(acc)
+                            + " cutterBounds=" + boundsOf(cutterPolys)
                             + " targetVol=" + String.format(java.util.Locale.ROOT, "%.6f", targetVol)
                             + " cutterVol=" + String.format(java.util.Locale.ROOT, "%.6f", cutterVol)
                             + " resultVol=" + String.format(java.util.Locale.ROOT, "%.6f",
@@ -3324,6 +3331,32 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             sb.append(shortId(k));
         }
         return sb.toString();
+    }
+
+    /** 诊断用：一组多边形的包围盒（CSG 是否在同一空间，一眼能看出来）✓ */
+    private static String boundsOf(final List<Csg.Polygon> polys) {
+        if (polys == null || polys.isEmpty()) {
+            return "empty";
+        }
+        double minX = Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double minZ = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+        double maxZ = -Double.MAX_VALUE;
+        for (final Csg.Polygon p : polys) {
+            for (final Csg.Vertex v : p.vertices) {
+                final Csg.V3 q = v.pos();
+                minX = Math.min(minX, q.x());
+                minY = Math.min(minY, q.y());
+                minZ = Math.min(minZ, q.z());
+                maxX = Math.max(maxX, q.x());
+                maxY = Math.max(maxY, q.y());
+                maxZ = Math.max(maxZ, q.z());
+            }
+        }
+        return String.format(java.util.Locale.ROOT, "(%.3f,%.3f,%.3f)..(%.3f,%.3f,%.3f)",
+                minX, minY, minZ, maxX, maxY, maxZ);
     }
 
     /**

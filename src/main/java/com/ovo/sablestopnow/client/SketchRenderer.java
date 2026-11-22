@@ -1158,7 +1158,9 @@ public final class SketchRenderer {
                 && com.ovo.sablestopnow.client.model.ModelUi.sketchGroupColors().get();
         final java.util.Map<Sketch.Entity, Integer> groups =
                 groupColors ? sketchGroups(sketch) : null;
-        if (groupColors) {
+        // ★ 闭合轮廓黄色填充是“是否闭合”的直接反馈，应该常驻；
+        //   复选框只控制“相连分组着色”。以前两者绑在一起 ⇒ 用户闭合了却看不到颜色。
+        if (isWorking) {
             drawClosedProfileFills(vc, pose, cameraPos, renderPose, sketch);
         }
         // 约束状态着色（只在**正在编辑**的那张草图上做）：

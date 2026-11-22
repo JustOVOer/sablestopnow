@@ -68,9 +68,28 @@ public final class RepeatTextureCache {
             final TextureAtlasSprite sprite = SolidTextureCache.previewSprite(blockId);
             if (sprite != null) {
                 final ResourceLocation tex = sprite.contents().name();
+                String path = tex.getPath();
+                if (!path.startsWith("textures/")) {
+                    path = "textures/" + path;
+                }
+                if (path.endsWith(".png")) {
+                    path = path.substring(0, path.length() - 4);
+                }
                 final ResourceLocation sibling = ResourceLocation.fromNamespaceAndPath(
-                        tex.getNamespace(), tex.getPath() + "_connected.png");
+                        tex.getNamespace(), path + "_connected.png");
                 found = mc.getResourceManager().getResource(sibling).isPresent();
+                if (!found) {
+                    final ResourceLocation id = ResourceLocation.tryParse(blockId);
+                    if (id != null) {
+                        final ResourceLocation fallback = ResourceLocation.fromNamespaceAndPath(
+                                id.getNamespace(),
+                                "textures/block/" + id.getPath() + "_connected.png");
+                        found = mc.getResourceManager().getResource(fallback).isPresent();
+                    }
+                }
+                com.ovo.sablestopnow.SablestopNow.LOGGER.info(
+                        "[ctm] detect {} sprite={} sibling={} found={}",
+                        blockId, tex, sibling, found);
             }
         } catch (final Throwable ignored) {
         }

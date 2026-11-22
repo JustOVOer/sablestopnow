@@ -1631,7 +1631,43 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     final double cutterVol = polysVolume(cutterPolys);
                     final int targetPolys = acc.size();
                     final int cutterPolysN = cutterPolys.size();
-                    acc = Csg.subtract(acc, cutterPolys);
+                    List<Csg.Polygon> chosen;
+                    if (f.revolve() != null) {
+                        // ★ 旋转体网格可能有混合绕序（凹槽轮廓/接缝），
+                        //   直接 subtract 可能把整块切没。做两个朝向，取“非空且更小”的
+                        //   正体积结果；正常朝向通常产生 0..target 的合理结果。
+                        final List<Csg.Polygon> flippedCutter = new ArrayList<>(cutterPolys.size());
+                        for (final Csg.Polygon p : cutterPolys) {
+                            flippedCutter.add(p.flipped());
+                        }
+                        final List<Csg.Polygon> targetA = ensureOutward(
+                                CsgMesh.fromMesh(targetMesh, null));
+                        final List<Csg.Polygon> targetB = ensureOutward(
+                                CsgMesh.fromMesh(targetMesh, null));
+                        final List<Csg.Polygon> resA = Csg.subtract(targetA,
+                                new ArrayList<>(cutterPolys));
+                        final List<Csg.Polygon> resB = Csg.subtract(targetB,
+                                new ArrayList<>(flippedCutter));
+                        final double volA = Math.abs(polysVolume(resA));
+                        final double volB = Math.abs(polysVolume(resB));
+                        if (volA < 1.0e-9 && volB >= 1.0e-9) {
+                            chosen = resB;
+                        } else if (volB < 1.0e-9 && volA >= 1.0e-9) {
+                            chosen = resA;
+                        } else {
+                            // 两边都非空：取更小的正体积（正确差集 ≤ 原体积）
+                            chosen = volA <= volB ? resA : resB;
+                        }
+                        trace("[csg] revolve-orient targetVol="
+                                + String.format(java.util.Locale.ROOT, "%.6f", targetVol)
+                                + " volA=" + String.format(java.util.Locale.ROOT, "%.6f", volA)
+                                + " volB=" + String.format(java.util.Locale.ROOT, "%.6f", volB)
+                                + " choose=" + (chosen == resA ? "A" : "B"));
+                    } else {
+                        chosen = Csg.subtract(new ArrayList<>(acc),
+                                new ArrayList<>(cutterPolys));
+                    }
+                    acc = chosen;
                     trace("[csg] body=" + shortId(solid.body())
                             + " solid=" + solid.index()
                             + " kind=" + (f.revolve() != null ? "revolutionCut" : "cut")

@@ -1645,7 +1645,36 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         continue;
                     }
                     List<Csg.Polygon> chosen;
-                    if (f.revolve() != null) {
+                    if (f.revolve() != null && f.revolve().fullTurn()) {
+                        // ★ 双半切割体：整圈旋转体在轴上自交/非流形。
+                        //   拆成两个 180° 带端盖的半体，先 CSG 合并成完整
+                        //   切割体（合并消掉中间端盖），再对目标做差集。
+                        //   外形仍是连续曲面，没有棱柱化降质。
+                        final Revolve.Params rp = f.revolve();
+                        final Revolve.Params hp = new Revolve.Params(
+                                rp.axisU(), rp.axisV(), rp.dirU(), rp.dirV(),
+                                rp.angleDeg() * 0.5, rp.direction());
+                        final SolidMesh.Mesh halfA = Revolve.mesh(f.sketch(), hp);
+                        final SolidMesh.Mesh halfB = Revolve.rotateAroundAxis(
+                                halfA, f.sketch().plane(), hp, Math.PI);
+                        final List<Csg.Polygon> hA = CsgMesh.fromMesh(halfA, null);
+                        final List<Csg.Polygon> hB = CsgMesh.fromMesh(halfB, null);
+                        if (hA.isEmpty() || hB.isEmpty()) {
+                            continue;
+                        }
+                        final List<Csg.Polygon> cutterUnion = ensureOutward(
+                                Csg.union(copyPolys(hA), copyPolys(hB)));
+                        chosen = Csg.subtract(new ArrayList<>(acc),
+                                copyPolys(cutterUnion));
+                        trace("[csg] half-union targetVol="
+                                + String.format(java.util.Locale.ROOT, "%.6f", targetVol)
+                                + " halfAVol=" + String.format(java.util.Locale.ROOT,
+                                        "%.6f", Math.abs(polysVolume(hA)))
+                                + " cutterVol=" + String.format(java.util.Locale.ROOT,
+                                        "%.6f", Math.abs(polysVolume(cutterUnion)))
+                                + " resultVol=" + String.format(java.util.Locale.ROOT,
+                                        "%.6f", Math.abs(polysVolume(chosen))));
+                    } else if (f.revolve() != null) {
                         // ★ 先把目标/切割体平移到包围盒中心附近再算。
                         //   模型局部坐标在 2e7 附近，BSP 的平面 w/分割在这么大坐标下
                         //   会产生共面误判，表现为切口边缘少切一圈（2.5px 半圆锥）。

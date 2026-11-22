@@ -537,6 +537,36 @@ public final class Revolve {
         return out;
     }
 
+    /** 绕旋转轴旋转一个已经生成的网格（双半切割体用）✓。 */
+    public static SolidMesh.Mesh rotateAroundAxis(final SolidMesh.Mesh mesh,
+                                                  final SketchPlane plane,
+                                                  final Params params,
+                                                  final double radians) {
+        if (mesh == null || mesh.isEmpty()) {
+            return mesh;
+        }
+        final Vector3d axisPoint = plane.toLocal(params.axisU(), params.axisV());
+        final Vector3d axisDir = axisDirection(plane, params);
+        final double c = Math.cos(radians);
+        final double s = Math.sin(radians);
+        final List<SolidMesh.Vertex> out = new ArrayList<>(mesh.vertices().size());
+        for (final SolidMesh.Vertex v : mesh.vertices()) {
+            final Vector3d p = new Vector3d(v.position()).sub(axisPoint);
+            final Vector3d cross = axisDir.cross(p, new Vector3d());
+            final Vector3d rot = p.mul(c, new Vector3d())
+                    .add(cross.mul(s, new Vector3d()))
+                    .add(axisDir.mul(axisDir.dot(p) * (1.0 - c), new Vector3d()))
+                    .add(axisPoint);
+            final Vector3d n = new Vector3d(v.normal());
+            final Vector3d nCross = axisDir.cross(n, new Vector3d());
+            final Vector3d nr = n.mul(c, new Vector3d())
+                    .add(nCross.mul(s, new Vector3d()))
+                    .add(axisDir.mul(axisDir.dot(n) * (1.0 - c), new Vector3d()));
+            out.add(new SolidMesh.Vertex(rot, nr, v.u(), v.v()));
+        }
+        return new SolidMesh.Mesh(out, mesh.indices());
+    }
+
     /**
      * 一个环的旋转侧面。
      *

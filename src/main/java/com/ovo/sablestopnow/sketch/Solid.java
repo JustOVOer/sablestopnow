@@ -1653,10 +1653,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         final Revolve.Params rp = f.revolve();
                         final Revolve.Params hp = new Revolve.Params(
                                 rp.axisU(), rp.axisV(), rp.dirU(), rp.dirV(),
-                                rp.angleDeg() * 0.5, rp.direction());
+                                rp.angleDeg() * 0.5 + 1.0, rp.direction());
                         final SolidMesh.Mesh halfA = Revolve.mesh(f.sketch(), hp);
                         final SolidMesh.Mesh halfB = Revolve.rotateAroundAxis(
-                                halfA, f.sketch().plane(), hp, Math.PI);
+                                halfA, f.sketch().plane(), hp, Math.toRadians(179.0));
                         final List<Csg.Polygon> hA = CsgMesh.fromMesh(halfA, null);
                         final List<Csg.Polygon> hB = CsgMesh.fromMesh(halfB, null);
                         if (hA.isEmpty() || hB.isEmpty()) {
@@ -1752,14 +1752,6 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                 new ArrayList<>(cutterPolys));
                     }
                     acc = chosen;
-                    if (f.revolve() != null) {
-                        final int before = acc.size();
-                        acc = stripThinSheetPairs(acc, 0.01);
-                        if (acc.size() != before) {
-                            trace("[csg] thin-sheet removed=" + (before - acc.size())
-                                    + " solid=" + solid.index());
-                        }
-                    }
                     trace("[csg] body=" + shortId(solid.body())
                             + " solid=" + solid.index()
                             + " kind=" + (f.revolve() != null ? "revolutionCut" : "cut")

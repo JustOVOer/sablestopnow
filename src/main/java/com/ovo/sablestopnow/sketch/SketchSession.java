@@ -257,6 +257,48 @@ public final class SketchSession {
     }
 
     /**
+     * 把草图里离原点 &lt; tol 的端点/圆心吸到基准点 (0,0)，并加 FIXED。
+     * 用于编辑旧草图时消除“看起来在基准点上、实际差 1e-3”的蓝色未定义点。
+     */
+    public int snapOriginPoints(final double tol) {
+        if (working == null) {
+            return 0;
+        }
+        int changed = 0;
+        for (final Sketch.Entity e : working.entities()) {
+            final int[] v = e.vars();
+            final int[][] pairs = switch (e.kind()) {
+                case POINT -> new int[][] {{v[0], v[1]}};
+                case LINE -> new int[][] {{v[0], v[1]}, {v[2], v[3]}};
+                case CIRCLE -> new int[][] {{v[0], v[1]}};
+                case ARC -> new int[][] {{v[0], v[1]}, {v[2], v[3]}, {v[4], v[5]}};
+                default -> new int[0][];
+            };
+            for (final int[] p : pairs) {
+                if (Math.hypot(working.variable(p[0]), working.variable(p[1])) > tol) {
+                    continue;
+                }
+                working.setVariable(p[0], 0.0);
+                working.setVariable(p[1], 0.0);
+                addFixedIfMissing(p[0]);
+                addFixedIfMissing(p[1]);
+                changed++;
+            }
+        }
+        return changed;
+    }
+
+    private void addFixedIfMissing(final int variable) {
+        for (final Sketch.Constraint c : working.constraints()) {
+            if (c.kind() == SketchSolver.FIXED && c.operands().length > 0
+                    && c.operands()[0] == variable) {
+                return;
+            }
+        }
+        working.addConstraint(SketchSolver.FIXED, 0.0, variable);
+    }
+
+    /**
      * 上一次"吸附→约束"的**判定结果** ✓（给客户端打日志用 ✓）。
      *
      * <p>⚠ 本包被离线工具**单独编译** ⇒ 不能引用 LOGGER ✗
@@ -698,6 +740,8 @@ public final class SketchSession {
         this.clearVariantLock();
         this.pending.clear();
         this.stage = Stage.EDITING;
+        // 编辑旧草图时顺手把“差一丁点”的基准点吸正，避免一直蓝色未定义。
+        snapOriginPoints(5.0e-3);
     }
 
     public void setTool(final Tool value) {
@@ -1468,6 +1512,10 @@ public final class SketchSession {
      */
     public double[] snap(final double u, final double v, final double tolerance) {
         KeyPoint kp = pickKeyPoint(u, v, tolerance);
+        // 基准点最近点：5e-3 内直接吸到 (0,0)，并会在 constrainToSnap 里变成 FIXED。
+        if (kp == null && Math.hypot(u, v) <= 5.0e-3) {
+            kp = new KeyPoint(0.0, 0.0, KeyKind.ORIGIN, null, -1, -1);
+        }
         // ★ 网格吸附也要真正进入落点（以前只有 hover 算了网格，click 没算 ⇒
         //   通过网格画的线仍取原始浮点坐标，和整数差 1e-3 量级）。
         if (kp == null) {

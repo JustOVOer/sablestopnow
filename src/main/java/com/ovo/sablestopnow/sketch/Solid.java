@@ -1612,6 +1612,12 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     if (cutterMesh == null || cutterMesh.isEmpty()) {
                         continue;
                     }
+                    if (f.revolve() != null) {
+                        cutterMesh = extendRevolveAlongAxis(
+                                cutterMesh, targetMesh, f.sketch().plane(), f.revolve(), 0.02);
+                        trace("[csg] cutter-extend solid=" + solid.index()
+                                + " bounds=" + boundsOf(CsgMesh.fromMesh(cutterMesh, null)));
+                    }
                     cutterTris += cutterMesh.indices().length / 3;
                     // ★ 修实测"仍然没有切割"✗ ✗
                     //   关键事实：`SolidMesh` 的顶点**已经是局部坐标**（`Extrude.onPlane` 已把
@@ -3759,6 +3765,55 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     private static long cellKey(final int x, final int y, final int z) {
         return ((long) x & 0x1FFFFF) << 42 | ((long) y & 0x1FFFFF) << 21
                 | ((long) z & 0x1FFFFF);
+    }
+
+    /** 让旋转切割体沿轴伸出目标两端 margin，避免端面差 0.008 留薄皮。 */
+    private static SolidMesh.Mesh extendRevolveAlongAxis(
+            final SolidMesh.Mesh cutter, final SolidMesh.Mesh target,
+            final SketchPlane plane, final Revolve.Params params,
+            final double margin) {
+        if (cutter == null || target == null || cutter.isEmpty() || target.isEmpty()) {
+            return cutter;
+        }
+        final Vector3d axis = Revolve.axisDirection(plane, params);
+        double cmin = Double.MAX_VALUE;
+        double cmax = -Double.MAX_VALUE;
+        for (final SolidMesh.Vertex v : cutter.vertices()) {
+            final double t = v.position().x * axis.x + v.position().y * axis.y
+                    + v.position().z * axis.z;
+            cmin = Math.min(cmin, t);
+            cmax = Math.max(cmax, t);
+        }
+        double tmin = Double.MAX_VALUE;
+        double tmax = -Double.MAX_VALUE;
+        for (final SolidMesh.Vertex v : target.vertices()) {
+            final double t = v.position().x * axis.x + v.position().y * axis.y
+                    + v.position().z * axis.z;
+            tmin = Math.min(tmin, t);
+            tmax = Math.max(tmax, t);
+        }
+        if (cmin == Double.MAX_VALUE || tmin == Double.MAX_VALUE
+                || (tmin >= cmin - 1.0e-6 && tmax <= cmax + 1.0e-6)) {
+            return cutter;
+        }
+        final double newMin = Math.min(cmin, tmin - margin);
+        final double newMax = Math.max(cmax, tmax + margin);
+        final double oldLen = cmax - cmin;
+        if (oldLen < 1.0e-9) {
+            return cutter;
+        }
+        final double scale = (newMax - newMin) / oldLen;
+        final List<SolidMesh.Vertex> out = new ArrayList<>(cutter.vertices().size());
+        for (final SolidMesh.Vertex v : cutter.vertices()) {
+            final Vector3d p = v.position();
+            final double t = p.x * axis.x + p.y * axis.y + p.z * axis.z;
+            final double nt = newMin + (t - cmin) * scale;
+            final double dt = nt - t;
+            out.add(new SolidMesh.Vertex(
+                    new Vector3d(p).fma(dt, axis, new Vector3d()),
+                    v.normal(), v.u(), v.v()));
+        }
+        return new SolidMesh.Mesh(out, cutter.indices());
     }
 
     /** 反射调用客户端 Manifold 桥；离线轻量门禁没有 JNA/原生库时返回 null。 */

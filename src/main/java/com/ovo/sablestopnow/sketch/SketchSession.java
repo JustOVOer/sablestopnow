@@ -275,7 +275,9 @@ public final class SketchSession {
         if (working == null) {
             return 0;
         }
-        int changed = 0;
+        int bestU = -1;
+        int bestV = -1;
+        double bestD = tol;
         for (final Sketch.Entity e : working.entities()) {
             final int[] v = e.vars();
             final int[][] pairs = switch (e.kind()) {
@@ -286,17 +288,49 @@ public final class SketchSession {
                 default -> new int[0][];
             };
             for (final int[] p : pairs) {
-                if (Math.hypot(working.variable(p[0]), working.variable(p[1])) > tol) {
-                    continue;
+                final double d = Math.hypot(working.variable(p[0]), working.variable(p[1]));
+                if (d <= bestD) {
+                    bestD = d;
+                    bestU = p[0];
+                    bestV = p[1];
                 }
-                working.setVariable(p[0], 0.0);
-                working.setVariable(p[1], 0.0);
-                addFixedIfMissing(p[0]);
-                addFixedIfMissing(p[1]);
-                changed++;
             }
         }
-        return changed;
+        if (bestU < 0) {
+            return 0;
+        }
+        // 只吸最近的一个点：吸多个会把多个自由度都钉死，极易过定义。
+        working.setVariable(bestU, 0.0);
+        working.setVariable(bestV, 0.0);
+        addFixedIfMissing(bestU);
+        addFixedIfMissing(bestV);
+        return 1;
+    }
+
+    /** 是否已经有一个端点被钉在基准点。 */
+    public boolean originAnchored() {
+        for (final Sketch.Entity e : working.entities()) {
+            final int[] v = e.vars();
+            final int[][] pairs = switch (e.kind()) {
+                case POINT -> new int[][] {{v[0], v[1]}};
+                case LINE -> new int[][] {{v[0], v[1]}, {v[2], v[3]}};
+                case CIRCLE -> new int[][] {{v[0], v[1]}};
+                case ARC -> new int[][] {{v[0], v[1]}, {v[2], v[3]}, {v[4], v[5]}};
+                default -> new int[0][];
+            };
+            for (final int[] p : pairs) {
+                if (Math.hypot(working.variable(p[0]), working.variable(p[1])) > 1.0e-9) {
+                    continue;
+                }
+                for (final Sketch.Constraint c : working.constraints()) {
+                    if (c.kind() == SketchSolver.FIXED && c.operands().length > 0
+                            && (c.operands()[0] == p[0] || c.operands()[0] == p[1])) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private void addFixedIfMissing(final int variable) {
@@ -1526,7 +1560,8 @@ public final class SketchSession {
     public double[] snap(final double u, final double v, final double tolerance) {
         KeyPoint kp = pickKeyPoint(u, v, tolerance);
         // 基准点最近点：5e-3 内直接吸到 (0,0)，并会在 constrainToSnap 里变成 FIXED。
-        if (kp == null && originSnap && Math.hypot(u, v) <= 5.0e-3) {
+        if (kp == null && originSnap && !originAnchored()
+                && Math.hypot(u, v) <= 5.0e-3) {
             kp = new KeyPoint(0.0, 0.0, KeyKind.ORIGIN, null, -1, -1);
         }
         // ★ 网格吸附也要真正进入落点（以前只有 hover 算了网格，click 没算 ⇒

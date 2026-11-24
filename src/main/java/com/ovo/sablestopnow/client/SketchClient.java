@@ -649,7 +649,7 @@ public final class SketchClient {
         final var skSess0 = MODE.session();
         if (skSess0 != null
                 && skSess0.stage() == com.ovo.sablestopnow.sketch.SketchSession.Stage.EDITING
-                && skSess0.originSnap()) {
+                && skSess0.originSnap() && !skSess0.originAnchored()) {
             final Vector3d uvAtOrigin = MODE.planePoint(localFrom, localDir);
             if (uvAtOrigin != null && Math.hypot(uvAtOrigin.x, uvAtOrigin.y) <= 0.005) {
                 skSess0.forceSnapOrigin();

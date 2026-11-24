@@ -604,10 +604,12 @@ public final class SketchRenderer {
         if (!sketching && com.ovo.sablestopnow.client.model.FeatureHighlight.id() != null) {
             final java.util.UUID hl = com.ovo.sablestopnow.client.model.FeatureHighlight.id();
             final float[] hot = {1.00f, 0.48f, 0.10f};
+            boolean highlighted = false;
             for (final Solid.Placed placed : solids) {
                 if (hl == null || !hl.equals(placed.solid().id())) {
                     continue;
                 }
+                highlighted = true;
                 final ClientSubLevel hsub = byId.get(placed.solid().body());
                 if (hsub == null) {
                     continue;
@@ -623,6 +625,22 @@ public final class SketchRenderer {
                     quadLine(vcq, pose, world(cameraPos, hp, e[0]), world(cameraPos, hp, e[1]),
                             hot);
                     drawn++;
+                }
+            }
+            // 切割/圆角本身不产生 Placed（它们只参与布尔），所以树行悬停时
+            // 单独画出它们的切割体/圆角盒线框，否则右边栏点它们没有任何高亮。
+            if (!highlighted) {
+                final Solid hs = SolidClientState.byId(level, hl);
+                if (hs != null) {
+                    final ClientSubLevel hsub = byId.get(hs.body());
+                    if (hsub != null) {
+                        final Pose3dc hp = hsub.renderPose();
+                        for (final Vector3d[] e : featureHighlightEdges(hs, level, sketches)) {
+                            quadLine(vcq, pose, world(cameraPos, hp, e[0]),
+                                    world(cameraPos, hp, e[1]), hot);
+                            drawn++;
+                        }
+                    }
                 }
             }
         }
@@ -1992,6 +2010,42 @@ public final class SketchRenderer {
      * <p>两种 RenderType 各用**独立**的 BufferSource（同一个源取两个类型会互相截断 ✗
      * 这个坑本文件里已经踩过 ✓）
      */
+    /** 切割/圆角特征的线框（它们没有 Placed，仅供树行高亮）。 */
+    private static java.util.List<Vector3d[]> featureHighlightEdges(
+            final Solid solid, final Level level,
+            final java.util.List<Sketch> sketches) {
+        final java.util.List<Vector3d[]> out = new java.util.ArrayList<>();
+        final Sketch sk = solid.resolve(sketches);
+        if (solid.shape() instanceof final Solid.Shape.Cut cut && sk != null) {
+            out.addAll(com.ovo.sablestopnow.sketch.Extrude.prismEdges(sk, cut.params()));
+        } else if (solid.shape() instanceof final Solid.Shape.RevolutionCut rc && sk != null) {
+            out.addAll(com.ovo.sablestopnow.sketch.Revolve.edges(sk, rc.params()));
+        } else if (solid.shape() instanceof Solid.Shape.Fillet) {
+            final java.util.Map<UUID, Solid> byId = new java.util.HashMap<>();
+            for (final Solid s : SolidClientState.ofBody(level, solid.body())) {
+                byId.put(s.id(), s);
+            }
+            for (final double[] b : solid.filletBoxes(byId)) {
+                final double[] xs = {b[0], b[3]};
+                final double[] ys = {b[1], b[4]};
+                final double[] zs = {b[2], b[5]};
+                for (int i = 0; i < 2; i++) {
+                    for (int j = 0; j < 2; j++) {
+                        out.add(new Vector3d[] {new Vector3d(xs[0], ys[i], zs[j]),
+                                new Vector3d(xs[1], ys[i], zs[j])});
+                        out.add(new Vector3d[] {new Vector3d(xs[i], ys[0], zs[j]),
+                                new Vector3d(xs[i], ys[1], zs[j])});
+                        out.add(new Vector3d[] {new Vector3d(xs[i], ys[j], zs[0]),
+                                new Vector3d(xs[i], ys[j], zs[1])});
+                    }
+                }
+            }
+        } else if (sk != null) {
+            out.addAll(solid.edges(sk));
+        }
+        return out;
+    }
+
     private static int drawFeatureHighlight(final PoseStack.Pose pose, final Vec3 cameraPos,
                                             final com.ovo.sablestopnow.client.model.FeatureHover.Hit fh) {
         int drawn = 0;

@@ -252,6 +252,21 @@ public final class CloneTool {
                         Solid.clonePoint(e[1], center, rot, s, tx, ty, tz)));
             }
         }
+        // 切割/圆角本身没有 SelectedEval 线框（它们不是材料），
+        // 但克隆预览里仍应能看到它们的轮廓。
+        final java.util.List<com.ovo.sablestopnow.sketch.Sketch> sks =
+                com.ovo.sablestopnow.sketch.SketchClientState.current(level);
+        for (final java.util.UUID sid : SOURCES) {
+            final Solid src = com.ovo.sablestopnow.sketch.SolidClientState.byId(level, sid);
+            if (src == null || !(src.isCut() || src.isFillet())) {
+                continue;
+            }
+            for (final Vector3d[] e : featureEdges(src, level, sks)) {
+                segs.add(new FeaturePreview.Seg(
+                        Solid.clonePoint(e[0], center, rot, s, tx, ty, tz),
+                        Solid.clonePoint(e[1], center, rot, s, tx, ty, tz)));
+            }
+        }
         // ② 参考：公共中心（青色三轴十字，长度 0.5 格）
         final List<FeaturePreview.Seg> refs = new ArrayList<>();
         final double k = 0.5;
@@ -313,5 +328,42 @@ public final class CloneTool {
         reset();
         ModelUi.refreshTreeNow();
         ModelMode.setTool(ModelTools.NONE);
+    }
+
+    /** 切割/圆角的轮廓线（克隆预览高亮用）。 */
+    private static List<Vector3d[]> featureEdges(
+            final Solid solid, final Level level,
+            final java.util.List<com.ovo.sablestopnow.sketch.Sketch> sketches) {
+        final com.ovo.sablestopnow.sketch.Sketch sk = solid.resolve(sketches);
+        if (solid.shape() instanceof final Solid.Shape.Cut cut && sk != null) {
+            return com.ovo.sablestopnow.sketch.Extrude.prismEdges(sk, cut.params());
+        }
+        if (solid.shape() instanceof final Solid.Shape.RevolutionCut rc && sk != null) {
+            return com.ovo.sablestopnow.sketch.Revolve.edges(sk, rc.params());
+        }
+        if (solid.shape() instanceof Solid.Shape.Fillet) {
+            final java.util.Map<java.util.UUID, Solid> byId = new java.util.HashMap<>();
+            for (final Solid s : SolidClientState.ofBody(level, solid.body())) {
+                byId.put(s.id(), s);
+            }
+            final List<Vector3d[]> out = new ArrayList<>();
+            for (final double[] b : solid.filletBoxes(byId)) {
+                final double[] xs = {b[0], b[3]};
+                final double[] ys = {b[1], b[4]};
+                final double[] zs = {b[2], b[5]};
+                for (int i = 0; i < 2; i++) {
+                    for (int j = 0; j < 2; j++) {
+                        out.add(new Vector3d[] {new Vector3d(xs[0], ys[i], zs[j]),
+                                new Vector3d(xs[1], ys[i], zs[j])});
+                        out.add(new Vector3d[] {new Vector3d(xs[i], ys[0], zs[j]),
+                                new Vector3d(xs[i], ys[1], zs[j])});
+                        out.add(new Vector3d[] {new Vector3d(xs[i], ys[j], zs[0]),
+                                new Vector3d(xs[i], ys[j], zs[1])});
+                    }
+                }
+            }
+            return out;
+        }
+        return sk == null ? List.of() : solid.edges(sk);
     }
 }

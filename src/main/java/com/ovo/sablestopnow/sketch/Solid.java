@@ -1645,7 +1645,18 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         continue;
                     }
                     List<Csg.Polygon> chosen;
-                    if (f.revolve() != null && f.revolve().fullTurn()) {
+                    final SolidMesh.Mesh manifoldResult =
+                            f.revolve() != null && f.revolve().fullTurn()
+                                    ? manifoldDifference(targetMesh, cutterMesh)
+                                    : null;
+                    if (manifoldResult != null) {
+                        chosen = ensureOutward(CsgMesh.fromMesh(manifoldResult, null));
+                        trace("[csg] manifold resultVol="
+                                + String.format(java.util.Locale.ROOT, "%.6f",
+                                        Math.abs(polysVolume(chosen)))
+                                + " tris=" + manifoldResult.indices().length / 3
+                                + " solid=" + solid.index());
+                    } else if (f.revolve() != null && f.revolve().fullTurn()) {
                         // ★ 双半切割体：整圈旋转体在轴上自交/非流形。
                         //   拆成两个 180° 带端盖的半体，先 CSG 合并成完整
                         //   切割体（合并消掉中间端盖），再对目标做差集。
@@ -3750,7 +3761,24 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 | ((long) z & 0x1FFFFF);
     }
 
-    /** 诊断：只出现一次的边数（>0 = 网格有开口）。 */
+    /** 反射调用客户端 Manifold 桥；离线轻量门禁没有 JNA/原生库时返回 null。 */
+    private static SolidMesh.Mesh manifoldDifference(final SolidMesh.Mesh a,
+                                                     final SolidMesh.Mesh b) {
+        try {
+            java.lang.reflect.Method m = MANIFOLD_DIFF;
+            if (m == null) {
+                final Class<?> c = Class.forName(
+                        "com.ovo.sablestopnow.client.manifold.ManifoldBridge");
+                m = c.getMethod("difference", SolidMesh.Mesh.class, SolidMesh.Mesh.class);
+                MANIFOLD_DIFF = m;
+            }
+            return (SolidMesh.Mesh) m.invoke(null, a, b);
+        } catch (final Throwable t) {
+            return null;
+        }
+    }
+
+    private static volatile java.lang.reflect.Method MANIFOLD_DIFF;
     private static int boundaryEdgeCount(final List<Csg.Polygon> polys) {
         if (polys == null || polys.isEmpty()) {
             return 0;

@@ -1346,7 +1346,8 @@ public final class ModelUi {
                 MateClientState.setHighlightedMate(null);
                 ModelForceUi.select(point.id());
                 return;
-            } else if (item.data instanceof com.ovo.sablestopnow.sketch.Solid treeSolid) {
+            } else if (item.data instanceof com.ovo.sablestopnow.sketch.Solid treeSolid
+                    && (item.key.startsWith("feat:") || item.key.startsWith("texture:"))) {
                   // ★ 顺序调整/删除：**必须像 texture: 一样在这里判** ✓
                   //   （之前写成外层 else-if，先被"实体"分支吃掉 ⇒ 永远轮不到 ⇒ 点了没反应）
                   if (item.key.startsWith("feat:")) {

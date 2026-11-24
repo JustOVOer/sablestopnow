@@ -1160,15 +1160,46 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
         final List<Solid> subset = new ArrayList<>();
         boolean needCsg = false;
+        final java.util.Set<UUID> cutBodies = new java.util.HashSet<>();
+        for (final Solid s : solids) {
+            if (!selectedIds.contains(s.id())) {
+                continue;
+            }
+            if (s.shape() instanceof Shape.Cut || s.shape() instanceof Shape.RevolutionCut) {
+                cutBodies.add(s.body());
+            }
+        }
         for (final Solid s : solids) {
             if (!selectedIds.contains(s.id())) {
                 continue;
             }
             if (s.shape() instanceof Shape.Extrusion || s.shape() instanceof Shape.Revolution) {
                 subset.add(s);
-            } else if (s.shape() instanceof Shape.Cut || s.shape() instanceof Shape.Fillet) {
+            } else if (s.shape() instanceof Shape.Cut || s.shape() instanceof Shape.RevolutionCut
+                    || s.shape() instanceof Shape.Fillet) {
                 subset.add(s);
                 needCsg = true;
+            }
+        }
+        // 只勾了一个切割时，克隆/预览没有材料可作用 ⇒ 自动带上同 body 的材料特征。
+        for (final UUID b : cutBodies) {
+            boolean hasMaterial = false;
+            for (final Solid s : subset) {
+                if (s.body().equals(b) && (s.shape() instanceof Shape.Extrusion
+                        || s.shape() instanceof Shape.Revolution)) {
+                    hasMaterial = true;
+                    break;
+                }
+            }
+            if (hasMaterial) {
+                continue;
+            }
+            for (final Solid s : solids) {
+                if (s.body().equals(b) && (s.shape() instanceof Shape.Extrusion
+                        || s.shape() instanceof Shape.Revolution)) {
+                    subset.add(s);
+                    needCsg = true;
+                }
             }
         }
         final List<SelectedEval> out = new ArrayList<>();

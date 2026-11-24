@@ -106,7 +106,7 @@ public final class ManifoldBridge {
             if (result == null || c.manifold_status(result) != 0) return null;
             manifolds.add(result);
             // 去掉切面边缘 < 2e-3 的残片/短边，不改动正常曲面。
-            Pointer simplified = c.manifold_simplify(mem(keep, manSize), result, 1.0e-2);
+            Pointer simplified = c.manifold_simplify(mem(keep, manSize), result, 5.0e-4);
             if (simplified != null && c.manifold_status(simplified) == 0) {
                 result = simplified;
                 manifolds.add(result);

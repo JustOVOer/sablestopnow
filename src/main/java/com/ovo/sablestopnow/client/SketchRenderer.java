@@ -601,8 +601,11 @@ public final class SketchRenderer {
             pendingPlaneLabels.add(new Object[] {psub.renderPose(), plane, planeSolid.id()});
         }
         // ★ item 6：**树行悬停 ⇒ 高亮对应特征** ✓（橙色描边，不改选择集）
-        if (!sketching && com.ovo.sablestopnow.client.model.FeatureHighlight.id() != null) {
-            final java.util.UUID hl = com.ovo.sablestopnow.client.model.FeatureHighlight.id();
+        if (!sketching && (com.ovo.sablestopnow.client.model.FeatureHighlight.id() != null
+                || com.ovo.sablestopnow.client.model.ModelUi.selectedSolid() != null)) {
+            final java.util.UUID hl = com.ovo.sablestopnow.client.model.FeatureHighlight.id() != null
+                    ? com.ovo.sablestopnow.client.model.FeatureHighlight.id()
+                    : com.ovo.sablestopnow.client.model.ModelUi.selectedSolid();
             final float[] hot = {1.00f, 0.48f, 0.10f};
             boolean highlighted = false;
             for (final Solid.Placed placed : solids) {

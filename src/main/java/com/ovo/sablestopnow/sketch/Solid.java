@@ -1765,8 +1765,20 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                 + " interOpen=" + boundaryEdgeCount(inter)
                                 + " choose=" + pick);
                     } else {
-                        chosen = Csg.subtract(new ArrayList<>(acc),
-                                new ArrayList<>(cutterPolys));
+                        // 普通切割也优先 Manifold；失败回退 csg.js。
+                        final SolidMesh.Mesh accMesh = CsgMesh.toMesh(acc);
+                        final SolidMesh.Mesh manCut =
+                                manifoldDifference(accMesh, cutterMesh);
+                        if (manCut != null) {
+                            chosen = ensureOutward(CsgMesh.fromMesh(manCut, null));
+                            trace("[csg] manifold-cut resultVol="
+                                    + String.format(java.util.Locale.ROOT, "%.6f",
+                                            Math.abs(polysVolume(chosen)))
+                                    + " solid=" + solid.index());
+                        } else {
+                            chosen = Csg.subtract(new ArrayList<>(acc),
+                                    new ArrayList<>(cutterPolys));
+                        }
                     }
                     acc = chosen;
                     trace("[csg] body=" + shortId(solid.body())

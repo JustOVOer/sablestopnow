@@ -196,9 +196,21 @@ public final class CloneTool {
         ensurePlaced(level);
         final List<double[]> boxes = new ArrayList<>();
         for (final Solid.SelectedEval se : previewSelected) {
+            if (!SOURCES.contains(se.source().id())) {
+                continue; // 自动补的材料不参与旋转中心
+            }
             final double[] b = se.bounds();
             if (b != null) {
                 boxes.add(b);
+            }
+        }
+        if (boxes.isEmpty()) {
+            for (final java.util.UUID sid : SOURCES) {
+                final Solid src = com.ovo.sablestopnow.sketch.SolidClientState.byId(level, sid);
+                final double[] b = featureBounds(src, level);
+                if (b != null) {
+                    boxes.add(b);
+                }
             }
         }
         return boxes.isEmpty() ? null : Solid.centerOfBoxes(boxes);
@@ -225,9 +237,21 @@ public final class CloneTool {
         ensurePlaced(level);
         final List<double[]> srcBoxes = new ArrayList<>();
         for (final Solid.SelectedEval se : previewSelected) {
+            if (!SOURCES.contains(se.source().id())) {
+                continue;
+            }
             final double[] b = se.bounds();
             if (b != null) {
                 srcBoxes.add(b);
+            }
+        }
+        if (srcBoxes.isEmpty()) {
+            for (final java.util.UUID sid : SOURCES) {
+                final Solid src = com.ovo.sablestopnow.sketch.SolidClientState.byId(level, sid);
+                final double[] b = featureBounds(src, level);
+                if (b != null) {
+                    srcBoxes.add(b);
+                }
             }
         }
         if (srcBoxes.isEmpty()) {
@@ -331,6 +355,52 @@ public final class CloneTool {
         reset();
         ModelUi.refreshTreeNow();
         ModelMode.setTool(ModelTools.NONE);
+    }
+
+    /** 特征自己的局部包围盒（切割/圆角没有 SelectedEval 时用）。 */
+    private static double[] featureBounds(final Solid solid, final Level level) {
+        if (solid == null) {
+            return null;
+        }
+        final java.util.List<com.ovo.sablestopnow.sketch.Sketch> sks =
+                com.ovo.sablestopnow.sketch.SketchClientState.current(level);
+        final com.ovo.sablestopnow.sketch.Sketch sk = solid.resolve(sks);
+        if (sk == null) {
+            return null;
+        }
+        com.ovo.sablestopnow.sketch.SolidMesh.Mesh mesh = null;
+        if (solid.shape() instanceof final Solid.Shape.Cut cut) {
+            mesh = com.ovo.sablestopnow.sketch.SolidMesh.build(sk, cut.params());
+        } else if (solid.shape() instanceof final Solid.Shape.RevolutionCut rc) {
+            mesh = com.ovo.sablestopnow.sketch.Revolve.mesh(sk, rc.params(), 0.02);
+        } else if (solid.shape() instanceof Solid.Shape.Fillet) {
+            final java.util.Map<java.util.UUID, Solid> byId = new java.util.HashMap<>();
+            for (final Solid s : SolidClientState.ofBody(level, solid.body())) {
+                byId.put(s.id(), s);
+            }
+            double[] out = null;
+            for (final double[] b : solid.filletBoxes(byId)) {
+                if (out == null) {
+                    out = new double[] {b[0], b[1], b[2], b[3], b[4], b[5]};
+                } else {
+                    out[0] = Math.min(out[0], b[0]);
+                    out[1] = Math.min(out[1], b[1]);
+                    out[2] = Math.min(out[2], b[2]);
+                    out[3] = Math.max(out[3], b[3]);
+                    out[4] = Math.max(out[4], b[4]);
+                    out[5] = Math.max(out[5], b[5]);
+                }
+            }
+            return out;
+        } else {
+            mesh = solid.mesh(sk);
+        }
+        if (mesh == null || mesh.isEmpty()) {
+            return null;
+        }
+        final double[] b = com.ovo.sablestopnow.sketch.csg.CsgMesh.bounds(
+                com.ovo.sablestopnow.sketch.csg.CsgMesh.fromMesh(mesh, null));
+        return b;
     }
 
     /** 切割/圆角的轮廓线（克隆预览高亮用）。 */

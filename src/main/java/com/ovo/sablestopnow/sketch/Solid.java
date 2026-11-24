@@ -2842,8 +2842,21 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         int reverted = 0;
         for (int i = 0; i < ops.size(); i++) {
             final double v0 = Math.abs(polysVolume(out));
-            final List<Csg.Polygon> next = union
-                    ? unionLocal(out, ops.get(i)) : subtractLocal(out, ops.get(i));
+            final List<Csg.Polygon> next;
+            if (!union) {
+                // 凸圆角 = 从材料里减掉楔块，优先 Manifold；失败回退 csg.js。
+                final SolidMesh.Mesh matMesh = CsgMesh.toMesh(out);
+                final SolidMesh.Mesh opMesh = CsgMesh.toMesh(ops.get(i));
+                final SolidMesh.Mesh man = manifoldDifference(matMesh, opMesh);
+                if (man != null) {
+                    next = ensureOutward(CsgMesh.fromMesh(man, null));
+                    trace("fillet: manifold-cut ok idx=" + index);
+                } else {
+                    next = subtractLocal(out, ops.get(i));
+                }
+            } else {
+                next = unionLocal(out, ops.get(i));
+            }
             final double v1 = Math.abs(polysVolume(next));
             final double delta = union ? (v1 - v0) : (v0 - v1);
             final double th = theory != null && i < theory.size() && theory.get(i) != null

@@ -246,6 +246,9 @@ public final class CloneTool {
         // ① 产物预览：每个选中的材料特征线框做同一套变换
         final List<FeaturePreview.Seg> segs = new ArrayList<>();
         for (final Solid.SelectedEval se : previewSelected) {
+            if (!SOURCES.contains(se.source().id())) {
+                continue; // 内部为切割自动补的材料不当作“已勾选源”高亮
+            }
             for (final Vector3d[] e : se.edges()) {
                 segs.add(new FeaturePreview.Seg(
                         Solid.clonePoint(e[0], center, rot, s, tx, ty, tz),

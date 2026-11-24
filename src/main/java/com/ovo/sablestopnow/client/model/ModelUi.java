@@ -2586,7 +2586,9 @@ public final class ModelUi {
                     final java.util.List<org.joml.Vector3d[]> wire =
                             src.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.Cut c
                                     ? com.ovo.sablestopnow.sketch.Extrude.prismEdges(sk, c.params())
-                                    : src.edges(sk);
+                                    : src.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.RevolutionCut r
+                                            ? com.ovo.sablestopnow.sketch.Revolve.edges(sk, r.params())
+                                            : src.edges(sk);
                     for (final org.joml.Vector3d[] e : wire) {
                         segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
                                 com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[0], o, n),
@@ -5445,7 +5447,9 @@ public final class ModelUi {
                                   || sd.shape()
                                   instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Revolution;
                           final boolean cut = sd.shape()
-                                  instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut;
+                                  instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Cut
+                                  || sd.shape()
+                                  instanceof com.ovo.sablestopnow.sketch.Solid.Shape.RevolutionCut;
                           boolean filletOk = false;
                           if (sd.isFillet()) {
                               final java.util.Set<java.util.UUID> deps = filletDeps(sd);
@@ -5605,6 +5609,15 @@ public final class ModelUi {
                                 lastLeftSignature = null;
                                 refreshLeftPanel();
                             }).width(Widget.FILL));
+                    final var originSnapButton = new Button(
+                            Component.translatable("model.sketch.snap_origin"), () -> {
+                                session.setOriginSnap(!session.originSnap());
+                                lastLeftSignature = null;
+                                refreshLeftPanel();
+                            });
+                    originSnapButton.toggled = session.originSnap();
+                    originSnapButton.width(Widget.FILL);
+                    body.add(originSnapButton);
                 }
                 body.add(new com.ovo.sablestopnow.client.gui.lib.Separator());
                 // 几何约束：作用在**当前选中的图元**上（左栏「选择」工具点中的那个）。

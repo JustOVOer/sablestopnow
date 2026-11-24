@@ -844,6 +844,7 @@
   "model.sketch.closed_no": "没有闭合轮廓",
   "model.sketch.group_colors": "按是否相连分组着色 / 闭合轮廓铺黄",
   "model.sketch.close_endpoints": "一键闭合端点（≤0.01）",
+  "model.sketch.snap_origin": "吸附基准点（≤0.005）",
   "model.sketch.close_done": "已连接 %1$s 处端点",
   "model.sketch.close_none": "没有需要闭合的端点"
 }

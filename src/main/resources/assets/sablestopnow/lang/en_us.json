@@ -844,6 +844,7 @@
   "model.sketch.closed_no": "No closed profile",
   "model.sketch.group_colors": "Color connected groups / fill closed profiles yellow",
   "model.sketch.close_endpoints": "Close endpoints (≤0.01)",
+  "model.sketch.snap_origin": "Snap to origin (≤0.005)",
   "model.sketch.close_done": "Connected %1$s endpoint pairs",
   "model.sketch.close_none": "No endpoints to close"
 }

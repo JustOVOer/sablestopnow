@@ -252,6 +252,17 @@ public final class SketchSession {
         return best == null ? null : ensureCenterPoint(best);
     }
 
+    /** 基准点吸附开关（草图面板按钮控制）✓。 */
+    private boolean originSnap = true;
+
+    public boolean originSnap() {
+        return originSnap;
+    }
+
+    public void setOriginSnap(final boolean value) {
+        this.originSnap = value;
+    }
+
     public void forceSnapOrigin() {
         this.pendingSnap = new KeyPoint(0.0, 0.0, KeyKind.ORIGIN, null, -1, -1);
     }
@@ -741,7 +752,9 @@ public final class SketchSession {
         this.pending.clear();
         this.stage = Stage.EDITING;
         // 编辑旧草图时顺手把“差一丁点”的基准点吸正，避免一直蓝色未定义。
-        snapOriginPoints(5.0e-3);
+        if (originSnap) {
+            snapOriginPoints(5.0e-3);
+        }
     }
 
     public void setTool(final Tool value) {
@@ -1513,7 +1526,7 @@ public final class SketchSession {
     public double[] snap(final double u, final double v, final double tolerance) {
         KeyPoint kp = pickKeyPoint(u, v, tolerance);
         // 基准点最近点：5e-3 内直接吸到 (0,0)，并会在 constrainToSnap 里变成 FIXED。
-        if (kp == null && Math.hypot(u, v) <= 5.0e-3) {
+        if (kp == null && originSnap && Math.hypot(u, v) <= 5.0e-3) {
             kp = new KeyPoint(0.0, 0.0, KeyKind.ORIGIN, null, -1, -1);
         }
         // ★ 网格吸附也要真正进入落点（以前只有 hover 算了网格，click 没算 ⇒

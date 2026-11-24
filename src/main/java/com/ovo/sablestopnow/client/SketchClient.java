@@ -648,7 +648,8 @@ public final class SketchClient {
         //     结果插了两份、清理时又把边界算错 ⇒ 只能回滚重来 ✓ 记住这个坑 ✓。
         final var skSess0 = MODE.session();
         if (skSess0 != null
-                && skSess0.stage() == com.ovo.sablestopnow.sketch.SketchSession.Stage.EDITING) {
+                && skSess0.stage() == com.ovo.sablestopnow.sketch.SketchSession.Stage.EDITING
+                && skSess0.originSnap()) {
             final Vector3d uvAtOrigin = MODE.planePoint(localFrom, localDir);
             if (uvAtOrigin != null && Math.hypot(uvAtOrigin.x, uvAtOrigin.y) <= 0.005) {
                 skSess0.forceSnapOrigin();

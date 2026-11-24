@@ -1884,6 +1884,18 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                     continue;
                 }
+                if (src.shape() instanceof final Shape.RevolutionCut rc
+                        && srcSketch != null) {
+                    final SolidMesh.Mesh cm = Revolve.mesh(srcSketch, rc.params(), 0.02);
+                    if (cm != null && !cm.isEmpty()) {
+                        cutMeshes.add(reflectMesh(cm, o, n));
+                    }
+                    for (final Vector3d[] ce : Revolve.edges(srcSketch, rc.params())) {
+                        cutWireEdges.add(new Vector3d[] {reflectPoint(ce[0], o, n),
+                                reflectPoint(ce[1], o, n)});
+                    }
+                    continue;
+                }
                 final Eval e = baseEvalOf.apply(src, srcSketch);
                 if (e == null) {
                     continue;
@@ -1997,20 +2009,28 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final List<SolidMesh.Mesh> cutMeshesRaw = new ArrayList<>();
             for (final UUID sid : pt.sources()) {
                 final Solid src = byId.get(sid);
-                if (src == null || !(src.shape() instanceof Shape.Cut cut0)) {
+                if (src == null) {
                     continue;
                 }
                 final Sketch srcSketch = src.resolve(sketches);
                 if (srcSketch == null) {
                     continue;
                 }
-                for (final double[] b : Extrude.boxesOf(srcSketch, cut0.params())) {
-                    cutRaw.add(b);
-                }
-                cutWireRaw.addAll(Extrude.prismEdges(srcSketch, cut0.params()));
-                final SolidMesh.Mesh cm = SolidMesh.build(srcSketch, cut0.params());
-                if (cm != null && !cm.isEmpty()) {
-                    cutMeshesRaw.add(cm);
+                if (src.shape() instanceof final Shape.Cut cut0) {
+                    for (final double[] b : Extrude.boxesOf(srcSketch, cut0.params())) {
+                        cutRaw.add(b);
+                    }
+                    cutWireRaw.addAll(Extrude.prismEdges(srcSketch, cut0.params()));
+                    final SolidMesh.Mesh cm = SolidMesh.build(srcSketch, cut0.params());
+                    if (cm != null && !cm.isEmpty()) {
+                        cutMeshesRaw.add(cm);
+                    }
+                } else if (src.shape() instanceof Shape.RevolutionCut rc) {
+                    cutWireRaw.addAll(Revolve.edges(srcSketch, rc.params()));
+                    final SolidMesh.Mesh cm = Revolve.mesh(srcSketch, rc.params(), 0.02);
+                    if (cm != null && !cm.isEmpty()) {
+                        cutMeshesRaw.add(cm);
+                    }
                 }
             }
             for (final UUID sid : pt.sources()) {
@@ -2020,7 +2040,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                         || src.shape instanceof Shape.Mirror
                         || src.shape instanceof Shape.Pattern
                         || src.shape instanceof Shape.Clone
-                        || src.shape instanceof Shape.Cut) {
+                        || src.shape instanceof Shape.Cut
+                        || src.shape instanceof Shape.RevolutionCut) {
                     continue;
                 }
                 final Eval e = baseEvalOf.apply(src, src.resolve(sketches));
@@ -2145,6 +2166,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             for (final UUID sid : cl.sources()) {
                 final Solid src = byId.get(sid);
                 if (src != null && (src.shape() instanceof Shape.Cut
+                        || src.shape() instanceof Shape.RevolutionCut
                         || src.shape() instanceof Shape.Fillet)) {
                     needsCsg = true;
                     break;

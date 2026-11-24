@@ -347,7 +347,9 @@ public final class PatternTool {
                 final List<Vector3d[]> wire =
                         src.shape() instanceof final Solid.Shape.Cut c
                                 ? com.ovo.sablestopnow.sketch.Extrude.prismEdges(sk, c.params())
-                                : src.edges(sk);
+                                : src.shape() instanceof final Solid.Shape.RevolutionCut r
+                                        ? com.ovo.sablestopnow.sketch.Revolve.edges(sk, r.params())
+                                        : src.edges(sk);
                 for (final double[] off : offsets) {
                     for (final Vector3d[] e : wire) {
                         segs.add(new FeaturePreview.Seg(

@@ -3,7 +3,7 @@
 // 输出：每个 RevolutionCut 对应的 target/cutter/result 体积与 OBJ（csg-dump-probe/）。
 
 import com.ovo.sablestopnow.sketch.Revolve;
-import com.ovo.sablestopnow.sketch.ManifoldNative;
+import com.ovo.sablestopnow.client.manifold.ManifoldBridge;
 import com.ovo.sablestopnow.sketch.Sketch;
 import com.ovo.sablestopnow.sketch.SketchData;
 import com.ovo.sablestopnow.sketch.Solid;
@@ -154,7 +154,7 @@ public final class RevolutionCutProbe {
                 final double cv = volume(b);
                 final List<Csg.Polygon> r = Csg.subtract(a, b);
                 final double rv = volume(r);
-                final SolidMesh.Mesh man = ManifoldNative.difference(targetMesh, cutterMesh);
+                final SolidMesh.Mesh man = ManifoldBridge.difference(targetMesh, cutterMesh);
                 if (man != null) {
                     System.out.printf(java.util.Locale.ROOT,
                             "  manifold resultVol=%.6f verts=%d tris=%d%n",
@@ -162,6 +162,16 @@ public final class RevolutionCutProbe {
                             man.vertices().size(), man.indices().length / 3);
                 } else {
                     System.out.println("  manifold result=null");
+                }
+                final SolidMesh.Mesh rawMan = ManifoldBridge.difference(
+                        targetMesh, Revolve.mesh(cutSketch, rc.params()));
+                if (rawMan != null) {
+                    System.out.printf(java.util.Locale.ROOT,
+                            "  manifoldRaw resultVol=%.6f verts=%d tris=%d%n",
+                            Math.abs(volume(CsgMesh.fromMesh(rawMan, null))),
+                            rawMan.vertices().size(), rawMan.indices().length / 3);
+                } else {
+                    System.out.println("  manifoldRaw result=null");
                 }
                 final List<Csg.Polygon> rClean = Solid.stripThinSheetPairs(r, 0.01);
                 final double rCleanV = volume(rClean);

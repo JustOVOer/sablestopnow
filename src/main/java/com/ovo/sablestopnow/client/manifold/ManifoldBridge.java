@@ -31,6 +31,7 @@ public final class ManifoldBridge {
         Pointer manifold_of_meshgl64(Pointer mem, Pointer mesh);
         int manifold_status(Pointer m);
         Pointer manifold_difference(Pointer mem, Pointer a, Pointer b);
+        Pointer manifold_simplify(Pointer mem, Pointer m, double tolerance);
         Pointer manifold_get_meshgl64(Pointer mem, Pointer m);
         long manifold_meshgl64_num_vert(Pointer m);
         long manifold_meshgl64_num_tri(Pointer m);
@@ -104,6 +105,12 @@ public final class ManifoldBridge {
             Pointer result = c.manifold_difference(mem(keep, manSize), mA, mB);
             if (result == null || c.manifold_status(result) != 0) return null;
             manifolds.add(result);
+            // 去掉切面边缘 < 2e-3 的残片/短边，不改动正常曲面。
+            Pointer simplified = c.manifold_simplify(mem(keep, manSize), result, 2.0e-3);
+            if (simplified != null && c.manifold_status(simplified) == 0) {
+                result = simplified;
+                manifolds.add(result);
+            }
             Pointer outMesh = c.manifold_get_meshgl64(mem(keep, meshSize), result);
             if (outMesh == null) return null;
             meshes.add(outMesh);

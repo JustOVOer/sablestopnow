@@ -1053,9 +1053,13 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     }
 
     private record CutFeat(SketchPlane plane, Sketch sketch, Extrude.Params params,
-                           Revolve.Params revolve, List<double[]> boxes) {
+                           Revolve.Params revolve, int sourceIndex,
+                           List<double[]> boxes, SolidMesh.Mesh meshOverride) {
 
         SolidMesh.Mesh cutterMesh() {
+            if (meshOverride != null) {
+                return meshOverride;
+            }
             if (revolve != null) {
                 return Revolve.mesh(sketch, revolve, 0.02);
             }
@@ -1160,15 +1164,6 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         }
         final List<Solid> subset = new ArrayList<>();
         boolean needCsg = false;
-        final java.util.Set<UUID> cutBodies = new java.util.HashSet<>();
-        for (final Solid s : solids) {
-            if (!selectedIds.contains(s.id())) {
-                continue;
-            }
-            if (s.shape() instanceof Shape.Cut || s.shape() instanceof Shape.RevolutionCut) {
-                cutBodies.add(s.body());
-            }
-        }
         for (final Solid s : solids) {
             if (!selectedIds.contains(s.id())) {
                 continue;
@@ -1181,27 +1176,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 needCsg = true;
             }
         }
-        // 只勾了一个切割时，克隆/预览没有材料可作用 ⇒ 自动带上同 body 的材料特征。
-        for (final UUID b : cutBodies) {
-            boolean hasMaterial = false;
-            for (final Solid s : subset) {
-                if (s.body().equals(b) && (s.shape() instanceof Shape.Extrusion
-                        || s.shape() instanceof Shape.Revolution)) {
-                    hasMaterial = true;
-                    break;
-                }
-            }
-            if (hasMaterial) {
-                continue;
-            }
-            for (final Solid s : solids) {
-                if (s.body().equals(b) && (s.shape() instanceof Shape.Extrusion
-                        || s.shape() instanceof Shape.Revolution)) {
-                    subset.add(s);
-                    needCsg = true;
-                }
-            }
-        }
+        // 切割源不在这里偷偷补材料：克隆切割应该把变换后的切割作用到
+        // 原有目标上，而不是连目标一起复制。
         final List<SelectedEval> out = new ArrayList<>();
         if (!needCsg) {
             for (final Solid s : subset) {
@@ -1252,7 +1228,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
                 cutters.computeIfAbsent(solid.body(), k -> new ArrayList<>())
                         .add(new CutFeat(cs.plane(), cs, cut.params(), null,
-                                Extrude.boxesOf(cs, cut.params())));
+                                solid.index(), Extrude.boxesOf(cs, cut.params()), null));
             } else if (solid.shape() instanceof final Shape.RevolutionCut rc) {
                 final Sketch cs = solid.resolve(sketches);
                 if (cs == null) {
@@ -1260,7 +1236,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     continue;
                 }
                 cutters.computeIfAbsent(solid.body(), k -> new ArrayList<>())
-                        .add(new CutFeat(cs.plane(), cs, null, rc.params(), List.of()));
+                        .add(new CutFeat(cs.plane(), cs, null, rc.params(),
+                                solid.index(), List.of(), null));
             }
         }
         // ★ item 8：**圆角**要挖掉的盒子（局部坐标，直接可用 ✓ 不需要平面换算）
@@ -1269,6 +1246,72 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         final java.util.Set<UUID> fallbackIds = new java.util.HashSet<>();
         for (final Solid s2 : solids) {
             byId.put(s2.id(), s2);
+        }
+        // 克隆的源是**切割**时：不复制被切材料，而是把切割体跟着克隆变换，
+        // 再作用到原目标（树里位于该切割上方的材料）上。
+        for (final Solid cloneSolid : solids) {
+            if (!(cloneSolid.shape() instanceof final Shape.Clone cl)
+                    || cl.sources().isEmpty()) {
+                continue;
+            }
+            final List<double[]> allBounds = new ArrayList<>();
+            for (final UUID sid : cl.sources()) {
+                final Solid src = byId.get(sid);
+                if (src == null) {
+                    continue;
+                }
+                final Sketch sk = src.resolve(sketches);
+                if (sk == null) {
+                    continue;
+                }
+                final SolidMesh.Mesh mm;
+                if (src.shape() instanceof final Shape.Cut cut) {
+                    mm = SolidMesh.build(sk, cut.params());
+                } else if (src.shape() instanceof final Shape.RevolutionCut rc) {
+                    mm = Revolve.mesh(sk, rc.params(), 0.02);
+                } else {
+                    mm = src.mesh(sk);
+                }
+                if (mm != null && !mm.isEmpty()) {
+                    final double[] bb = CsgMesh.bounds(CsgMesh.fromMesh(mm, null));
+                    if (bb != null) {
+                        allBounds.add(bb);
+                    }
+                }
+            }
+            if (allBounds.isEmpty()) {
+                continue;
+            }
+            final Vector3d center = centerOfBoxes(allBounds);
+            final org.joml.Matrix3d rot = cloneRotation(cl.rx(), cl.ry(), cl.rz());
+            for (final UUID sid : cl.sources()) {
+                final Solid src = byId.get(sid);
+                if (src == null) {
+                    continue;
+                }
+                final Sketch sk = src.resolve(sketches);
+                final SolidMesh.Mesh base;
+                if (src.shape() instanceof final Shape.Cut cut && sk != null) {
+                    base = SolidMesh.build(sk, cut.params());
+                } else if (src.shape() instanceof final Shape.RevolutionCut rc && sk != null) {
+                    base = Revolve.mesh(sk, rc.params(), 0.02);
+                } else {
+                    continue;
+                }
+                if (base == null || base.isEmpty()) {
+                    continue;
+                }
+                final SolidMesh.Mesh moved = cloneMesh(base, center, rot, cl.scale(),
+                        cl.tx(), cl.ty(), cl.tz());
+                if (moved == null || moved.isEmpty()) {
+                    continue;
+                }
+                cutters.computeIfAbsent(cloneSolid.body(), k -> new ArrayList<>())
+                        .add(new CutFeat(null, sk, null, null, src.index(),
+                                List.of(), moved));
+                trace("clone-cut body=" + shortId(cloneSolid.body())
+                        + " source=" + src.index() + " cloneIdx=" + cloneSolid.index());
+            }
         }
         final java.util.Map<UUID, List<Csg.Polygon>> filletPolyByBody = new java.util.HashMap<>();
         // ★ 原始棱数据（a,b,n1,n2,r[,curveGroup]）：几何验证式求值用 ✓
@@ -1636,6 +1679,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 List<Csg.Polygon> acc = ensureOutward(CsgMesh.fromMesh(targetMesh, null));
                 int cutterTris = 0;
                 for (final CutFeat f : feats) {
+                    // 切割只作用于树里**位于它上方**的材料（index 更小）。
+                    if (solid.index() >= f.sourceIndex()) {
+                        continue;
+                    }
                     SolidMesh.Mesh cutterMesh = f.cutterMesh();
                     if (cutterMesh == null || cutterMesh.isEmpty()) {
                         cutterMesh = boxesInLocal(f.sketch(), f.boxes());

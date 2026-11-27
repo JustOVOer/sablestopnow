@@ -548,7 +548,6 @@ public final class Sketch {
     @Nullable
     private static Boolean lastArcCwCache;
 
-    /** 画弧落点时把最终方向写进缓存，供恰好 180° 的显示使用。 */
     public static void setArcCwCache(final boolean cw) {
         lastArcCwCache = cw;
     }
@@ -566,13 +565,10 @@ public final class Sketch {
         if (full) {
             return 2.0 * Math.PI;
         }
-        // 180°：用最近一次画弧/已有弧的方向缓存，避免正负号跳变。
+        // 180°：每段弧用自己的 cw 位，不能用全局缓存（否则画一条弧，其它弧跟着翻）。
         if (Math.abs(ccw - Math.PI) <= 1.0e-2) {
-            final boolean cw = lastArcCwCache != null ? lastArcCwCache : arc.cw();
-            return cw ? -Math.PI : Math.PI;
+            return arc.cw() ? -Math.PI : Math.PI;
         }
-        // 其余情况**永远走短弧**：ccw 超过 π 就变成负的短弧。
-        // 不再让 cw 位二次翻转 —— 否则 >180° 时预览更新了，落地却走回长弧。
         return ccw > Math.PI ? ccw - 2.0 * Math.PI : ccw;
     }
 

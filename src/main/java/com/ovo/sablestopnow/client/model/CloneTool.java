@@ -74,6 +74,12 @@ public final class CloneTool {
         if (solids == null) {
             return;
         }
+        // 第二次克隆不要自动勾上全部材料：否则取消勾选也会被下一轮预填盖掉。
+        for (final Solid sd : solids) {
+            if (sd.isClone()) {
+                return;
+            }
+        }
         for (final Solid sd : solids) {
             if (sd.shape() instanceof Solid.Shape.Extrusion
                     || sd.shape() instanceof Solid.Shape.Revolution) {

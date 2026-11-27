@@ -1675,28 +1675,18 @@ public final class SketchSession {
                                            final double centerU, final double centerV,
                                            final double mouseU, final double mouseV) {
         final double d = normSweep(a0, a1);
-        // 无缓存时先把当前圆弧方向记下来（不先用鼠标移动覆盖它）。
-        if (lastDrawArcCw == null) {
-            lastDrawArcCw = d < 0.0;
-        }
-        // 180° 附近冻结缓存：本次弧内不再按鼠标移动改方向。
+        // 180° 内冻结；没有缓存时先把当前几何方向记下来。
         if (Math.abs(Math.abs(d) - Math.PI) <= ARC_180_EPS) {
+            if (lastDrawArcCw == null) {
+                lastDrawArcCw = d < 0.0;
+            }
             return lastDrawArcCw;
         }
-        // 离开 180° 后才更新：优先鼠标绕圆心的移动方向，否则用当前劣弧方向。
-        final double mouseAng = Math.atan2(mouseV - centerV, mouseU - centerU);
-        if (lastDrawArcMouseAngle == null) {
-            lastDrawArcMouseAngle = mouseAng;
-        } else {
-            final double md = normSweep(lastDrawArcMouseAngle, mouseAng);
-            if (Math.abs(md) > 1.0e-4) {
-                lastDrawArcCw = md < 0.0;
-                lastDrawArcMouseAngle = mouseAng;
-                return lastDrawArcCw;
-            }
-        }
-        lastDrawArcCw = d < 0.0;
-        return lastDrawArcCw;
+        // 普通情况严格按当前弦方向（>180° 时 d 为负，就是短弧方向）。
+        final boolean cw = d < 0.0;
+        lastDrawArcCw = cw;
+        lastDrawArcMouseAngle = Math.atan2(mouseV - centerV, mouseU - centerU);
+        return cw;
     }
 
     /** 预览用带符号扫角：严格劣弧，只有 180°±eps 才沿用鼠标方向缓存。 */

@@ -437,11 +437,19 @@ public final class Revolve {
      */
     public static SolidMesh.Mesh mesh(final Sketch sketch, final Params params,
                                       final double axisOffset) {
+        final SketchPlane plane = sketch.plane();
+        final int steps = stepsFor(params);
+        // 整圈优先用 Manifold 原生 revolve：轴上的顶点由库自己退化成极点，
+        // 不再需要把轮廓整体推离轴（0.02）和事后减小圆柱。
+        if (params.fullTurn()) {
+            final SolidMesh.Mesh nativeMesh = manifoldRevolve(sketch, params, steps);
+            if (nativeMesh != null && !nativeMesh.isEmpty()) {
+                return nativeMesh;
+            }
+        }
         final List<SolidMesh.Vertex> verts = new ArrayList<>();
         final List<Integer> indices = new ArrayList<>();
-        final SketchPlane plane = sketch.plane();
         final double total = params.signedRadians();
-        final int steps = stepsFor(params);
         final boolean full = params.fullTurn();
         final boolean needsAxisOffset = full && axisOffset != 0.0
                 && touchesAxis(sketch, params);
@@ -499,6 +507,128 @@ public final class Revolve {
         }
         return false;
     }
+
+    /**
+     * 原生 Manifold CrossSection.revolve。返回网格坐标已经变换回草图轴所在的空间；
+     * 失败返回 null（调用方回退旧的逐环旋转）。
+     */
+    private static SolidMesh.Mesh manifoldRevolve(final Sketch sketch,
+                                                  final Params params,
+                                                  final int steps) {
+        try {
+            java.lang.reflect.Method method = MANIFOLD_REVOLVE;
+            if (method == null) {
+                final Class<?> bridge = Class.forName(
+                        "com.ovo.sablestopnow.client.manifold.ManifoldBridge");
+                method = bridge.getMethod("revolve", java.util.List.class, int.class,
+                        double.class);
+                MANIFOLD_REVOLVE = method;
+            }
+            final SketchPlane plane = sketch.plane();
+            if (plane == null) {
+                return null;
+            }
+            final Vector3d origin = plane.toLocal(params.axisU(), params.axisV());
+            final Vector3d dir = axisDirection(plane, params);
+            Vector3d r0 = plane.normal().cross(dir, new Vector3d());
+            if (r0.lengthSquared() < 1.0e-18) {
+                return null;
+            }
+            r0.normalize();
+            final List<SketchProfiles.Region> regions = SketchProfiles.nest(
+                    SketchProfiles.findLoops(sketch,
+                            SketchProfiles.DEFAULT_WELD_TOLERANCE,
+                            SketchProfiles.Sampling.RENDER));
+            double sum = 0.0;
+            for (final SketchProfiles.Region region : regions) {
+                for (final double[] p : region.outer().points()) {
+                    sum += new Vector3d(plane.toLocal(p[0], p[1])).sub(origin).dot(r0);
+                }
+            }
+            if (Math.abs(sum) < 1.0e-12) {
+                return null;
+            }
+            final Vector3d radial = r0.mul(sum >= 0.0 ? 1.0 : -1.0, new Vector3d());
+            final List<double[]> contours = new ArrayList<>();
+            for (final SketchProfiles.Region region : regions) {
+                if (!Extrude.extrudable(region)) {
+                    continue;
+                }
+                if (!addRevolveContour(contours, region.outer().points(),
+                        plane, origin, dir, radial, true)) {
+                    return null;
+                }
+                for (final SketchProfiles.Profile hole : region.holes()) {
+                    if (!addRevolveContour(contours, hole.points(),
+                            plane, origin, dir, radial, false)) {
+                        return null;
+                    }
+                }
+            }
+            if (contours.isEmpty()) {
+                return null;
+            }
+            final SolidMesh.Mesh raw = (SolidMesh.Mesh) method.invoke(
+                    null, contours, Math.max(8, steps), 360.0);
+            if (raw == null || raw.isEmpty()) {
+                return null;
+            }
+            final Vector3d e2 = new Vector3d(dir).cross(radial, new Vector3d()).normalize();
+            final List<SolidMesh.Vertex> out = new ArrayList<>(raw.vertices().size());
+            for (final SolidMesh.Vertex v : raw.vertices()) {
+                final Vector3d p = v.position();
+                final Vector3d q = new Vector3d(origin)
+                        .fma(p.x, radial, new Vector3d())
+                        .fma(p.y, e2, new Vector3d())
+                        .fma(p.z, dir, new Vector3d());
+                out.add(new SolidMesh.Vertex(q, new Vector3d(0, 0, 1), 0, 0));
+            }
+            return new SolidMesh.Mesh(out, raw.indices());
+        } catch (final Throwable t) {
+            return null;
+        }
+    }
+
+    /** 把一条草图轮廓变成 (r,t) 坐标，并修正外圈/孔的方向。 */
+    private static boolean addRevolveContour(final List<double[]> out,
+                                             final List<double[]> ring,
+                                             final SketchPlane plane,
+                                             final Vector3d origin,
+                                             final Vector3d dir,
+                                             final Vector3d radial,
+                                             final boolean outer) {
+        if (ring == null || ring.size() < 3) {
+            return false;
+        }
+        final List<double[]> pts = new ArrayList<>(ring.size());
+        for (final double[] p : ring) {
+            final Vector3d w = new Vector3d(plane.toLocal(p[0], p[1])).sub(origin);
+            final double r = w.dot(radial);
+            final double t = w.dot(dir);
+            if (r < -1.0e-6) {
+                return false; // 轮廓跨过轴：交给旧路径，不硬切
+            }
+            pts.add(new double[] {Math.max(0.0, r), t});
+        }
+        final double area = signedArea(pts);
+        if (outer != (area > 0.0)) {
+            java.util.Collections.reverse(pts);
+        }
+        out.addAll(pts);
+        return true;
+    }
+
+    private static double signedArea(final List<double[]> ring) {
+        double a = 0.0;
+        for (int i = 0; i < ring.size(); i++) {
+            final double[] p = ring.get(i);
+            final double[] q = ring.get((i + 1) % ring.size());
+            a += p[0] * q[1] - q[0] * p[1];
+        }
+        return a * 0.5;
+    }
+
+    private static volatile java.lang.reflect.Method MANIFOLD_REVOLVE;
 
     /** 把一条闭合轮廓整体沿“远离旋转轴”的方向平移 eps（平面 u/v 坐标）✓。 */
     private static List<double[]> offsetProfileRing(final List<double[]> ring,

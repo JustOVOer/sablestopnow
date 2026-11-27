@@ -1062,7 +1062,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 return meshOverride;
             }
             if (revolve != null) {
-                return Revolve.mesh(sketch, revolve, 0.02);
+                return Revolve.mesh(sketch, revolve, 0.0);
             }
             return SolidMesh.build(sketch, params);
         }
@@ -1269,7 +1269,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 if (src.shape() instanceof final Shape.Cut cut) {
                     mm = SolidMesh.build(sk, cut.params());
                 } else if (src.shape() instanceof final Shape.RevolutionCut rc) {
-                    mm = Revolve.mesh(sk, rc.params(), 0.02);
+                    mm = Revolve.mesh(sk, rc.params(), 0.0);
                 } else {
                     mm = src.mesh(sk);
                 }
@@ -1295,7 +1295,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 if (src.shape() instanceof final Shape.Cut cut && sk != null) {
                     base = SolidMesh.build(sk, cut.params());
                 } else if (src.shape() instanceof final Shape.RevolutionCut rc && sk != null) {
-                    base = Revolve.mesh(sk, rc.params(), 0.02);
+                    base = Revolve.mesh(sk, rc.params(), 0.0);
                 } else {
                     continue;
                 }
@@ -1753,17 +1753,6 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                                     : null;
                     if (manifoldResult != null) {
                         chosen = ensureOutward(CsgMesh.fromMesh(manifoldResult, null));
-                        if (f.revolve() != null && f.revolve().fullTurn()) {
-                            final SolidMesh.Mesh rod = axisRodCutter(
-                                    f.sketch().plane(), f.revolve(),
-                                    CsgMesh.toMesh(chosen), 0.025);
-                            final SolidMesh.Mesh noRod = rod == null ? null
-                                    : manifoldDifference(CsgMesh.toMesh(chosen), rod);
-                            if (noRod != null && !noRod.isEmpty()) {
-                                chosen = ensureOutward(CsgMesh.fromMesh(noRod, null));
-                                trace("[csg] axis-strip-removed solid=" + solid.index());
-                            }
-                        }
                         trace("[csg] manifold resultVol="
                                 + String.format(java.util.Locale.ROOT, "%.6f",
                                         Math.abs(polysVolume(chosen)))
@@ -2005,7 +1994,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
                 if (src.shape() instanceof final Shape.RevolutionCut rc
                         && srcSketch != null) {
-                    final SolidMesh.Mesh cm = Revolve.mesh(srcSketch, rc.params(), 0.02);
+                    final SolidMesh.Mesh cm = Revolve.mesh(srcSketch, rc.params(), 0.0);
                     if (cm != null && !cm.isEmpty()) {
                         cutMeshes.add(reflectMesh(cm, o, n));
                     }
@@ -2146,7 +2135,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                 } else if (src.shape() instanceof Shape.RevolutionCut rc) {
                     cutWireRaw.addAll(Revolve.edges(srcSketch, rc.params()));
-                    final SolidMesh.Mesh cm = Revolve.mesh(srcSketch, rc.params(), 0.02);
+                    final SolidMesh.Mesh cm = Revolve.mesh(srcSketch, rc.params(), 0.0);
                     if (cm != null && !cm.isEmpty()) {
                         cutMeshesRaw.add(cm);
                     }
@@ -3922,73 +3911,6 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     }
 
     /** 让旋转切割体沿轴伸出目标两端 margin，避免端面差 0.008 留薄皮。 */
-    /** 旋转切割轴线上的小圆柱：用来清掉轮廓避开奇点后留下的半圆细条。 */
-    private static SolidMesh.Mesh axisRodCutter(final SketchPlane plane,
-                                                final Revolve.Params params,
-                                                final SolidMesh.Mesh result,
-                                                final double radius) {
-        if (plane == null || params == null || result == null || result.isEmpty()) {
-            return null;
-        }
-        final Vector3d axis = Revolve.axisDirection(plane, params);
-        final Vector3d axisPoint = plane.toLocal(params.axisU(), params.axisV());
-        double tmin = Double.MAX_VALUE;
-        double tmax = -Double.MAX_VALUE;
-        for (final SolidMesh.Vertex v : result.vertices()) {
-            final double t = v.position().sub(axisPoint, new Vector3d()).dot(axis);
-            tmin = Math.min(tmin, t);
-            tmax = Math.max(tmax, t);
-        }
-        if (tmin == Double.MAX_VALUE || tmax - tmin < 1.0e-9) {
-            return null;
-        }
-        Vector3d u = axis.cross(plane.normal(), new Vector3d());
-        if (u.lengthSquared() < 1.0e-12) {
-            u = axis.cross(new Vector3d(1, 0, 0), new Vector3d());
-        }
-        u.normalize();
-        final Vector3d v = axis.cross(u, new Vector3d()).normalize();
-        final int seg = 24;
-        final List<SolidMesh.Vertex> verts = new ArrayList<>();
-        for (int i = 0; i < seg; i++) {
-            final double a = 2.0 * Math.PI * i / seg;
-            final Vector3d n = u.mul(Math.cos(a), new Vector3d())
-                    .add(v.mul(Math.sin(a), new Vector3d()));
-            for (final double t : new double[] {tmin - 0.02, tmax + 0.02}) {
-                verts.add(new SolidMesh.Vertex(
-                        new Vector3d(axisPoint).add(axis.mul(t, new Vector3d()))
-                                .add(n.mul(radius, new Vector3d())),
-                        n, 0.0, 0.0));
-            }
-        }
-        final List<Integer> idx = new ArrayList<>();
-        for (int i = 0; i < seg; i++) {
-            final int a0 = i * 2;
-            final int a1 = ((i + 1) % seg) * 2;
-            idx.add(a0); idx.add(a1); idx.add(a1 + 1);
-            idx.add(a0); idx.add(a1 + 1); idx.add(a0 + 1);
-        }
-        final int cStart = verts.size();
-        verts.add(new SolidMesh.Vertex(
-                new Vector3d(axisPoint).add(axis.mul(tmin - 0.02, new Vector3d())),
-                axis.mul(-1.0, new Vector3d()), 0.0, 0.0));
-        final int cEnd = verts.size();
-        verts.add(new SolidMesh.Vertex(
-                new Vector3d(axisPoint).add(axis.mul(tmax + 0.02, new Vector3d())),
-                new Vector3d(axis), 0.0, 0.0));
-        for (int i = 0; i < seg; i++) {
-            final int a0 = i * 2;
-            final int a1 = ((i + 1) % seg) * 2;
-            idx.add(cStart); idx.add(a1); idx.add(a0);
-            idx.add(cEnd); idx.add(a0 + 1); idx.add(a1 + 1);
-        }
-        final List<Csg.Polygon> raw = CsgMesh.fromMesh(
-                new SolidMesh.Mesh(verts,
-                        idx.stream().mapToInt(Integer::intValue).toArray()), null);
-        final SolidMesh.Mesh out = CsgMesh.toMesh(ensureOutward(raw));
-        return out.isEmpty() ? null : out;
-    }
-
     private static SolidMesh.Mesh extendMeshToTarget(
             final SolidMesh.Mesh cutter, final SolidMesh.Mesh target,
             final Vector3d axis, final double margin) {

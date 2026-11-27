@@ -25,6 +25,17 @@ public final class ManifoldBridge {
     private interface Api extends Library {
         long manifold_manifold_size();
         long manifold_meshgl64_size();
+        long manifold_simple_polygon_size();
+        long manifold_polygons_size();
+        long manifold_cross_section_size();
+        Pointer manifold_simple_polygon(Pointer mem, Pointer points, long length);
+        Pointer manifold_polygons(Pointer mem, Pointer[] polys, long length);
+        Pointer manifold_cross_section_of_polygons(Pointer mem, Pointer polys, int fillRule);
+        Pointer manifold_cross_section_to_polygons(Pointer mem, Pointer cs);
+        Pointer manifold_revolve(Pointer mem, Pointer polygons, int segments, double degrees);
+        void manifold_destruct_simple_polygon(Pointer p);
+        void manifold_destruct_polygons(Pointer p);
+        void manifold_destruct_cross_section(Pointer cs);
         Pointer manifold_meshgl64(Pointer mem, double[] v, long nv, long np,
                                   long[] t, long nt);
         Pointer manifold_meshgl64_merge(Pointer mem, Pointer mesh);
@@ -143,6 +154,103 @@ public final class ManifoldBridge {
                 try { c.manifold_destruct_manifold(p); } catch (Throwable ignored) { }
             }
         }
+    }
+
+    /** 用 Manifold 原生 CrossSection.revolve 生成整圈旋转体（轴顶点由库处理）。 */
+    public static SolidMesh.Mesh revolve(List<double[]> contours, int segments,
+                                         double degrees) {
+        Api c = api();
+        if (c == null || contours == null || contours.isEmpty()) return null;
+        List<Memory> keep = new ArrayList<>();
+        List<Pointer> simple = new ArrayList<>();
+        List<Pointer> polygons = new ArrayList<>();
+        List<Pointer> crossSections = new ArrayList<>();
+        List<Pointer> manifolds = new ArrayList<>();
+        try {
+            long simpleSize = c.manifold_simple_polygon_size();
+            long polygonsSize = c.manifold_polygons_size();
+            long crossSize = c.manifold_cross_section_size();
+            long manSize = c.manifold_manifold_size();
+            List<Pointer> simplePtrs = new ArrayList<>();
+            for (final double[] contour : contours) {
+                if (contour == null || contour.length < 6) {
+                    return null;
+                }
+                final int n = contour.length / 2;
+                Memory vec = mem(keep, (long) n * 16);
+                vec.write(0, contour, 0, n * 2);
+                Pointer sp = c.manifold_simple_polygon(mem(keep, simpleSize), vec, n);
+                if (sp == null) return null;
+                simple.add(sp);
+                simplePtrs.add(sp);
+            }
+            Pointer[] ptrs = simplePtrs.toArray(new Pointer[0]);
+            Memory ptrArray = mem(keep, (long) ptrs.length * Native.POINTER_SIZE);
+            for (int i = 0; i < ptrs.length; i++) {
+                ptrArray.setPointer((long) i * Native.POINTER_SIZE, ptrs[i]);
+            }
+            Pointer polys = c.manifold_polygons(mem(keep, polygonsSize), ptrs, ptrs.length);
+            if (polys == null) return null;
+            polygons.add(polys);
+            // POSITIVE = 2；先用 CrossSection 做一次规范化，保证孔/外圈填充分正确。
+            Pointer cs = c.manifold_cross_section_of_polygons(
+                    mem(keep, crossSize), polys, 2);
+            if (cs == null) return null;
+            crossSections.add(cs);
+            Pointer norm = c.manifold_cross_section_to_polygons(
+                    mem(keep, polygonsSize), cs);
+            if (norm == null) return null;
+            polygons.add(norm);
+            Pointer result = c.manifold_revolve(
+                    mem(keep, manSize), norm, Math.max(8, segments), degrees);
+            if (result == null || c.manifold_status(result) != 0) {
+                System.out.println("[manifold] revolve status="
+                        + (result == null ? "null" : c.manifold_status(result)));
+                return null;
+            }
+            manifolds.add(result);
+            return extract(c, keep, result);
+        } catch (Throwable x) {
+            System.out.println("[manifold] revolve failed: " + x);
+            return null;
+        } finally {
+            for (Pointer p : manifolds) {
+                try { c.manifold_destruct_manifold(p); } catch (Throwable ignored) { }
+            }
+            for (Pointer p : crossSections) {
+                try { c.manifold_destruct_cross_section(p); } catch (Throwable ignored) { }
+            }
+            for (Pointer p : polygons) {
+                try { c.manifold_destruct_polygons(p); } catch (Throwable ignored) { }
+            }
+            for (Pointer p : simple) {
+                try { c.manifold_destruct_simple_polygon(p); } catch (Throwable ignored) { }
+            }
+        }
+    }
+
+    private static SolidMesh.Mesh extract(Api c, List<Memory> keep, Pointer result) {
+        long meshSize = c.manifold_meshgl64_size();
+        Pointer outMesh = c.manifold_get_meshgl64(mem(keep, meshSize), result);
+        if (outMesh == null) return null;
+        int nv = (int) c.manifold_meshgl64_num_vert(outMesh);
+        int nt = (int) c.manifold_meshgl64_num_tri(outMesh);
+        int np = (int) c.manifold_meshgl64_num_prop(outMesh);
+        if (nv <= 0 || nt <= 0 || np < 3) return null;
+        Memory p = mem(keep, (long) nv * np * 8);
+        Memory t = mem(keep, (long) nt * 3 * 8);
+        c.manifold_meshgl64_vert_properties(p, outMesh);
+        c.manifold_meshgl64_tri_verts(t, outMesh);
+        double[] ps = p.getDoubleArray(0, nv * np);
+        long[] ts = t.getLongArray(0, nt * 3);
+        List<SolidMesh.Vertex> vs = new ArrayList<>(nv);
+        for (int i = 0; i < nv; i++) {
+            vs.add(new SolidMesh.Vertex(new Vector3d(ps[i * np], ps[i * np + 1],
+                    ps[i * np + 2]), new Vector3d(0, 0, 1), 0, 0));
+        }
+        int[] idx = new int[nt * 3];
+        for (int i = 0; i < idx.length; i++) idx[i] = (int) ts[i];
+        return new SolidMesh.Mesh(vs, idx);
     }
 
     private static Pointer mesh(Api c, List<Memory> keep, long size, SolidMesh.Mesh m) {

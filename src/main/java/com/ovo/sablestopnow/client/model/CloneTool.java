@@ -126,6 +126,9 @@ public final class CloneTool {
             SOURCES.remove(id);
         }
         body = bodyId;
+        previewSig = "";
+        lastSegSig = "";
+        FeaturePreview.clear();
     }
 
     /** 按当前参数造形状（**不发送**）；缺源时返回 null。 */

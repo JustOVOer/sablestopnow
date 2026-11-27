@@ -623,12 +623,9 @@ public final class SketchHud {
             if (d.labelKey() != null && d.labelKey().contains("angle")
                     && d.constraintIndex() >= 0
                     && d.constraintIndex() < working.constraints().size()) {
-                final int[] av = working.constraints().get(d.constraintIndex()).operands();
-                final int angArgb = d.driving() ? 0xFFE6E6E6 : 0xFF8C93A8;
-                drawAngularDimension(g, working, sub, mc, tmp, av, screen, angArgb,
-                        hovered ? 0xFFFFCC55 : angArgb,
-                        d.value(), d.constraintIndex(), d.driving());
-                continue; // 不再走下面那套线性画法 ✓
+                // 角度尺寸的弧/箭头由 SketchRenderer 的 3D 画法负责，
+                // HUD 不再画屏幕像素线，避免和草图线条叠出“残留像素线”。
+                continue;
             }
             // ---- 尺寸线（SolidWorks 的画法：线**穿过标签**，两端有界线与箭头 ✓）----
             // 参考点按需推导 ✓（推导不出就只画文字 ✓ 宁可少画不画错 ✓）

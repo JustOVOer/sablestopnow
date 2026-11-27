@@ -1357,6 +1357,24 @@ public final class SketchSession {
         return removed;
     }
 
+    /** Delete 键：删掉当前选中的所有草图图元。 */
+    public boolean deleteSelectedEntities() {
+        if (working == null || selection.isEmpty()) {
+            return false;
+        }
+        pushUndo();
+        boolean removed = false;
+        for (final Sketch.Entity e : java.util.List.copyOf(selection)) {
+            if (working.removeEntity(e)) {
+                selection.remove(e);
+                removed = true;
+            }
+        }
+        selectedEntity = selection.isEmpty() ? null : selection.get(0);
+        pendingSnap = null;
+        return removed;
+    }
+
     // ------------------------------------------------------------------
     // 关键点拾取（端点/中点/圆心）—— 端点拾取与推理吸附的共同底座
     // ------------------------------------------------------------------

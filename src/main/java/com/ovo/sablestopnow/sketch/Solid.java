@@ -1306,9 +1306,19 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 if (moved == null || moved.isEmpty()) {
                     continue;
                 }
+                // 克隆切割也要沿它的成轴方向伸出一点，否则切完端面会留薄片。
+                Vector3d axis = null;
+                if (src.shape() instanceof Shape.RevolutionCut rc2 && sk != null) {
+                    axis = Revolve.axisDirection(sk.plane(), rc2.params());
+                } else if (src.shape() instanceof Shape.Cut && sk != null
+                        && sk.plane() != null) {
+                    axis = sk.plane().normal();
+                }
+                final SolidMesh.Mesh extended = axis == null ? moved
+                        : extendMeshAlongAxis(moved, cloneDirection(axis, rot).normalize(), 0.02);
                 cutters.computeIfAbsent(cloneSolid.body(), k -> new ArrayList<>())
                         .add(new CutFeat(null, sk, null, null, src.index(),
-                                List.of(), moved));
+                                List.of(), extended));
                 trace("clone-cut body=" + shortId(cloneSolid.body())
                         + " source=" + src.index() + " cloneIdx=" + cloneSolid.index());
             }
@@ -3893,6 +3903,38 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     }
 
     /** 让旋转切割体沿轴伸出目标两端 margin，避免端面差 0.008 留薄皮。 */
+    private static SolidMesh.Mesh extendMeshAlongAxis(
+            final SolidMesh.Mesh cutter, final Vector3d axis, final double margin) {
+        if (cutter == null || cutter.isEmpty()) {
+            return cutter;
+        }
+        double cmin = Double.MAX_VALUE;
+        double cmax = -Double.MAX_VALUE;
+        for (final SolidMesh.Vertex v : cutter.vertices()) {
+            final double t = v.position().x * axis.x + v.position().y * axis.y
+                    + v.position().z * axis.z;
+            cmin = Math.min(cmin, t);
+            cmax = Math.max(cmax, t);
+        }
+        final double oldLen = cmax - cmin;
+        if (oldLen < 1.0e-9) {
+            return cutter;
+        }
+        final double newMin = cmin - margin;
+        final double newMax = cmax + margin;
+        final double scale = (newMax - newMin) / oldLen;
+        final List<SolidMesh.Vertex> out = new ArrayList<>(cutter.vertices().size());
+        for (final SolidMesh.Vertex v : cutter.vertices()) {
+            final Vector3d p = v.position();
+            final double t = p.x * axis.x + p.y * axis.y + p.z * axis.z;
+            final double nt = newMin + (t - cmin) * scale;
+            out.add(new SolidMesh.Vertex(
+                    new Vector3d(p).fma(nt - t, axis, new Vector3d()),
+                    v.normal(), v.u(), v.v()));
+        }
+        return new SolidMesh.Mesh(out, cutter.indices());
+    }
+
     private static SolidMesh.Mesh extendRevolveAlongAxis(
             final SolidMesh.Mesh cutter, final SolidMesh.Mesh target,
             final SketchPlane plane, final Revolve.Params params,

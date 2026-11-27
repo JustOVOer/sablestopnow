@@ -534,6 +534,7 @@
   "model.sketch.constraint_delete": "删除",
   "model.sketch.snap_constraints": "吸附即约束",
   "model.sketch.constraint_deleted": "已删除该约束",
+  "model.sketch.entity_deleted": "已删除选中的草图图元",
   "model.sketch.snap.grid_point": "网格点 %s",
   "model.sketch.snap.grid_line_u": "竖向格线 u = %s",
   "model.sketch.snap.grid_line_v": "横向格线 v = %s",

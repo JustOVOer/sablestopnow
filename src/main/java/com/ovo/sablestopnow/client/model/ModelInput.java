@@ -567,6 +567,14 @@ public final class ModelInput {
                 if (com.ovo.sablestopnow.client.SketchClient.active()
                         && com.ovo.sablestopnow.client.SketchClient.mode().session() != null
                         && com.ovo.sablestopnow.client.SketchClient.mode().session()
+                                .deleteSelectedEntities()) {
+                    com.ovo.sablestopnow.client.SketchClient.mode().solve();
+                    ModelMode.prompt("model.sketch.entity_deleted");
+                    return true;
+                }
+                if (com.ovo.sablestopnow.client.SketchClient.active()
+                        && com.ovo.sablestopnow.client.SketchClient.mode().session() != null
+                        && com.ovo.sablestopnow.client.SketchClient.mode().session()
                                 .deleteSelectedConstraint()) {
                     com.ovo.sablestopnow.client.SketchClient.mode().solve();
                     ModelMode.prompt("model.sketch.constraint_deleted");

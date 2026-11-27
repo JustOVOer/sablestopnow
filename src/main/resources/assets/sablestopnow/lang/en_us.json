@@ -534,6 +534,7 @@
   "model.sketch.constraint_delete": "Delete",
   "model.sketch.snap_constraints": "Snapping adds constraints",
   "model.sketch.constraint_deleted": "Constraint deleted",
+  "model.sketch.entity_deleted": "Deleted selected sketch entities",
   "model.sketch.snap.grid_point": "Grid point %s",
   "model.sketch.snap.grid_line_u": "Vertical grid line u = %s",
   "model.sketch.snap.grid_line_v": "Horizontal grid line v = %s",

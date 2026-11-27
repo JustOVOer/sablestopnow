@@ -866,7 +866,7 @@ public final class SketchHud {
         // ★ 用户实测："角度尺寸的预览和最终在草图上的显示不一致，预览还是线段尺寸的样式" ✗
         //   ⇒ 角度预览也走**同一套**角度画法（弧线 + 切向箭头 + 两线自身作界线 ✓）
         //   标签位置就用指针 ⇒ 弧半径随指针变化 ⇒ **松手落下的就是看到的** ✓
-        if (shown.labelKey() != null && shown.labelKey().contains("angle")
+        if (false && shown.labelKey() != null && shown.labelKey().contains("angle")
                 && shown.vars() != null && shown.vars().length >= 8 && psub != null) {
             final org.joml.Vector3d angTmp = new org.joml.Vector3d();
             final int angPreviewArgb = session.lockedVariant() >= 0 ? 0xEEFFCC55 : 0x99FFCC55;

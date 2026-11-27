@@ -1636,9 +1636,11 @@ public final class SketchRenderer {
                         final double a1 = Math.atan2(bv - centre[1], bu - centre[0]);
                         // ⚠ 必须用与 Sketch.addArc **同一个** sweep 规则（永远从 a0 逆时针扫到 a1）。
                         // 各写一份的话，预览画的是劣弧、松手出来的是优弧 —— 又是"预览骗人"。
-                        final double sweep = Sketch.sweep(a0, a1);
+                        final double sweep = com.ovo.sablestopnow.sketch.SketchSession
+                                .previewArcSweep(a0, a1);
                         final int segs = Math.max(4,
-                                (int) Math.ceil(CIRCLE_SEGMENTS * sweep / (2.0 * Math.PI)));
+                                (int) Math.ceil(CIRCLE_SEGMENTS * Math.abs(sweep)
+                                        / (2.0 * Math.PI)));
                         Vec3 prev = null;
                         for (int i = 0; i <= segs; i++) {
                             final double ang = a0 + sweep * i / segs;
@@ -2152,8 +2154,9 @@ public final class SketchRenderer {
         }
         // 角度尺寸的几何是圆弧：暂由 HUD 那份画（3D 版另做）⇒ 这里不画，避免两套叠着
         final String lk = shown.labelKey() == null ? "" : shown.labelKey();
-        if (lk.contains("angle")) {
-            return 0;
+        if (lk.contains("angle") && shown.vars() != null && shown.vars().length >= 8) {
+            // 角度预览也画成 3D 草图线条，不用 HUD 的屏幕空间样式。
+            return anglePreview3D(vcq, pose, cameraPos, renderPose, sketch, shown.vars());
         }
         final double[] ends = com.ovo.sablestopnow.sketch.SketchMeasure.endpointsOfVars(
                 sketch, shown.solverKind(), shown.vars());
@@ -2353,6 +2356,58 @@ public final class SketchRenderer {
     private static String lastDim3dDiag = "";
 
     private static String lastQuadDiag = "";
+
+    /** 角度尺寸预览：用 3D 折线画弧 + 两条半径线，风格与草图线条一致。 */
+    private static int anglePreview3D(final VertexConsumer vcq, final PoseStack.Pose pose,
+                                      final Vec3 cameraPos, final Pose3dc renderPose,
+                                      final Sketch sketch, final int[] v) {
+        final double ax0 = sketch.variable(v[0]);
+        final double ay0 = sketch.variable(v[1]);
+        final double ax1 = sketch.variable(v[2]);
+        final double ay1 = sketch.variable(v[3]);
+        final double bx0 = sketch.variable(v[4]);
+        final double by0 = sketch.variable(v[5]);
+        final double bx1 = sketch.variable(v[6]);
+        final double by1 = sketch.variable(v[7]);
+        final double[] ip = intersectUv(ax0, ay0, ax1, ay1, bx0, by0, bx1, by1);
+        if (ip == null) {
+            return 0;
+        }
+        final double[] da = farEnd(ip[0], ip[1], ax0, ay0, ax1, ay1);
+        final double[] db = farEnd(ip[0], ip[1], bx0, by0, bx1, by1);
+        if (da == null || db == null) {
+            return 0;
+        }
+        final double a0 = Math.atan2(da[1], da[0]);
+        final double a1 = Math.atan2(db[1], db[0]);
+        double sweep = a1 - a0;
+        while (sweep > Math.PI) {
+            sweep -= 2.0 * Math.PI;
+        }
+        while (sweep < -Math.PI) {
+            sweep += 2.0 * Math.PI;
+        }
+        final double r = 0.8;
+        final float[] col = PREVIEW_COLOR;
+        int drawn = 0;
+        double pu = ip[0] + Math.cos(a0) * r;
+        double pv = ip[1] + Math.sin(a0) * r;
+        for (int k = 1; k <= 24; k++) {
+            final double ang = a0 + sweep * k / 24.0;
+            final double cu = ip[0] + Math.cos(ang) * r;
+            final double cv = ip[1] + Math.sin(ang) * r;
+            seg3(vcq, pose, cameraPos, renderPose, sketch, pu, pv, cu, cv, col);
+            pu = cu;
+            pv = cv;
+            drawn++;
+        }
+        // 两条半径线（从交点到弧端点），和草图线条同一套 3D 细条。
+        seg3(vcq, pose, cameraPos, renderPose, sketch, ip[0], ip[1],
+                ip[0] + da[0] * r, ip[1] + da[1] * r, col);
+        seg3(vcq, pose, cameraPos, renderPose, sketch, ip[0], ip[1],
+                ip[0] + db[0] * r, ip[1] + db[1] * r, col);
+        return drawn + 2;
+    }
 
     /** 角度尺寸的 3D 弧（半径 0.8 格、16 段折线 + 两端切向箭头）✓ */
     private static int angleDim3D(final VertexConsumer vcq, final PoseStack.Pose pose,

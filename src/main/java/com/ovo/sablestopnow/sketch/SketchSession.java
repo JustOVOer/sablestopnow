@@ -1616,6 +1616,44 @@ public final class SketchSession {
         return new double[] {u, v, 0.0};
     }
 
+    /** 上一次圆弧的走向（180° 附近方向退化时用它，避免来回跳变）。 */
+    @Nullable
+    private static Boolean lastArcClockwise;
+
+    private static final double ARC_180_EPS = Math.toRadians(1.0);
+
+    private static double normSweep(final double a0, final double a1) {
+        double d = a1 - a0;
+        while (d > Math.PI) {
+            d -= 2.0 * Math.PI;
+        }
+        while (d <= -Math.PI) {
+            d += 2.0 * Math.PI;
+        }
+        return d;
+    }
+
+    /** 圆弧走向；180°±1° 内沿用上一次缓存，其余按劣弧方向并更新缓存。 */
+    public static boolean arcClockwise(final double a0, final double a1) {
+        final double d = normSweep(a0, a1);
+        if (Math.abs(Math.abs(d) - Math.PI) <= ARC_180_EPS && lastArcClockwise != null) {
+            return lastArcClockwise;
+        }
+        final boolean cw = d < 0.0;
+        lastArcClockwise = cw;
+        return cw;
+    }
+
+    /** 预览用带符号扫角：只画劣弧，并按缓存方向决定 180° 附近往哪边走。 */
+    public static double previewArcSweep(final double a0, final double a1) {
+        final double d = normSweep(a0, a1);
+        final boolean cw = arcClockwise(a0, a1);
+        if (cw) {
+            return d > 0.0 ? d - 2.0 * Math.PI : d;
+        }
+        return d < 0.0 ? d + 2.0 * Math.PI : d;
+    }
+
     /** 画图元时，把"起点吸到了谁"变成一条真正的约束。 */
     private void constrainToSnap(final int[] newPointVars) {
         KeyPoint snapped = this.pendingSnap;
@@ -2170,7 +2208,7 @@ public final class SketchSession {
         while (delta <= -Math.PI) {
             delta += 2.0 * Math.PI;
         }
-        final boolean clockwise = delta < 0.0;
+        final boolean clockwise = arcClockwise(a0, a1);
         // ★ 诊断（实测"劣弧方向仍不对"✗）：把三次点击与角度差打出来 ✓
         //   ⇒ 一看就知道你的点击序列对应哪种语义 ✓ 再定规则（而不是继续猜 ✓）
         lastArcDiag = String.format(java.util.Locale.ROOT,

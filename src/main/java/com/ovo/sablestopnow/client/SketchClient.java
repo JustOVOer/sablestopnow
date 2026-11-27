@@ -918,7 +918,25 @@ public final class SketchClient {
         if (sketch != null && sketch.plane() != null) {
             // ★ 平面法线是**局部**的 ⇒ 必须按该体的渲染姿态转世界（结构移动/旋转后否则不正）
         alignCameraTo(toWorldNormal(sketch.body(), sketch.plane().normal()));
+            centerCameraOnSketch(sketch);
         }
+    }
+
+    /** 进入草图时把基准点缓动移到屏幕中心（目标点走 ModelCamera 的现有缓动）。 */
+    private static void centerCameraOnSketch(final Sketch sketch) {
+        if (sketch == null || sketch.plane() == null) {
+            return;
+        }
+        final net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        final org.joml.Vector3d local = sketch.plane().origin();
+        org.joml.Vector3d world = new org.joml.Vector3d(local);
+        if (mc != null && mc.level != null && sketch.body() != null) {
+            final var sub = com.ovo.sablestopnow.client.model.BoxPick.sub(mc.level, sketch.body());
+            if (sub != null && sub.renderPose() != null) {
+                world = sub.renderPose().transformPosition(local, new org.joml.Vector3d());
+            }
+        }
+        com.ovo.sablestopnow.client.model.ModelCamera.followTarget(world);
     }
 
     /**
@@ -992,6 +1010,7 @@ public final class SketchClient {
                 String.format(java.util.Locale.ROOT, "%.3f", worldNormal.y),
                 String.format(java.util.Locale.ROOT, "%.3f", worldNormal.z));
         alignCameraTo(worldNormal);
+        centerCameraOnSketch(MODE.working());
         return true;
     }
 
@@ -1095,6 +1114,7 @@ public final class SketchClient {
         }
         SketchRenderer.setEditing(MODE.editingId());
         alignCameraTo(normal);
+        centerCameraOnSketch(MODE.working());
         com.ovo.sablestopnow.SablestopNow.LOGGER.info("[sketch-plane] from feature plane ✓");
         return true;
     }
@@ -1131,6 +1151,7 @@ public final class SketchClient {
         }
         alignCameraTo(worldNormal != null ? worldNormal
                 : toWorldNormal(hit.body(), hit.localNormal()));
+        centerCameraOnSketch(MODE.working());
         // ★ 该面的直线 ⇒ 参考几何（常驻、不可移动、可被约束）✓
         final int refs = MODE.session() == null ? 0 : MODE.session().addReferenceLines(
                 hit.face().segments());

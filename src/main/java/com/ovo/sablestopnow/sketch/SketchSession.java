@@ -2208,7 +2208,7 @@ public final class SketchSession {
         while (delta <= -Math.PI) {
             delta += 2.0 * Math.PI;
         }
-        final boolean clockwise = arcClockwise(a0, a1);
+        final boolean clockwise = delta < 0.0;
         // ★ 诊断（实测"劣弧方向仍不对"✗）：把三次点击与角度差打出来 ✓
         //   ⇒ 一看就知道你的点击序列对应哪种语义 ✓ 再定规则（而不是继续猜 ✓）
         lastArcDiag = String.format(java.util.Locale.ROOT,

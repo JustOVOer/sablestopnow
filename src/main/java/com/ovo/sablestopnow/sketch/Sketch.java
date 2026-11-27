@@ -544,6 +544,10 @@ public final class Sketch {
      * <p>⚠ 一律走 {@link #sweep}：这就是 {@link #addArc} 当初写进去的那条规则，
      * 渲染 / 采样 / 拾取必须共用它，各写一份就会出现"预览是劣弧、松手是优弧"。
      */
+    /** 已存在圆弧在 180° 附近的方向缓存（只影响渲染/求值，不影响画新弧）。 */
+    @Nullable
+    private static Boolean lastArcCwCache;
+
     public double arcSweep(final Entity arc) {
         if (arc.kind() != EntityKind.ARC) {
             return 0.0;
@@ -557,12 +561,20 @@ public final class Sketch {
         //   —— 离线断言已经在守这条（"起点终点相同的圆弧 ⇒ 扫角约 2π" ✓），
         //   一刀切换成负角会把它砍成 0 ✗（我第一版就是这样，门禁立刻报红 ✓）。
         final boolean full = ccw >= 2.0 * Math.PI - 1.0e-9;
+        if (!full && Math.abs(ccw - Math.PI) <= 1.0e-2 && lastArcCwCache != null) {
+            // 已存在的圆弧在 180° 附近不重新猜方向，沿用缓存；画新弧不走这里。
+            return lastArcCwCache ? -Math.PI : Math.PI;
+        }
         final double minor = (ccw > Math.PI && !full) ? ccw - 2.0 * Math.PI : ccw;
         // ★ 需求 ④：**方向位** ✓ —— 鼠标在弦哪一侧，就往哪一侧画劣弧 ✓
         //   几何上给定 圆心+起点+终点，劣弧只有一条 ✓ 想换到另一侧只能**改走向** ✓
         //   cw=true ⇒ 取反（顺时针走那条短弧 ✓）；整圈（full）不取反 ✓ 保持 2π ✓
         if (arc.cw() && !full) {
+            lastArcCwCache = true;
             return -minor;
+        }
+        if (!full) {
+            lastArcCwCache = false;
         }
         return minor;
     }

@@ -770,6 +770,7 @@ public final class SketchSession {
                 .fma(-(ov - Math.round(ov)), plane.axisV(), new Vector3d());
         this.working = new Sketch(UUID.randomUUID(), body, name,
                 new SketchPlane(origin, plane.axisU(), plane.axisV()));
+        resetArcCaches();
         this.tool = Tool.SELECT;
         this.clearVariantLock();
         this.pending.clear();
@@ -779,6 +780,7 @@ public final class SketchSession {
 
     /** 编辑一张已有的草图。 */
     public void edit(final Sketch sketch) {
+        resetArcCaches();
         this.body = sketch.body();
         this.working = sketch;
         this.tool = Tool.SELECT;
@@ -1658,6 +1660,65 @@ public final class SketchSession {
         return d;
     }
 
+    /** 绘制中的圆弧方向缓存：由鼠标绕圆心的移动方向决定。 */
+    @Nullable
+    private static Double lastDrawArcMouseAngle;
+    @Nullable
+    private static Boolean lastDrawArcCw;
+
+    /**
+     * 绘制圆弧时的走向：
+     * - 非 180° 区域严格按当前劣弧方向，并更新缓存；
+     * - 180°±eps 内用鼠标绕圆心移动方向留下的缓存，避免来回跳。
+     */
+    public static boolean arcDrawClockwise(final double a0, final double a1,
+                                           final double centerU, final double centerV,
+                                           final double mouseU, final double mouseV) {
+        final double d = normSweep(a0, a1);
+        // 无缓存时先把当前圆弧方向记下来（不先用鼠标移动覆盖它）。
+        if (lastDrawArcCw == null) {
+            lastDrawArcCw = d < 0.0;
+        }
+        // 180° 附近冻结缓存：本次弧内不再按鼠标移动改方向。
+        if (Math.abs(Math.abs(d) - Math.PI) <= ARC_180_EPS) {
+            return lastDrawArcCw;
+        }
+        // 离开 180° 后才更新：优先鼠标绕圆心的移动方向，否则用当前劣弧方向。
+        final double mouseAng = Math.atan2(mouseV - centerV, mouseU - centerU);
+        if (lastDrawArcMouseAngle == null) {
+            lastDrawArcMouseAngle = mouseAng;
+        } else {
+            final double md = normSweep(lastDrawArcMouseAngle, mouseAng);
+            if (Math.abs(md) > 1.0e-4) {
+                lastDrawArcCw = md < 0.0;
+                lastDrawArcMouseAngle = mouseAng;
+                return lastDrawArcCw;
+            }
+        }
+        lastDrawArcCw = d < 0.0;
+        return lastDrawArcCw;
+    }
+
+    /** 预览用带符号扫角：严格劣弧，只有 180°±eps 才沿用鼠标方向缓存。 */
+    public static double drawArcSweep(final double a0, final double a1,
+                                      final double centerU, final double centerV,
+                                      final double mouseU, final double mouseV) {
+        final double d = normSweep(a0, a1);
+        final boolean cw = arcDrawClockwise(a0, a1, centerU, centerV, mouseU, mouseV);
+        if (cw) {
+            return d > 0.0 ? d - 2.0 * Math.PI : d;
+        }
+        return d < 0.0 ? d + 2.0 * Math.PI : d;
+    }
+
+    /** 进入另一张草图时清空圆弧方向缓存（缓存按草图生命周期算）。 */
+    public static void resetArcCaches() {
+        lastDrawArcCw = null;
+        lastDrawArcMouseAngle = null;
+        lastArcClockwise = null;
+        Sketch.clearArcCwCache();
+    }
+
     /** 圆弧走向；180°±1° 内沿用上一次缓存，其余按劣弧方向并更新缓存。 */
     public static boolean arcClockwise(final double a0, final double a1) {
         final double d = normSweep(a0, a1);
@@ -2233,7 +2294,8 @@ public final class SketchSession {
         while (delta <= -Math.PI) {
             delta += 2.0 * Math.PI;
         }
-        final boolean clockwise = delta < 0.0;
+        final boolean clockwise = arcDrawClockwise(a0, a1, center[0], center[1],
+                hoverU, hoverV);
         // ★ 诊断（实测"劣弧方向仍不对"✗）：把三次点击与角度差打出来 ✓
         //   ⇒ 一看就知道你的点击序列对应哪种语义 ✓ 再定规则（而不是继续猜 ✓）
         lastArcDiag = String.format(java.util.Locale.ROOT,
@@ -2245,6 +2307,7 @@ public final class SketchSession {
         final KeyPoint kpCenter = pickKeyPoint(center[0], center[1], 0.15);
         final Sketch.Entity arc = working.addArcPoints(center[0], center[1],
                 start[0], start[1], end[0], end[1], clockwise);
+        Sketch.setArcCwCache(clockwise);
         // ★ 需求 ④：圆弧改为"**由两条辅助线生成**" ✓（客户端开启；默认关 ⇒ 离线用例不变 ✓）
         final int[] v = arc.vars();
         if (arcHandles) {

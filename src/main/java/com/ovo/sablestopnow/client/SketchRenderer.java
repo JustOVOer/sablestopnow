@@ -1636,11 +1636,8 @@ public final class SketchRenderer {
                         final double a1 = Math.atan2(bv - centre[1], bu - centre[0]);
                         // ⚠ 必须用与 Sketch.addArc **同一个** sweep 规则（永远从 a0 逆时针扫到 a1）。
                         // 各写一份的话，预览画的是劣弧、松手出来的是优弧 —— 又是"预览骗人"。
-                        double sweep = Sketch.sweep(a0, a1);
-                        // 画新弧严格按劣弧；180° 缓存只用于已存在的图元。
-                        if (sweep > Math.PI) {
-                            sweep -= 2.0 * Math.PI;
-                        }
+                        final double sweep = com.ovo.sablestopnow.sketch.SketchSession
+                                .drawArcSweep(a0, a1, centre[0], centre[1], bu, bv);
                         final int segs = Math.max(4,
                                 (int) Math.ceil(CIRCLE_SEGMENTS * Math.abs(sweep)
                                         / (2.0 * Math.PI)));

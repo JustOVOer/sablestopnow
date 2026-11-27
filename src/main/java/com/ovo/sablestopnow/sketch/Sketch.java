@@ -548,35 +548,32 @@ public final class Sketch {
     @Nullable
     private static Boolean lastArcCwCache;
 
+    /** 画弧落点时把最终方向写进缓存，供恰好 180° 的显示使用。 */
+    public static void setArcCwCache(final boolean cw) {
+        lastArcCwCache = cw;
+    }
+
+    public static void clearArcCwCache() {
+        lastArcCwCache = null;
+    }
+
     public double arcSweep(final Entity arc) {
         if (arc.kind() != EntityKind.ARC) {
             return 0.0;
         }
-        // ★ 用户要求：**圆弧只画劣弧** ✓（"圆弧只画劣弧" 实测反馈 ✓）
-        //   `sweep(...)` 返回逆时针正角 (0, 2π] ✗ —— 起点/终点顺序一反过来就是**优弧** ✓
-        //   ⇒ 超过 π 就换成 `ccw − 2π`（负角 = 顺时针走**短的那一段** ✓）。
-        //   渲染 / 采样 / 拾取共用这个函数（类注释里就写着必须共用 ✓）⇒ 三处自动一致 ✓。
         final double ccw = sweep(arcStart(arc), arcEnd(arc));
-        // ⚠ 例外：起点与终点**几乎重合**时是有意义的"整圈"（ccw ≈ 2π）✓
-        //   —— 离线断言已经在守这条（"起点终点相同的圆弧 ⇒ 扫角约 2π" ✓），
-        //   一刀切换成负角会把它砍成 0 ✗（我第一版就是这样，门禁立刻报红 ✓）。
         final boolean full = ccw >= 2.0 * Math.PI - 1.0e-9;
-        if (!full && Math.abs(ccw - Math.PI) <= 1.0e-2 && lastArcCwCache != null) {
-            // 已存在的圆弧在 180° 附近不重新猜方向，沿用缓存；画新弧不走这里。
-            return lastArcCwCache ? -Math.PI : Math.PI;
+        if (full) {
+            return 2.0 * Math.PI;
         }
-        final double minor = (ccw > Math.PI && !full) ? ccw - 2.0 * Math.PI : ccw;
-        // ★ 需求 ④：**方向位** ✓ —— 鼠标在弦哪一侧，就往哪一侧画劣弧 ✓
-        //   几何上给定 圆心+起点+终点，劣弧只有一条 ✓ 想换到另一侧只能**改走向** ✓
-        //   cw=true ⇒ 取反（顺时针走那条短弧 ✓）；整圈（full）不取反 ✓ 保持 2π ✓
-        if (arc.cw() && !full) {
-            lastArcCwCache = true;
-            return -minor;
+        // 180°：用最近一次画弧/已有弧的方向缓存，避免正负号跳变。
+        if (Math.abs(ccw - Math.PI) <= 1.0e-2) {
+            final boolean cw = lastArcCwCache != null ? lastArcCwCache : arc.cw();
+            return cw ? -Math.PI : Math.PI;
         }
-        if (!full) {
-            lastArcCwCache = false;
-        }
-        return minor;
+        // 其余情况**永远走短弧**：ccw 超过 π 就变成负的短弧。
+        // 不再让 cw 位二次翻转 —— 否则 >180° 时预览更新了，落地却走回长弧。
+        return ccw > Math.PI ? ccw - 2.0 * Math.PI : ccw;
     }
 
     /**

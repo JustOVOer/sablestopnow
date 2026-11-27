@@ -623,8 +623,16 @@ public final class SketchHud {
             if (d.labelKey() != null && d.labelKey().contains("angle")
                     && d.constraintIndex() >= 0
                     && d.constraintIndex() < working.constraints().size()) {
-                // 角度尺寸的弧/箭头由 SketchRenderer 的 3D 画法负责，
-                // HUD 不再画屏幕像素线，避免和草图线条叠出“残留像素线”。
+                // 角度弧由 3D 画法负责；HUD 只保留可点击/可编辑的文字标签。
+                final String text = String.format(java.util.Locale.ROOT, "%.1f°",
+                        Math.abs(d.value()));
+                final int angArgb = d.driving() ? 0xFFE6E6E6 : 0xFF8C93A8;
+                final int textArgb = hovered ? 0xFFFFCC55 : angArgb;
+                final int tx = (int) screen[0];
+                final int ty = (int) screen[1];
+                com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, mc.font, text,
+                        tx, ty, textArgb, 1.0f, true);
+                LABEL_HITS.add(new LabelHit(d.constraintIndex(), d.driving(), tx, ty));
                 continue;
             }
             // ---- 尺寸线（SolidWorks 的画法：线**穿过标签**，两端有界线与箭头 ✓）----
@@ -863,15 +871,15 @@ public final class SketchHud {
         // ★ 用户实测："角度尺寸的预览和最终在草图上的显示不一致，预览还是线段尺寸的样式" ✗
         //   ⇒ 角度预览也走**同一套**角度画法（弧线 + 切向箭头 + 两线自身作界线 ✓）
         //   标签位置就用指针 ⇒ 弧半径随指针变化 ⇒ **松手落下的就是看到的** ✓
-        if (false && shown.labelKey() != null && shown.labelKey().contains("angle")
-                && shown.vars() != null && shown.vars().length >= 8 && psub != null) {
-            final org.joml.Vector3d angTmp = new org.joml.Vector3d();
-            final int angPreviewArgb = session.lockedVariant() >= 0 ? 0xEEFFCC55 : 0x99FFCC55;
-            drawAngularDimension(g, working, psub, mc, angTmp, shown.vars(),
-                    new double[] {guiX(mc) + OFFSET_X, guiY(mc) + OFFSET_Y},
-                    angPreviewArgb, angPreviewArgb,
-                    shown.value(), -1, true);
-            return; // 不再走下面的线性预览 ✓
+        if (shown.labelKey() != null && shown.labelKey().contains("angle")
+                && shown.vars() != null && shown.vars().length >= 8) {
+            // 角度弧由 3D 画法负责；预览只画黄色数值，跟随鼠标。
+            final String text = String.format(java.util.Locale.ROOT, "%.1f°",
+                    Math.abs(shown.value()));
+            com.ovo.sablestopnow.client.gui.lib.UiDraw.text(g, mc.font, text,
+                    guiX(mc) + OFFSET_X, guiY(mc) + OFFSET_Y,
+                    0xFFFFCC55, 1.0f, true);
+            return;
         }
         //  线性/半径类预览已改由 SketchRenderer.drawSmartPreview3D 用 3D 棒绘制 ✓
         //   HUD 只保留**角度**预览（圆弧几何 3D 版另做）

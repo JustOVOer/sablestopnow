@@ -1359,12 +1359,19 @@ public final class SketchSession {
 
     /** Delete 键：删掉当前选中的所有草图图元。 */
     public boolean deleteSelectedEntities() {
-        if (working == null || selection.isEmpty()) {
+        if (working == null) {
+            return false;
+        }
+        final java.util.List<Sketch.Entity> targets = selection.isEmpty()
+                && selectedEntity != null
+                        ? java.util.List.of(selectedEntity)
+                        : java.util.List.copyOf(selection);
+        if (targets.isEmpty()) {
             return false;
         }
         pushUndo();
         boolean removed = false;
-        for (final Sketch.Entity e : java.util.List.copyOf(selection)) {
+        for (final Sketch.Entity e : targets) {
             if (working.removeEntity(e)) {
                 selection.remove(e);
                 removed = true;

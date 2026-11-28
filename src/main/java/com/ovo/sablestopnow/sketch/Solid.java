@@ -4035,8 +4035,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
         if (cur != null || loop.size() != edges.size() || loop.size() < 3) {
             return null;
         }
-        // 凸性检查：凹边界如果合并，fan 三角化会跑出原区域。
+        // 凸性检查：边界绕序可能和平面法线同向或反向，只要求**所有拐角同号**；
+        // 凹边界如果合并，fan 三角化会跑出原区域。
         final Csg.V3 n = group.get(0).plane.normal;
+        int turnSign = 0;
         for (int i = 0; i < loop.size(); i++) {
             final Csg.V3 a = loop.get(i).pos();
             final Csg.V3 b = loop.get((i + 1) % loop.size()).pos();
@@ -4046,9 +4048,19 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
             final double cx = ab.y() * bc.z() - ab.z() * bc.y();
             final double cy = ab.z() * bc.x() - ab.x() * bc.z();
             final double cz = ab.x() * bc.y() - ab.y() * bc.x();
-            if (cx * n.x() + cy * n.y() + cz * n.z() < -1.0e-9) {
+            final double dot = cx * n.x() + cy * n.y() + cz * n.z();
+            if (Math.abs(dot) < 1.0e-9) {
+                continue;
+            }
+            final int s = dot > 0 ? 1 : -1;
+            if (turnSign == 0) {
+                turnSign = s;
+            } else if (turnSign != s) {
                 return null;
             }
+        }
+        if (turnSign < 0) {
+            java.util.Collections.reverse(loop);
         }
         return List.of(new Csg.Polygon(loop, group.get(0).plane));
     }

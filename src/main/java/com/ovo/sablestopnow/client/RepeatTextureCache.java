@@ -223,13 +223,23 @@ public final class RepeatTextureCache {
             final int h = src.getHeight();
             final int b = Math.max(1, Math.min(w, h) / 16);
             final NativeImage loadedConnected = loadConnectedImage(mc, sprite, blockId);
+            final int[] tile = loadedConnected == null ? null
+                    : chooseBorderlessTile(loadedConnected, w, h);
+            final int tileCols = loadedConnected == null ? 1 : Math.max(1, loadedConnected.getWidth() / w);
+            final int tileRows = loadedConnected == null ? 1 : Math.max(1, loadedConnected.getHeight() / h);
             final NativeImage base = new NativeImage(src.format(), w, h, false);
             final NativeImage ring = new NativeImage(src.format(), w, h, false);
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
                     final int sx = Math.max(b, Math.min(w - 1 - b, x));
                     final int sy = Math.max(b, Math.min(h - 1 - b, y));
-                    if (loadedConnected != null && loadedConnected.getWidth() == w
+                    if (loadedConnected != null && tile != null
+                            && loadedConnected.getWidth() >= tileCols * w
+                            && loadedConnected.getHeight() >= tileRows * h) {
+                        base.setPixelRGBA(x, y, loadedConnected.getPixelRGBA(
+                                tile[0] * w + x, tile[1] * h + y));
+                    } else if (loadedConnected != null
+                            && loadedConnected.getWidth() == w
                             && loadedConnected.getHeight() == h) {
                         base.setPixelRGBA(x, y, loadedConnected.getPixelRGBA(x, y));
                     } else {
@@ -291,6 +301,52 @@ public final class RepeatTextureCache {
         } catch (final Throwable ignored) {
         }
         return null;
+    }
+
+    /** 从 Create 的 CTM 图集里挑“四周都连接”的无边框 tile：边缘与内圈最接近。 */
+    @Nullable
+    private static int[] chooseBorderlessTile(final NativeImage img,
+                                              final int tw, final int th) {
+        final int cols = img.getWidth() / tw;
+        final int rows = img.getHeight() / th;
+        if (cols <= 1 && rows <= 1) {
+            return null;
+        }
+        int bestI = -1;
+        int bestJ = -1;
+        long bestDiff = Long.MAX_VALUE;
+        for (int j = 0; j < rows; j++) {
+            for (int i = 0; i < cols; i++) {
+                boolean opaque = true;
+                long diff = 0;
+                int count = 0;
+                for (int y = 0; y < th; y++) {
+                    for (int x = 0; x < tw; x++) {
+                        final int argb = img.getPixelRGBA(i * tw + x, j * th + y);
+                        final int a = (argb >>> 24) & 0xFF;
+                        if (a < 40) {
+                            opaque = false;
+                        }
+                        final int ix = Math.max(1, Math.min(tw - 2, x));
+                        final int iy = Math.max(1, Math.min(th - 2, y));
+                        final int inner = img.getPixelRGBA(i * tw + ix, j * th + iy);
+                        final boolean edge = x == 0 || y == 0 || x == tw - 1 || y == th - 1;
+                        if (edge) {
+                            diff += Math.abs(((argb >>> 16) & 0xFF) - ((inner >>> 16) & 0xFF))
+                                    + Math.abs(((argb >>> 8) & 0xFF) - ((inner >>> 8) & 0xFF))
+                                    + Math.abs((argb & 0xFF) - (inner & 0xFF));
+                            count++;
+                        }
+                    }
+                }
+                if (opaque && count > 0 && diff < bestDiff) {
+                    bestDiff = diff;
+                    bestI = i;
+                    bestJ = j;
+                }
+            }
+        }
+        return bestI < 0 ? null : new int[] {bestI, bestJ};
     }
 
     private static ResourceLocation registerRepeat(final Minecraft mc, final String name,

@@ -2025,24 +2025,19 @@ public final class SketchRenderer {
             out.addAll(com.ovo.sablestopnow.sketch.Extrude.prismEdges(sk, cut.params()));
         } else if (solid.shape() instanceof final Solid.Shape.RevolutionCut rc && sk != null) {
             out.addAll(com.ovo.sablestopnow.sketch.Revolve.edges(sk, rc.params()));
-        } else if (solid.shape() instanceof Solid.Shape.Fillet) {
-            final java.util.Map<UUID, Solid> byId = new java.util.HashMap<>();
-            for (final Solid s : SolidClientState.ofBody(level, solid.body())) {
-                byId.put(s.id(), s);
-            }
-            for (final double[] b : solid.filletBoxes(byId)) {
-                final double[] xs = {b[0], b[3]};
-                final double[] ys = {b[1], b[4]};
-                final double[] zs = {b[2], b[5]};
-                for (int i = 0; i < 2; i++) {
-                    for (int j = 0; j < 2; j++) {
-                        out.add(new Vector3d[] {new Vector3d(xs[0], ys[i], zs[j]),
-                                new Vector3d(xs[1], ys[i], zs[j])});
-                        out.add(new Vector3d[] {new Vector3d(xs[i], ys[0], zs[j]),
-                                new Vector3d(xs[i], ys[1], zs[j])});
-                        out.add(new Vector3d[] {new Vector3d(xs[i], ys[j], zs[0]),
-                                new Vector3d(xs[i], ys[j], zs[1])});
+        } else if (solid.shape() instanceof final Solid.Shape.Fillet fillet) {
+            // 圆角高亮直接画被选中的棱；用 filletBoxes 会把“要挖掉的楔块”
+            // 画到材料外面去，看起来像偏到拉伸体之外。
+            for (final Solid.Shape.EdgeRef ref : fillet.edges()) {
+                if (ref.isCurve()) {
+                    for (final double[] sg : ref.curveSegs()) {
+                        out.add(new Vector3d[] {new Vector3d(sg[0], sg[1], sg[2]),
+                                new Vector3d(sg[3], sg[4], sg[5])});
                     }
+                } else {
+                    out.add(new Vector3d[] {
+                            new Vector3d(ref.ax(), ref.ay(), ref.az()),
+                            new Vector3d(ref.bx(), ref.by(), ref.bz())});
                 }
             }
         } else if (sk != null) {
@@ -2195,10 +2190,28 @@ public final class SketchRenderer {
         final double off = Math.abs(perp) < DIM_OFFSET
                 ? (perp < 0.0 ? -DIM_OFFSET : DIM_OFFSET)
                 : perp;
-        final double a1 = u1 + du * off;
-        final double b1 = v1 + dv * off;
-        final double a2 = u2 + du * off;
-        final double b2 = v2 + dv * off;
+        final double a1;
+        final double b1;
+        final double a2;
+        final double b2;
+        if (lk.contains("horizontal")) {
+            final double lineV = midV + off;
+            a1 = u1;
+            b1 = lineV;
+            a2 = u2;
+            b2 = lineV;
+        } else if (lk.contains("vertical")) {
+            final double lineU = midU + off;
+            a1 = lineU;
+            b1 = v1;
+            a2 = lineU;
+            b2 = v2;
+        } else {
+            a1 = u1 + du * off;
+            b1 = v1 + dv * off;
+            a2 = u2 + du * off;
+            b2 = v2 + dv * off;
+        }
         int drawn = 0;
         seg3(vcq, pose, cameraPos, renderPose, sketch, a1, b1, a2, b2, SMART_PREVIEW_COLOR);
         drawn++;
@@ -2293,10 +2306,28 @@ public final class SketchRenderer {
                 }
             }
             // 尺寸线两端（几何点 + 偏移）✓
-            final double a1 = u1 + du;
-            final double b1 = v1 + dv;
-            final double a2 = u2 + du;
-            final double b2 = v2 + dv;
+            final double a1;
+            final double b1;
+            final double a2;
+            final double b2;
+            if (horiz) {
+                final double lineV = midV + dv;
+                a1 = u1;
+                b1 = lineV;
+                a2 = u2;
+                b2 = lineV;
+            } else if (vert) {
+                final double lineU = midU + du;
+                a1 = lineU;
+                b1 = v1;
+                a2 = lineU;
+                b2 = v2;
+            } else {
+                a1 = u1 + du;
+                b1 = v1 + dv;
+                a2 = u2 + du;
+                b2 = v2 + dv;
+            }
             // ★ 发布数字的位置：拖动时**就是指针拖到的点**（数字跟手 ✓）；
             //   没拖动时 = 尺寸线中点（两条界线之间 ✓）。
             DIM_TEXT_ANCHORS.put(d.constraintIndex(), labelOv != null

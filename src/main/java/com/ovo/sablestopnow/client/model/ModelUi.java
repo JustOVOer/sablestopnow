@@ -97,9 +97,10 @@ public final class ModelUi {
         }
         // 选择标记层先开：它是 HUD 层里最底下的一层，面板会画在它上面（层顺序 = 注册顺序）
         buildPicks();
-        buildTop();
+        // 左右栏先注册、上边栏后注册 ⇒ 上边栏始终画在最上层，动画期间也不会被侧栏盖住。
         buildTree();
         buildLeft();
+        buildTop();
         buildHud();
         refreshLeftPanel();
     }
@@ -163,7 +164,6 @@ public final class ModelUi {
             openPanels();
             return;
         }
-        layoutTopBetweenSides();
         if (--refreshCountdown > 0) {
             return;
         }
@@ -1497,28 +1497,6 @@ public final class ModelUi {
         if (treeLayer != null) {
             treeLayer.root.padding(4, top, 4, 4);
         }
-    }
-
-    /**
-     * 左右栏展开动画期间，上边栏也要按**当前动画宽度**让出空间；
-     * 否则动画阶段左右栏会盖住上边栏，只有动画结束才突然避让。
-     */
-    private static void layoutTopBetweenSides() {
-        final UiLayer top = Ui.layer(LAYER_TOP);
-        if (top == null) {
-            return;
-        }
-        int left = 0;
-        final UiLayer leftLayer = Ui.layer(LAYER_LEFT);
-        if (leftLayer != null && leftLayer.visible && leftPanelRef != null) {
-            left = Math.max(0, leftPanelRef.w);
-        }
-        int right = 0;
-        final UiLayer treeLayer = Ui.layer(LAYER_TREE);
-        if (treeLayer != null && treeLayer.visible && treePanelRef != null) {
-            right = Math.max(0, treePanelRef.w);
-        }
-        top.root.padding(left, 0, right, 0);
     }
 
     /** 树：模型 → [配合 / 属性 / 可控施力点]。 */

@@ -1062,7 +1062,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 return meshOverride;
             }
             if (revolve != null) {
-                return Revolve.mesh(sketch, revolve, 0.0);
+                return Revolve.mesh(sketch, revolve);
             }
             return SolidMesh.build(sketch, params);
         }
@@ -1269,7 +1269,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 if (src.shape() instanceof final Shape.Cut cut) {
                     mm = SolidMesh.build(sk, cut.params());
                 } else if (src.shape() instanceof final Shape.RevolutionCut rc) {
-                    mm = Revolve.mesh(sk, rc.params(), 0.0);
+                    mm = Revolve.mesh(sk, rc.params());
                 } else {
                     mm = src.mesh(sk);
                 }
@@ -1295,7 +1295,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 if (src.shape() instanceof final Shape.Cut cut && sk != null) {
                     base = SolidMesh.build(sk, cut.params());
                 } else if (src.shape() instanceof final Shape.RevolutionCut rc && sk != null) {
-                    base = Revolve.mesh(sk, rc.params(), 0.0);
+                    base = Revolve.mesh(sk, rc.params());
                 } else {
                     continue;
                 }
@@ -1994,7 +1994,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 }
                 if (src.shape() instanceof final Shape.RevolutionCut rc
                         && srcSketch != null) {
-                    final SolidMesh.Mesh cm = Revolve.mesh(srcSketch, rc.params(), 0.0);
+                    final SolidMesh.Mesh cm = Revolve.mesh(srcSketch, rc.params());
                     if (cm != null && !cm.isEmpty()) {
                         cutMeshes.add(reflectMesh(cm, o, n));
                     }
@@ -2135,7 +2135,7 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                 } else if (src.shape() instanceof Shape.RevolutionCut rc) {
                     cutWireRaw.addAll(Revolve.edges(srcSketch, rc.params()));
-                    final SolidMesh.Mesh cm = Revolve.mesh(srcSketch, rc.params(), 0.0);
+                    final SolidMesh.Mesh cm = Revolve.mesh(srcSketch, rc.params());
                     if (cm != null && !cm.isEmpty()) {
                         cutMeshesRaw.add(cm);
                     }

@@ -71,7 +71,7 @@ public final class RevolutionCutProbe {
                 if (cutSketch == null) {
                     continue;
                 }
-                final SolidMesh.Mesh cutterMesh = Revolve.mesh(cutSketch, rc.params(), 0.02);
+                final SolidMesh.Mesh cutterMesh = Revolve.mesh(cutSketch, rc.params());
                 if (cutterMesh == null || cutterMesh.isEmpty()) {
                     continue;
                 }

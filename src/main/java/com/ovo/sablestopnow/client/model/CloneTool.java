@@ -381,7 +381,7 @@ public final class CloneTool {
         if (solid.shape() instanceof final Solid.Shape.Cut cut) {
             mesh = com.ovo.sablestopnow.sketch.SolidMesh.build(sk, cut.params());
         } else if (solid.shape() instanceof final Solid.Shape.RevolutionCut rc) {
-            mesh = com.ovo.sablestopnow.sketch.Revolve.mesh(sk, rc.params(), 0.0);
+            mesh = com.ovo.sablestopnow.sketch.Revolve.mesh(sk, rc.params());
         } else if (solid.shape() instanceof Solid.Shape.Fillet) {
             final java.util.Map<java.util.UUID, Solid> byId = new java.util.HashMap<>();
             for (final Solid s : SolidClientState.ofBody(level, solid.body())) {

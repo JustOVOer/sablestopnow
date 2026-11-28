@@ -47,7 +47,7 @@ public final class ManifoldRevolveProbe {
         }
         final Revolve.Params p = new Revolve.Params(0, 0, 0, 1, 360, 1);
         long t = System.nanoTime();
-        SolidMesh.Mesh m = Revolve.mesh(sk, p, 0.0);
+        SolidMesh.Mesh m = Revolve.mesh(sk, p);
         report(name + " sketch-native", m, t);
     }
 

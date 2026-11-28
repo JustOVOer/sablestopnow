@@ -375,16 +375,13 @@ public final class SketchRenderer {
                     ? SolidTextureCache.resolve(look.blockId()) : null;
             if (faces != null && !placed.mesh().isEmpty() && placed.planeNormal() != null) {
                 final com.ovo.sablestopnow.client.RepeatTextureCache.Connected ctm =
-                        CTM_BORDERS_ENABLED
-                                && (look.connected() || com.ovo.sablestopnow.client.RepeatTextureCache
-                                .hasConnectedVariant(look.blockId()))
+                        look.connected()
                                 ? com.ovo.sablestopnow.client.RepeatTextureCache.connected(
                                         look.blockId())
                                 : null;
-                // 有“无边框底图”时不再内缩；回退路线才用 sprite 内缩近似。
-                final SolidTextureCache.Faces renderFaces =
-                        CTM_BORDERS_ENABLED && ctm != null
-                                ? insetFaces(faces, 0.0625) : faces;
+                // 阶段一：只在玩家显式开启“连接纹理”时替换为无边框底图；
+                // 不自动按 hasConnectedVariant 改所有同材质模型。
+                final SolidTextureCache.Faces renderFaces = faces;
                 // ⚠ **REPEAT 贴图路线**下每个实体可能是**不同的**贴图（不同方块），
                 //   所以各自用自己的 immediate 源与 RenderType ——
                 //   共用同一个 BufferSource 去取不同 RenderType 会**结束掉前一个 builder**

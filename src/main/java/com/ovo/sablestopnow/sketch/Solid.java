@@ -1948,6 +1948,14 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                 }
             }
+            // 没有切割的实体也走同一层“平面高 eps 合并”；否则纯拉伸的平面
+            // 仍会保留原始扇形三角化。
+            if (!cut && mesh != null && !mesh.isEmpty()) {
+                final List<Csg.Polygon> plain = CsgMesh.fromMesh(mesh, null);
+                if (!plain.isEmpty()) {
+                    mesh = CsgMesh.toMesh(mergePlanarFaces(plain, 1.0e-2));
+                }
+            }
             final long csgMs = (System.nanoTime() - tCsg0) / 1_000_000L;
             // ★ bug ⑨：缓存**评估后**的几何（已扣切割、已倒圆角），供镜像/阵列复用 ✓
             evalById.put(solid.id(), new Eval(boxes, drawnEdges, mesh));

@@ -349,7 +349,10 @@ public final class PatternTool {
                                 ? com.ovo.sablestopnow.sketch.Extrude.prismEdges(sk, c.params())
                                 : src.shape() instanceof final Solid.Shape.RevolutionCut r
                                         ? com.ovo.sablestopnow.sketch.Revolve.edges(sk, r.params())
+                                : src.shape() instanceof Solid.Shape.Fillet
+                                        ? src.filletWireEdges()
                                         : src.edges(sk);
+
                 for (final double[] off : offsets) {
                     for (final Vector3d[] e : wire) {
                         segs.add(new FeaturePreview.Seg(

@@ -2590,7 +2590,9 @@ public final class ModelUi {
                                     ? com.ovo.sablestopnow.sketch.Extrude.prismEdges(sk, c.params())
                                     : src.shape() instanceof final com.ovo.sablestopnow.sketch.Solid.Shape.RevolutionCut r
                                             ? com.ovo.sablestopnow.sketch.Revolve.edges(sk, r.params())
-                                            : src.edges(sk);
+                                            : src.shape() instanceof com.ovo.sablestopnow.sketch.Solid.Shape.Fillet
+                                                    ? src.filletWireEdges()
+                                                    : src.edges(sk);
                     for (final org.joml.Vector3d[] e : wire) {
                         segs.add(new com.ovo.sablestopnow.client.model.FeaturePreview.Seg(
                                 com.ovo.sablestopnow.sketch.Solid.reflectPoint(e[0], o, n),

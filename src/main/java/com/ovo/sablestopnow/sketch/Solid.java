@@ -467,6 +467,26 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
      * <p>对每条棱：相邻两面取"盖面法线（草图平面法线）"与"侧面法线（棱方向 × 盖面法线）"，
      * 交给 {@link FilletGeom} 算阶梯盒 ✓（凸棱假设；凹棱/斜棱返回空 ⇒ 该棱不生效）
      */
+    /** 圆角特征引用的实际棱线（预览/高亮用，不偏移到材料外）。 */
+    public java.util.List<Vector3d[]> filletWireEdges() {
+        final java.util.List<Vector3d[]> out = new ArrayList<>();
+        if (!(this.shape instanceof final Shape.Fillet f)) {
+            return out;
+        }
+        for (final Shape.EdgeRef ref : f.edges()) {
+            if (ref.isCurve()) {
+                for (final double[] sg : ref.curveSegs()) {
+                    out.add(new Vector3d[] {new Vector3d(sg[0], sg[1], sg[2]),
+                            new Vector3d(sg[3], sg[4], sg[5])});
+                }
+            } else {
+                out.add(new Vector3d[] {new Vector3d(ref.ax(), ref.ay(), ref.az()),
+                        new Vector3d(ref.bx(), ref.by(), ref.bz())});
+            }
+        }
+        return out;
+    }
+
     public java.util.List<double[]> filletBoxes(final java.util.Map<UUID, Solid> byId) {
         final java.util.List<double[]> out = new java.util.ArrayList<>();
         if (!(this.shape instanceof final Shape.Fillet f) || byId == null) {

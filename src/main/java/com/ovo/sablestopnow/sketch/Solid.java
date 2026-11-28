@@ -3948,10 +3948,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 continue;
             }
             final Csg.V3 n = p.plane.normal;
-            final String key = Math.round(n.x() * 1.0e4) + ","
-                    + Math.round(n.y() * 1.0e4) + ","
-                    + Math.round(n.z() * 1.0e4) + ","
-                    + Math.round(p.plane.w * 1.0e3);
+            final String key = Math.round(n.x() * 1.0e3) + ","
+                    + Math.round(n.y() * 1.0e3) + ","
+                    + Math.round(n.z() * 1.0e3) + ","
+                    + Math.round(p.plane.w * 1.0e2);
             groups.computeIfAbsent(key, k -> new ArrayList<>()).add(p);
         }
         if (groups.size() == in.size()) {
@@ -3965,10 +3965,10 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                 continue;
             }
             final Csg.V3 n = p.plane == null ? null : p.plane.normal;
-            final String key = n == null ? null : Math.round(n.x() * 1.0e4) + ","
-                    + Math.round(n.y() * 1.0e4) + ","
-                    + Math.round(n.z() * 1.0e4) + ","
-                    + Math.round(p.plane.w * 1.0e3);
+            final String key = n == null ? null : Math.round(n.x() * 1.0e3) + ","
+                    + Math.round(n.y() * 1.0e3) + ","
+                    + Math.round(n.z() * 1.0e3) + ","
+                    + Math.round(p.plane.w * 1.0e2);
             final List<Csg.Polygon> group = key == null ? null : groups.get(key);
             if (group == null || group.size() < 2) {
                 out.add(p);

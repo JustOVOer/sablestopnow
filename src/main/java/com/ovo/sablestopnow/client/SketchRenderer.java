@@ -2152,10 +2152,10 @@ public final class SketchRenderer {
         if (lk.contains("angle") && shown.vars() != null && shown.vars().length >= 8) {
             return anglePreview3D(vcq, pose, cameraPos, renderPose, sketch, shown.vars());
         }
-        final boolean horiz = sk == com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL_DISTANCE
+        final boolean horiz = sk == com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL_DISTANCE
                 || sk == com.ovo.sablestopnow.sketch.SketchSolver.HPOINT_LINE_DISTANCE
                 || lk.contains("horizontal");
-        final boolean vert = sk == com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL_DISTANCE
+        final boolean vert = sk == com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL_DISTANCE
                 || sk == com.ovo.sablestopnow.sketch.SketchSolver.VPOINT_LINE_DISTANCE
                 || lk.contains("vertical");
         final double[] ends = com.ovo.sablestopnow.sketch.SketchMeasure.endpointsOfVars(
@@ -2268,12 +2268,12 @@ public final class SketchRenderer {
             final double v2 = ends[3];
             final String lk = d.labelKey() == null ? "" : d.labelKey();
             final boolean horiz = d.solverKind()
-                    == com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL_DISTANCE
+                    == com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL_DISTANCE
                     || d.solverKind()
                     == com.ovo.sablestopnow.sketch.SketchSolver.HPOINT_LINE_DISTANCE
                     || lk.contains("horizontal");
             final boolean vert = d.solverKind()
-                    == com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL_DISTANCE
+                    == com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL_DISTANCE
                     || d.solverKind()
                     == com.ovo.sablestopnow.sketch.SketchSolver.VPOINT_LINE_DISTANCE
                     || lk.contains("vertical");

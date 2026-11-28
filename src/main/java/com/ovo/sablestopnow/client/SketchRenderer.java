@@ -374,13 +374,16 @@ public final class SketchRenderer {
             final SolidTextureCache.Faces faces = look.hasTexture()
                     ? SolidTextureCache.resolve(look.blockId()) : null;
             if (faces != null && !placed.mesh().isEmpty() && placed.planeNormal() != null) {
+                final boolean hasConnected =
+                        com.ovo.sablestopnow.client.RepeatTextureCache
+                                .hasConnectedVariant(look.blockId());
                 final com.ovo.sablestopnow.client.RepeatTextureCache.Connected ctm =
-                        look.connected()
+                        (look.connected() || hasConnected)
                                 ? com.ovo.sablestopnow.client.RepeatTextureCache.connected(
                                         look.blockId())
                                 : null;
-                // 阶段一：只在玩家显式开启“连接纹理”时替换为无边框底图；
-                // 不自动按 hasConnectedVariant 改所有同材质模型。
+                // 阶段一：有 _connected 连接的材质自动用无边框底图填充；
+                // 显式勾选“连接纹理”也走同一条路。边框仍然不画。
                 final SolidTextureCache.Faces renderFaces = faces;
                 // ⚠ **REPEAT 贴图路线**下每个实体可能是**不同的**贴图（不同方块），
                 //   所以各自用自己的 immediate 源与 RenderType ——

@@ -468,8 +468,7 @@ public final class SketchSession {
     /**
      * 把"显示值"换算成**求解器要的有符号值** ✓（水平/竖直尺寸专用）。
      *
-     * <p>kind 15 实际约束 Δy、kind 16 实际约束 Δx。
-     * 玩家给的正数表示"**大小**" ⇒ 方向沿用**当前几何**的符号 ⇒ 落下/改值都不会镜像翻转 ✓
+     * <p>kind 15 约束 Δx、kind 16 约束 Δy；求解器残差为 p0−p1−d。
      */
     private double signedAxisValue(final int kind, final double value, final int[] vars) {
         if (vars == null || vars.length < 4 || this.working == null) {
@@ -477,11 +476,11 @@ public final class SketchSession {
         }
         final double abs = Math.abs(value);
         if (kind == SketchSolver.HORIZONTAL_DISTANCE) {
-            final double cur = this.working.variable(vars[3]) - this.working.variable(vars[1]);
+            final double cur = this.working.variable(vars[0]) - this.working.variable(vars[2]);
             return cur < 0 ? -abs : abs;
         }
         if (kind == SketchSolver.VERTICAL_DISTANCE) {
-            final double cur = this.working.variable(vars[2]) - this.working.variable(vars[0]);
+            final double cur = this.working.variable(vars[1]) - this.working.variable(vars[3]);
             return cur < 0 ? -abs : abs;
         }
         return value;

@@ -423,25 +423,18 @@ public final class CloneTool {
         if (solid.shape() instanceof final Solid.Shape.RevolutionCut rc && sk != null) {
             return com.ovo.sablestopnow.sketch.Revolve.edges(sk, rc.params());
         }
-        if (solid.shape() instanceof Solid.Shape.Fillet) {
-            final java.util.Map<java.util.UUID, Solid> byId = new java.util.HashMap<>();
-            for (final Solid s : SolidClientState.ofBody(level, solid.body())) {
-                byId.put(s.id(), s);
-            }
+        if (solid.shape() instanceof final Solid.Shape.Fillet fillet) {
             final List<Vector3d[]> out = new ArrayList<>();
-            for (final double[] b : solid.filletBoxes(byId)) {
-                final double[] xs = {b[0], b[3]};
-                final double[] ys = {b[1], b[4]};
-                final double[] zs = {b[2], b[5]};
-                for (int i = 0; i < 2; i++) {
-                    for (int j = 0; j < 2; j++) {
-                        out.add(new Vector3d[] {new Vector3d(xs[0], ys[i], zs[j]),
-                                new Vector3d(xs[1], ys[i], zs[j])});
-                        out.add(new Vector3d[] {new Vector3d(xs[i], ys[0], zs[j]),
-                                new Vector3d(xs[i], ys[1], zs[j])});
-                        out.add(new Vector3d[] {new Vector3d(xs[i], ys[j], zs[0]),
-                                new Vector3d(xs[i], ys[j], zs[1])});
+            for (final Solid.Shape.EdgeRef ref : fillet.edges()) {
+                if (ref.isCurve()) {
+                    for (final double[] sg : ref.curveSegs()) {
+                        out.add(new Vector3d[] {new Vector3d(sg[0], sg[1], sg[2]),
+                                new Vector3d(sg[3], sg[4], sg[5])});
                     }
+                } else {
+                    out.add(new Vector3d[] {
+                            new Vector3d(ref.ax(), ref.ay(), ref.az()),
+                            new Vector3d(ref.bx(), ref.by(), ref.bz())});
                 }
             }
             return out;

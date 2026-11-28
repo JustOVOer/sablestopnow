@@ -2147,12 +2147,17 @@ public final class SketchRenderer {
         if (shown == null) {
             return 0;
         }
-        // 角度尺寸的几何是圆弧：暂由 HUD 那份画（3D 版另做）⇒ 这里不画，避免两套叠着
         final String lk = shown.labelKey() == null ? "" : shown.labelKey();
+        final int sk = shown.solverKind();
         if (lk.contains("angle") && shown.vars() != null && shown.vars().length >= 8) {
-            // 角度预览也画成 3D 草图线条，不用 HUD 的屏幕空间样式。
             return anglePreview3D(vcq, pose, cameraPos, renderPose, sketch, shown.vars());
         }
+        final boolean horiz = sk == com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL_DISTANCE
+                || sk == com.ovo.sablestopnow.sketch.SketchSolver.HPOINT_LINE_DISTANCE
+                || lk.contains("horizontal");
+        final boolean vert = sk == com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL_DISTANCE
+                || sk == com.ovo.sablestopnow.sketch.SketchSolver.VPOINT_LINE_DISTANCE
+                || lk.contains("vertical");
         final double[] ends = com.ovo.sablestopnow.sketch.SketchMeasure.endpointsOfVars(
                 sketch, shown.solverKind(), shown.vars());
         if (ends == null) {
@@ -2165,10 +2170,10 @@ public final class SketchRenderer {
         // 偏移方向：与已放置尺寸同一规则（水平沿 v、竖直沿 u、其它沿垂直连线）
         final double du;
         final double dv;
-        if (lk.contains("horizontal")) {
+        if (horiz) {
             du = 0.0;
             dv = 1.0;
-        } else if (lk.contains("vertical")) {
+        } else if (vert) {
             du = 1.0;
             dv = 0.0;
         } else {
@@ -2194,13 +2199,13 @@ public final class SketchRenderer {
         final double b1;
         final double a2;
         final double b2;
-        if (lk.contains("horizontal")) {
+        if (horiz) {
             final double lineV = midV + off;
             a1 = u1;
             b1 = lineV;
             a2 = u2;
             b2 = lineV;
-        } else if (lk.contains("vertical")) {
+        } else if (vert) {
             final double lineU = midU + off;
             a1 = lineU;
             b1 = v1;
@@ -2262,8 +2267,16 @@ public final class SketchRenderer {
             final double u2 = ends[2];
             final double v2 = ends[3];
             final String lk = d.labelKey() == null ? "" : d.labelKey();
-            final boolean horiz = lk.contains("horizontal");
-            final boolean vert = lk.contains("vertical");
+            final boolean horiz = d.solverKind()
+                    == com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL_DISTANCE
+                    || d.solverKind()
+                    == com.ovo.sablestopnow.sketch.SketchSolver.HPOINT_LINE_DISTANCE
+                    || lk.contains("horizontal");
+            final boolean vert = d.solverKind()
+                    == com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL_DISTANCE
+                    || d.solverKind()
+                    == com.ovo.sablestopnow.sketch.SketchSolver.VPOINT_LINE_DISTANCE
+                    || lk.contains("vertical");
             // 偏移方向：水平尺寸沿 v 偏、竖直尺寸沿 u 偏、其它沿"垂直连线"偏 ✓
             double du = 0;
             double dv = 0;
@@ -2620,7 +2633,7 @@ public final class SketchRenderer {
             quadUp = new Vec3(0, 1, 0);
             return;
         }
-        final org.joml.Vector3d w = renderPose.transformPosition(
+        final org.joml.Vector3d w = renderPose.transformNormal(
                 sketch.plane().normal(), new org.joml.Vector3d());
         final Vec3 v = new Vec3(w.x, w.y, w.z);
         quadUp = v.lengthSqr() < 1.0e-9 ? new Vec3(0, 1, 0) : v.normalize();
@@ -2915,13 +2928,13 @@ public final class SketchRenderer {
     }
 
     /** 3D 棒的**半宽**（格）✓ 方向在基准面内、垂直于线段。 */
-    private static final double BAR_WIDTH_HALF = 0.025;
+    private static final double BAR_WIDTH_HALF = 0.018;
 
     /** 当前批次的棒宽/厚缩放 ✓（高亮描边要更粗 ⇒ 置 2.5，画完复位 1） */
     private static double barScale = 1.0;
 
     /** 3D 棒的**半厚**（格）✓ 沿基准面法线 ⇒ 侧看也有厚度，不是一张纸。 */
-    private static final double BAR_THICK_HALF = 0.01;
+    private static final double BAR_THICK_HALF = 0.018;
 
     /**
      * 用**四边形细条**画一条线 ✓ —— 尺寸/预览线要"和背景网格一样的呈现方式"。

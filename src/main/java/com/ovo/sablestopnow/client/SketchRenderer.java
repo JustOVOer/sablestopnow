@@ -2152,10 +2152,10 @@ public final class SketchRenderer {
         if (lk.contains("angle") && shown.vars() != null && shown.vars().length >= 8) {
             return anglePreview3D(vcq, pose, cameraPos, renderPose, sketch, shown.vars());
         }
-        final boolean horiz = sk == com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL_DISTANCE
+        final boolean horiz = sk == com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL_DISTANCE
                 || sk == com.ovo.sablestopnow.sketch.SketchSolver.HPOINT_LINE_DISTANCE
                 || lk.contains("horizontal");
-        final boolean vert = sk == com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL_DISTANCE
+        final boolean vert = sk == com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL_DISTANCE
                 || sk == com.ovo.sablestopnow.sketch.SketchSolver.VPOINT_LINE_DISTANCE
                 || lk.contains("vertical");
         final double[] ends = com.ovo.sablestopnow.sketch.SketchMeasure.endpointsOfVars(
@@ -2268,12 +2268,12 @@ public final class SketchRenderer {
             final double v2 = ends[3];
             final String lk = d.labelKey() == null ? "" : d.labelKey();
             final boolean horiz = d.solverKind()
-                    == com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL_DISTANCE
+                    == com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL_DISTANCE
                     || d.solverKind()
                     == com.ovo.sablestopnow.sketch.SketchSolver.HPOINT_LINE_DISTANCE
                     || lk.contains("horizontal");
             final boolean vert = d.solverKind()
-                    == com.ovo.sablestopnow.sketch.SketchSolver.HORIZONTAL_DISTANCE
+                    == com.ovo.sablestopnow.sketch.SketchSolver.VERTICAL_DISTANCE
                     || d.solverKind()
                     == com.ovo.sablestopnow.sketch.SketchSolver.VPOINT_LINE_DISTANCE
                     || lk.contains("vertical");
@@ -2960,31 +2960,31 @@ public final class SketchRenderer {
             n = new Vec3(0, 1, 0);
         }
         n = n.normalize();
-        Vec3 side = dir.cross(n);
+        // 用相机方向做“广告牌”宽度轴：无论草图在水平面还是竖直面，
+        // 屏幕上的线宽都一致，不会因为平面朝向不同而显出长方体的厚度。
+        Vec3 view = a.scale(-1.0);
+        if (view.lengthSqr() < 1.0e-9) {
+            view = n;
+        }
+        view = view.normalize();
+        Vec3 side = dir.cross(view);
         if (side.lengthSqr() < 1.0e-9) {
-            // 线段与法线平行（理论上不该出现）：退回到任意垂直方向 ✓
+            side = dir.cross(n);
+        }
+        if (side.lengthSqr() < 1.0e-9) {
             side = dir.cross(new Vec3(0, 0, 1));
-            if (side.lengthSqr() < 1.0e-9) {
-                side = dir.cross(new Vec3(1, 0, 0));
-            }
+        }
+        if (side.lengthSqr() < 1.0e-9) {
+            side = dir.cross(new Vec3(1, 0, 0));
         }
         side = side.normalize().scale(BAR_WIDTH_HALF * barScale);
-        final Vec3 th = n.scale(BAR_THICK_HALF * barScale);
-        // 端点 a/b 各四个角（±side ±th）✓
-        final Vec3 a00 = a.subtract(side).subtract(th);
-        final Vec3 a01 = a.subtract(side).add(th);
-        final Vec3 a10 = a.add(side).subtract(th);
-        final Vec3 a11 = a.add(side).add(th);
-        final Vec3 b00 = b.subtract(side).subtract(th);
-        final Vec3 b01 = b.subtract(side).add(th);
-        final Vec3 b10 = b.add(side).subtract(th);
-        final Vec3 b11 = b.add(side).add(th);
-        // 四个侧面：上 / 下 / 左 / 右 ✓（QUADS 需要 4 个顶点成一组）
-        quadOf(vc, pose, a10, b10, b11, a11, colour);
-        quadOf(vc, pose, a00, a01, b01, b00, colour);
-        quadOf(vc, pose, a01, a11, b11, b01, colour);
-        quadOf(vc, pose, a00, b00, b10, a10, colour);
-        quadsWritten += 4;
+        // 只画面向相机的一片；不画厚度侧面，避免侧看时变粗。
+        final Vec3 a0 = a.subtract(side);
+        final Vec3 a1 = a.add(side);
+        final Vec3 b0 = b.subtract(side);
+        final Vec3 b1 = b.add(side);
+        quadOf(vc, pose, a0, a1, b1, b0, colour);
+        quadsWritten++;
     }
 
     /** 一个四边形（4 个顶点，QUADS 模式）✓。 */

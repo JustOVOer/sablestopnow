@@ -165,7 +165,7 @@ public final class SketchMeasure {
                 // ★ 实测修正：kind 15 约束的是 **Δy**、kind 16 约束的是 **Δx** ✓（与命名相反 ✓）
                 //   ⇒ 实测值与标签都按这个真实语义来 ✓ 否则会出现"显示竖直、约束水平"✓
                 final int[] v = c.operands();
-                final boolean xAxis = c.kind() == SketchSolver.VERTICAL_DISTANCE;
+                final boolean xAxis = c.kind() == SketchSolver.HORIZONTAL_DISTANCE;
                 // ★ 与变体同一口径：**有符号**差值 ✓（显示处取绝对值 ✓）
                 final double measured = xAxis
                         ? sketch.variable(v[2]) - sketch.variable(v[0])
@@ -1172,18 +1172,14 @@ public final class SketchMeasure {
                 // 两点距离 ✓：平行（默认 ✓）→ 水平 ✓ → 竖直 ✓
                 out.add(new Variant("model.dim.distance", SketchSolver.DISTANCE, v, dim.value()));
                 if (v.length >= 4) {
-                    // ★ 修实测"选'竖直'落下却是水平、选'水平'落下却是竖直" ✗
-                    //   求解器里 kind 15/16 的实际语义与我们原来的命名**相反**：
-                    //     15 (HORIZONTAL_DISTANCE) 实际约束的是 **Δy**
-                    //     16 (VERTICAL_DISTANCE)   实际约束的是 **Δx**
-                    //   ⇒ 显示名跟**实际量**走：水平(Δx) 用 kind 16、竖直(Δy) 用 kind 15 ✓
+                    // kind 15 = 水平(Δx)、kind 16 = 竖直(Δy)。
                     // ★ 修实测"水平/竖直尺寸落下后被镜像翻转、并标红" ✗
                     //   我们原来传的是**绝对值** |Δ|，而求解器要的是**有符号差值**
                     //   ⇒ Δ 为负时传正数 ⇒ 它把几何翻到另一侧（看着像"镜像翻转"✓）、实测≠设定（标红 ✓）
                     //   ⇒ 传**有符号** Δx / Δy ✓ 显示与比较一律取绝对值 ✓
-                    out.add(new Variant("model.dim.horizontal", SketchSolver.VERTICAL_DISTANCE, v,
+                    out.add(new Variant("model.dim.horizontal", SketchSolver.HORIZONTAL_DISTANCE, v,
                             sketch.variable(v[2]) - sketch.variable(v[0])));
-                    out.add(new Variant("model.dim.vertical", SketchSolver.HORIZONTAL_DISTANCE, v,
+                    out.add(new Variant("model.dim.vertical", SketchSolver.VERTICAL_DISTANCE, v,
                             sketch.variable(v[3]) - sketch.variable(v[1])));
                 }
             }

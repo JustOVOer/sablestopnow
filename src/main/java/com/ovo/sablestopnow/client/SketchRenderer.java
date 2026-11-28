@@ -273,7 +273,7 @@ public final class SketchRenderer {
         //   ⇒ 这里只"算好"，真正设置/恢复放在画草图的前后（见 working 块）。
         final double wppBar = com.ovo.sablestopnow.client.model.ModelCamera.worldPerPixel(mc);
         final double sketchBarScale = wppBar > 0.0
-                ? Math.max(0.6, Math.min(10.0, (3.0 * wppBar) / BAR_WIDTH_HALF))
+                ? Math.max(0.6, Math.min(10.0, (2.0 * wppBar) / BAR_WIDTH_HALF))
                 : 1.0;
         // ★ 模型视图：只有**模型模式**才需要面/棱/点的悬停拾取 ✓
         //   以前普通游戏里也每帧构建所有实体的 Features 特征图（大模型/40k 多边形
@@ -2928,13 +2928,13 @@ public final class SketchRenderer {
     }
 
     /** 3D 棒的**半宽**（格）✓ 方向在基准面内、垂直于线段。 */
-    private static final double BAR_WIDTH_HALF = 0.018;
+    private static final double BAR_WIDTH_HALF = 0.012;
 
     /** 当前批次的棒宽/厚缩放 ✓（高亮描边要更粗 ⇒ 置 2.5，画完复位 1） */
     private static double barScale = 1.0;
 
     /** 3D 棒的**半厚**（格）✓ 沿基准面法线 ⇒ 侧看也有厚度，不是一张纸。 */
-    private static final double BAR_THICK_HALF = 0.018;
+    private static final double BAR_THICK_HALF = 0.012;
 
     /**
      * 用**四边形细条**画一条线 ✓ —— 尺寸/预览线要"和背景网格一样的呈现方式"。

@@ -273,7 +273,7 @@ public final class SketchRenderer {
         //   ⇒ 这里只"算好"，真正设置/恢复放在画草图的前后（见 working 块）。
         final double wppBar = com.ovo.sablestopnow.client.model.ModelCamera.worldPerPixel(mc);
         final double sketchBarScale = wppBar > 0.0
-                ? Math.max(0.6, Math.min(10.0, (2.0 * wppBar) / BAR_WIDTH_HALF))
+                ? Math.max(0.5, Math.min(10.0, (1.0 * wppBar) / BAR_WIDTH_HALF))
                 : 1.0;
         // ★ 模型视图：只有**模型模式**才需要面/棱/点的悬停拾取 ✓
         //   以前普通游戏里也每帧构建所有实体的 Features 特征图（大模型/40k 多边形

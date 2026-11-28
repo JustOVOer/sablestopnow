@@ -1938,6 +1938,8 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
                     }
                 }
                 if (!acc.isEmpty()) {
+                    // 低 eps 已由 Manifold 完成；这里只对共面连通区域做高 eps 合并。
+                    acc = mergePlanarFaces(acc, 1.0e-2);
                     mesh = CsgMesh.toMesh(acc);
                     // 线框也从结果提（旧轮廓已经不成立 ⇒ 画出来会"线框完整、实体有洞"✗）
                     final List<Vector3d[]> sharp = CsgMesh.sharpEdges(acc, 25.0);
@@ -3931,6 +3933,127 @@ public record Solid(UUID id, UUID body, UUID sketchId, int index, Solid.Shape sh
     }
 
     /** 让旋转切割体沿轴伸出目标两端 margin，避免端面差 0.008 留薄皮。 */
+    /**
+     * 第二轮高 eps：只合并**共面且连通成单一边界线**的三角形。
+     * 曲面三角形法线不同，不会进同一组；带孔的平面有两条边界环，直接跳过。
+     */
+    private static List<Csg.Polygon> mergePlanarFaces(final List<Csg.Polygon> in,
+                                                      final double eps) {
+        if (in == null || in.size() < 2) {
+            return in;
+        }
+        final java.util.Map<String, List<Csg.Polygon>> groups = new java.util.LinkedHashMap<>();
+        for (final Csg.Polygon p : in) {
+            if (p.plane == null) {
+                continue;
+            }
+            final Csg.V3 n = p.plane.normal;
+            final String key = Math.round(n.x() * 1.0e4) + ","
+                    + Math.round(n.y() * 1.0e4) + ","
+                    + Math.round(n.z() * 1.0e4) + ","
+                    + Math.round(p.plane.w * 1.0e3);
+            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(p);
+        }
+        if (groups.size() == in.size()) {
+            return in;
+        }
+        final List<Csg.Polygon> out = new ArrayList<>(in.size());
+        final java.util.Set<Csg.Polygon> done = java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<>());
+        for (final Csg.Polygon p : in) {
+            if (done.contains(p)) {
+                continue;
+            }
+            final Csg.V3 n = p.plane == null ? null : p.plane.normal;
+            final String key = n == null ? null : Math.round(n.x() * 1.0e4) + ","
+                    + Math.round(n.y() * 1.0e4) + ","
+                    + Math.round(n.z() * 1.0e4) + ","
+                    + Math.round(p.plane.w * 1.0e3);
+            final List<Csg.Polygon> group = key == null ? null : groups.get(key);
+            if (group == null || group.size() < 2) {
+                out.add(p);
+                done.add(p);
+                continue;
+            }
+            final List<Csg.Polygon> merged = mergeOnePlanarGroup(group, eps);
+            if (merged != null && merged.size() == 1) {
+                out.add(merged.get(0));
+            } else {
+                out.addAll(group);
+            }
+            done.addAll(group);
+        }
+        return out;
+    }
+
+    private static List<Csg.Polygon> mergeOnePlanarGroup(final List<Csg.Polygon> group,
+                                                         final double eps) {
+        final java.util.Map<String, Edge> edges = new java.util.LinkedHashMap<>();
+        for (final Csg.Polygon p : group) {
+            final List<Csg.Vertex> vs = p.vertices;
+            for (int i = 0; i < vs.size(); i++) {
+                final Csg.Vertex a = vs.get(i);
+                final Csg.Vertex b = vs.get((i + 1) % vs.size());
+                final String ka = vkey(a);
+                final String kb = vkey(b);
+                final String key = ka.compareTo(kb) <= 0 ? ka + "|" + kb : kb + "|" + ka;
+                final Edge old = edges.remove(key);
+                if (old == null) {
+                    edges.put(key, new Edge(ka, kb, a));
+                }
+            }
+        }
+        if (edges.isEmpty()) {
+            return null;
+        }
+        final java.util.Map<String, Edge> next = new java.util.HashMap<>();
+        for (final Edge e : edges.values()) {
+            if (next.put(e.fromKey, e) != null) {
+                return null; // 分叉/多环，不合并
+            }
+        }
+        final Edge first = edges.values().iterator().next();
+        final List<Csg.Vertex> loop = new ArrayList<>(edges.size());
+        final java.util.Set<String> seen = new java.util.HashSet<>();
+        Edge cur = first;
+        while (cur != null && seen.add(cur.fromKey)) {
+            loop.add(cur.vertex);
+            if (cur.toKey.equals(first.fromKey)) {
+                cur = null;
+                break;
+            }
+            cur = next.get(cur.toKey);
+        }
+        if (cur != null || loop.size() != edges.size() || loop.size() < 3) {
+            return null;
+        }
+        // 凸性检查：凹边界如果合并，fan 三角化会跑出原区域。
+        final Csg.V3 n = group.get(0).plane.normal;
+        for (int i = 0; i < loop.size(); i++) {
+            final Csg.V3 a = loop.get(i).pos();
+            final Csg.V3 b = loop.get((i + 1) % loop.size()).pos();
+            final Csg.V3 c = loop.get((i + 2) % loop.size()).pos();
+            final Csg.V3 ab = new Csg.V3(b.x() - a.x(), b.y() - a.y(), b.z() - a.z());
+            final Csg.V3 bc = new Csg.V3(c.x() - b.x(), c.y() - b.y(), c.z() - b.z());
+            final double cx = ab.y() * bc.z() - ab.z() * bc.y();
+            final double cy = ab.z() * bc.x() - ab.x() * bc.z();
+            final double cz = ab.x() * bc.y() - ab.y() * bc.x();
+            if (cx * n.x() + cy * n.y() + cz * n.z() < -1.0e-9) {
+                return null;
+            }
+        }
+        return List.of(new Csg.Polygon(loop, group.get(0).plane));
+    }
+
+    private record Edge(String fromKey, String toKey, Csg.Vertex vertex) {
+    }
+
+    private static String vkey(final Csg.Vertex v) {
+        return Math.round(v.pos().x() * 1.0e4) + ","
+                + Math.round(v.pos().y() * 1.0e4) + ","
+                + Math.round(v.pos().z() * 1.0e4);
+    }
+
     private static SolidMesh.Mesh extendMeshToTarget(
             final SolidMesh.Mesh cutter, final SolidMesh.Mesh target,
             final Vector3d axis, final double margin) {

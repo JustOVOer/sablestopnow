@@ -222,16 +222,25 @@ public final class RepeatTextureCache {
             final int w = src.getWidth();
             final int h = src.getHeight();
             final int b = Math.max(1, Math.min(w, h) / 16);
+            final NativeImage loadedConnected = loadConnectedImage(mc, sprite, blockId);
             final NativeImage base = new NativeImage(src.format(), w, h, false);
             final NativeImage ring = new NativeImage(src.format(), w, h, false);
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
                     final int sx = Math.max(b, Math.min(w - 1 - b, x));
                     final int sy = Math.max(b, Math.min(h - 1 - b, y));
-                    base.setPixelRGBA(x, y, src.getPixelRGBA(sx, sy));
+                    if (loadedConnected != null && loadedConnected.getWidth() == w
+                            && loadedConnected.getHeight() == h) {
+                        base.setPixelRGBA(x, y, loadedConnected.getPixelRGBA(x, y));
+                    } else {
+                        base.setPixelRGBA(x, y, src.getPixelRGBA(sx, sy));
+                    }
                     final boolean edge = x < b || y < b || x >= w - b || y >= h - b;
                     ring.setPixelRGBA(x, y, edge ? src.getPixelRGBA(x, y) : 0x00000000);
                 }
+            }
+            if (loadedConnected != null) {
+                loadedConnected.close();
             }
             final String key = blockId.replace(':', '_').replace('/', '_');
             final ResourceLocation baseTex = registerRepeat(mc, "sablestopnow_ctm_base/" + key, base);
@@ -247,6 +256,41 @@ public final class RepeatTextureCache {
             FAILED.add(blockId);
             return null;
         }
+    }
+
+    /** 读取同名 {@code _connected.png}（存在时直接作为无边框底图）。 */
+    @Nullable
+    private static NativeImage loadConnectedImage(final Minecraft mc,
+                                                  final TextureAtlasSprite sprite,
+                                                  final String blockId) {
+        try {
+            final ResourceLocation tex = sprite.contents().name();
+            String path = tex.getPath();
+            if (!path.startsWith("textures/")) {
+                path = "textures/" + path;
+            }
+            if (path.endsWith(".png")) {
+                path = path.substring(0, path.length() - 4);
+            }
+            ResourceLocation loc = ResourceLocation.fromNamespaceAndPath(
+                    tex.getNamespace(), path + "_connected.png");
+            var res = mc.getResourceManager().getResource(loc);
+            if (res.isEmpty()) {
+                final ResourceLocation id = ResourceLocation.tryParse(blockId);
+                if (id != null) {
+                    loc = ResourceLocation.fromNamespaceAndPath(id.getNamespace(),
+                            "textures/block/" + id.getPath() + "_connected.png");
+                    res = mc.getResourceManager().getResource(loc);
+                }
+            }
+            if (res.isPresent()) {
+                try (java.io.InputStream in = res.get().open()) {
+                    return NativeImage.read(in);
+                }
+            }
+        } catch (final Throwable ignored) {
+        }
+        return null;
     }
 
     private static ResourceLocation registerRepeat(final Minecraft mc, final String name,

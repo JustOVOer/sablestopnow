@@ -1594,16 +1594,25 @@ public final class SketchSession {
         // ★ 网格吸附也要真正进入落点（以前只有 hover 算了网格，click 没算 ⇒
         //   通过网格画的线仍取原始浮点坐标，和整数差 1e-3 量级）。
         if (kp == null) {
+            // 已经触发水平/竖直推理时，同方向的网格吸附会让线不再“自由伸長”，
+            // 只保留垂直方向那一格的吸附。
+            int orthoFlag = 0;
+            if (pending.size() == 1) {
+                final double[] o = inferOrtho(pending.get(0)[0], pending.get(0)[1], u, v);
+                orthoFlag = (int) o[2];
+            }
+            final boolean allowU = orthoFlag != 1;
+            final boolean allowV = orthoFlag != 2;
             final double gridTol = Math.min(tolerance, 1.0 / 6.0);
             final double gu = Math.round(u);
             final double gv = Math.round(v);
             final double du = Math.abs(u - gu);
             final double dv = Math.abs(v - gv);
-            if (du <= gridTol && dv <= gridTol) {
+            if (allowU && allowV && du <= gridTol && dv <= gridTol) {
                 kp = new KeyPoint(gu, gv, KeyKind.GRID, null, -1, -1);
-            } else if (du <= gridTol) {
+            } else if (allowU && du <= gridTol) {
                 kp = new KeyPoint(gu, v, KeyKind.GRID, null, -1, -1);
-            } else if (dv <= gridTol) {
+            } else if (allowV && dv <= gridTol) {
                 kp = new KeyPoint(u, gv, KeyKind.GRID, null, -1, -1);
             }
         }
@@ -2272,7 +2281,16 @@ public final class SketchSession {
             return; // 起点压在圆心上，定不出半径
         }
         final double a0 = Math.atan2(start[1] - center[1], start[0] - center[0]);
-        final double a1 = Math.atan2(end[1] - center[1], end[0] - center[0]);
+        // 第二个点定了半径；第三点只定角度。把终点投到同一个圆上，
+        // 避免存进去的终点半径和 start 半径不一致。
+        double ex = end[0];
+        double ey = end[1];
+        final double endLen = Math.hypot(ex - center[0], ey - center[1]);
+        if (endLen > 1.0e-9) {
+            ex = center[0] + (ex - center[0]) / endLen * r;
+            ey = center[1] + (ey - center[1]) / endLen * r;
+        }
+        final double a1 = Math.atan2(ey - center[1], ex - center[0]);
         // ★ 需求 ④："鼠标在**初始线（弦）的哪一侧**就往哪一侧画劣弧" ✓
         //   我们的画法是 圆心 → 起点 → 终点 ✓ ⇒ 判定就用**扫动的方向**：
         //   从起点到终点的角度差（规范化到 (−π, π]）为**负** ⇒ 玩家是**顺时针**拖的 ✓
@@ -2290,13 +2308,13 @@ public final class SketchSession {
         //   ⇒ 一看就知道你的点击序列对应哪种语义 ✓ 再定规则（而不是继续猜 ✓）
         lastArcDiag = String.format(java.util.Locale.ROOT,
                 "c=(%.2f,%.2f) s=(%.2f,%.2f) e=(%.2f,%.2f) a0=%.1f a1=%.1f d=%.1f cw=%s",
-                center[0], center[1], start[0], start[1], end[0], end[1],
+                center[0], center[1], start[0], start[1], ex, ey,
                 Math.toDegrees(a0), Math.toDegrees(a1), Math.toDegrees(delta), clockwise);
         // ★ 修"圆弧圆心钉不住"同样的坑 ✓：**建弧之前**先把圆心该吸的关键点拾好 ✓
         //   （建完弧再拾 ⇒ 拾到的是弧自己的圆心、距离 0 ⇒ 被退化保护丢掉 ✗）
         final KeyPoint kpCenter = pickKeyPoint(center[0], center[1], 0.15);
         final Sketch.Entity arc = working.addArcPoints(center[0], center[1],
-                start[0], start[1], end[0], end[1], clockwise);
+                start[0], start[1], ex, ey, clockwise);
         Sketch.setArcCwCache(clockwise);
         // ★ 需求 ④：圆弧改为"**由两条辅助线生成**" ✓（客户端开启；默认关 ⇒ 离线用例不变 ✓）
         final int[] v = arc.vars();

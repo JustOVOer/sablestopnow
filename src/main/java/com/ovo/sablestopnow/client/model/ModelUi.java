@@ -163,6 +163,7 @@ public final class ModelUi {
             openPanels();
             return;
         }
+        layoutTopBetweenSides();
         if (--refreshCountdown > 0) {
             return;
         }
@@ -1496,6 +1497,28 @@ public final class ModelUi {
         if (treeLayer != null) {
             treeLayer.root.padding(4, top, 4, 4);
         }
+    }
+
+    /**
+     * 左右栏展开动画期间，上边栏也要按**当前动画宽度**让出空间；
+     * 否则动画阶段左右栏会盖住上边栏，只有动画结束才突然避让。
+     */
+    private static void layoutTopBetweenSides() {
+        final UiLayer top = Ui.layer(LAYER_TOP);
+        if (top == null) {
+            return;
+        }
+        int left = 0;
+        final UiLayer leftLayer = Ui.layer(LAYER_LEFT);
+        if (leftLayer != null && leftLayer.visible && leftPanelRef != null) {
+            left = Math.max(0, leftPanelRef.w);
+        }
+        int right = 0;
+        final UiLayer treeLayer = Ui.layer(LAYER_TREE);
+        if (treeLayer != null && treeLayer.visible && treePanelRef != null) {
+            right = Math.max(0, treePanelRef.w);
+        }
+        top.root.padding(left, 0, right, 0);
     }
 
     /** 树：模型 → [配合 / 属性 / 可控施力点]。 */
@@ -5222,6 +5245,8 @@ public final class ModelUi {
                               }
                               mirrorBody = sd.body();
                               updateMirrorPreview();
+                              // 依赖项（圆角）可见性要立刻跟着源勾选变化。
+                              forceRefreshLeft();
                           };
                           body.add(cb);
                       }
@@ -5356,8 +5381,11 @@ public final class ModelUi {
                             final com.ovo.sablestopnow.client.gui.lib.Checkbox cb =
                                     new com.ovo.sablestopnow.client.gui.lib.Checkbox(prop,
                                             () -> Component.literal(solidShortLabel(sd)));
-                            cb.onChange = on -> com.ovo.sablestopnow.client.model.PatternTool
-                                    .setSource(sd.id(), on, sd.body());
+                            cb.onChange = on -> {
+                                com.ovo.sablestopnow.client.model.PatternTool
+                                        .setSource(sd.id(), on, sd.body());
+                                forceRefreshLeft();
+                            };
                             body.add(cb);
                         }
                     }
@@ -5473,7 +5501,10 @@ public final class ModelUi {
                           final com.ovo.sablestopnow.client.gui.lib.Checkbox cb =
                                   new com.ovo.sablestopnow.client.gui.lib.Checkbox(prop,
                                           () -> Component.literal(solidShortLabel(sd)));
-                          cb.onChange = on -> CloneTool.setSource(sd.id(), on, sd.body());
+                          cb.onChange = on -> {
+                              CloneTool.setSource(sd.id(), on, sd.body());
+                              forceRefreshLeft();
+                          };
                           body.add(cb);
                       }
                   }
